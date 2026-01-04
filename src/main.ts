@@ -1,6 +1,6 @@
+import { ConsoleLogger, Logger, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ConsoleLogger, Logger, VersioningType } from '@nestjs/common';
 import { HTTPExceptionFilter } from './helper/exception-filters/http.exception-filter';
 import { HTTPResponseInterceptor } from './helper/interceptor/http.interceptor';
 import { AppValidationPipe } from './helper/pipe/app-validation.pipe';
