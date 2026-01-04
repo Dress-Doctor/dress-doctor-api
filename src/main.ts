@@ -1,11 +1,14 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { Logger, VersioningType } from '@nestjs/common';
+import { ConsoleLogger, Logger, VersioningType } from '@nestjs/common';
 import { HTTPExceptionFilter } from './helper/exception-filters/http.exception-filter';
 import { HTTPResponseInterceptor } from './helper/interceptor/http.interceptor';
+import { AppValidationPipe } from './helper/pipe/app-validation.pipe';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    logger: new ConsoleLogger({ prefix: 'Dress Doctor' }),
+  });
 
   // Cors
   app.enableCors({
@@ -21,6 +24,9 @@ async function bootstrap() {
   // HTTP Interceptor / Exception Filter
   app.useGlobalFilters(new HTTPExceptionFilter());
   app.useGlobalInterceptors(new HTTPResponseInterceptor());
+
+  // Handle Class-Validation Errors
+  app.useGlobalPipes(AppValidationPipe);
 
   const PORT = process.env.PORT ?? 3000;
   await app.listen(PORT, () => {
