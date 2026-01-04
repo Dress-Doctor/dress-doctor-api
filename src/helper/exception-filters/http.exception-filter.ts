@@ -23,12 +23,10 @@ export class HTTPExceptionFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    const res = exception.getResponse() as { message: string; error: string };
-
     const errorResponse = {
       success: false,
       statusCode: status,
-      errorCode: res.error,
+      errorCode: 'serverError',
       timestamp: new Date().toISOString(),
       error: exception?.message ?? constant.SERVER_ERROR,
     };
@@ -39,6 +37,9 @@ export class HTTPExceptionFilter implements ExceptionFilter {
         exception.stack,
       );
       errorResponse.error = constant.SERVER_ERROR;
+    } else {
+      const res = exception.getResponse() as { message: string; error: string };
+      errorResponse.errorCode = res.error;
     }
 
     response.status(status).json(errorResponse);

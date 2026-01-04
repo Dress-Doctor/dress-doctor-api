@@ -4,6 +4,8 @@ import { AppModule } from './app.module';
 import { HTTPExceptionFilter } from './helper/exception-filters/http.exception-filter';
 import { HTTPResponseInterceptor } from './helper/interceptor/http.interceptor';
 import { AppValidationPipe } from './helper/pipe/app-validation.pipe';
+import { SwaggerModule } from '@nestjs/swagger';
+import swaggerConfig from './config/swagger.config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -28,10 +30,15 @@ async function bootstrap() {
   // Handle Class-Validation Errors
   app.useGlobalPipes(AppValidationPipe);
 
+  // Swagger Documentation
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('api/docs', app, document);
+
   const PORT = process.env.PORT ?? 3000;
   await app.listen(PORT, () => {
     const logger = new Logger('Bootstrap');
     logger.log(`Service running on http://localhost:${PORT}`);
+    logger.log(`API Documentation: http://localhost:${PORT}/api/docs`);
   });
 }
 

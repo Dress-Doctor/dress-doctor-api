@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import {
   AcceptLanguageResolver,
   HeaderResolver,
@@ -8,6 +8,7 @@ import {
 import * as path from 'path';
 import appConfig from 'src/config/app-config';
 
+@Global()
 @Module({
   imports: [
     I18nModule.forRoot({
