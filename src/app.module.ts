@@ -4,9 +4,10 @@ import { AppService } from './app.service';
 import { ConfigModule } from '@nestjs/config';
 import { LogRequestMiddleware } from './helper/middleware/log-request.middleware';
 import { i18nModule } from './i18n/i18n.module';
+import { SchemaModule } from './schema/schema.module';
 
 @Module({
-  imports: [i18nModule, ConfigModule.forRoot({ isGlobal: true })],
+  imports: [i18nModule, SchemaModule, ConfigModule.forRoot({ isGlobal: true })],
   controllers: [AppController],
   providers: [AppService],
 })

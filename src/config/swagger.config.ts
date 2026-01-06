@@ -1,5 +1,5 @@
 import { DocumentBuilder } from '@nestjs/swagger';
-import { ApiErrorResponse, ApiSuccessResponse } from 'src/dto/swagger.dto';
+import { ApiErrorResponse } from 'src/dto/swagger.dto';
 
 export default new DocumentBuilder()
   .setTitle('Dress Doctor API')
@@ -13,11 +13,6 @@ export default new DocumentBuilder()
     { type: 'apiKey', name: 'api-secrete', in: 'header' },
     'Api-Secrete',
   )
-  .addGlobalResponse({
-    status: 201,
-    type: ApiSuccessResponse,
-    description: 'Successful operation',
-  })
   .addGlobalResponse({
     status: 400,
     type: ApiErrorResponse,

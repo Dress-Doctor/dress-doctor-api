@@ -24,5 +24,6 @@ import appConfig from 'src/config/app-config';
       ],
     }),
   ],
+  exports: [I18nModule],
 })
 export class i18nModule {}
