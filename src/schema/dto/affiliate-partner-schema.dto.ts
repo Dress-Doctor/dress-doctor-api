@@ -1,0 +1,10 @@
+export enum RewardTypeEnum {
+  FLAT = 'FLAT',
+  PERCENTAGE = 'PERCENTAGE',
+}
+
+export enum EligibilityEnum {
+  NEW_CUSTOMERS = 'NEW_CUSTOMERS',
+  ALL_CUSTOMERS = 'ALL_CUSTOMERS',
+  EXISTING_CUSTOMERS = 'EXISTING_CUSTOMERS',
+}

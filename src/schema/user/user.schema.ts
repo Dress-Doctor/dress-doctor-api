@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types, Document } from 'mongoose';
-import { GenderEnum, PreferredLanguageEnum } from './dto/user-schema.dto';
+import { GenderEnum, PreferredLanguageEnum } from '../dto/user-schema.dto';
+import { UserType } from './user-type.schema';
 
 export const userSchemaName = 'user';
 @Schema({ timestamps: true, collection: userSchemaName })
@@ -24,8 +25,12 @@ export class User extends Document<Types.ObjectId> {
   })
   preferredLanguage: PreferredLanguageEnum;
 
-  // TODO: Get class name from schema
-  @Prop({ required: true, index: true, type: Types.ObjectId, ref: 'UserType' })
+  @Prop({
+    index: true,
+    required: true,
+    ref: UserType.name,
+    type: Types.ObjectId,
+  })
   userTypeId: Types.ObjectId;
 
   @Prop({ required: true, type: GenderEnum })
