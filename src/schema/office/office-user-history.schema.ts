@@ -27,7 +27,7 @@ export class OfficeUserHistory extends Document<Types.ObjectId> {
   })
   changedFields?: ChangedFieldDto[];
 
-  @Prop({ required: true, type: ActionEnum })
+  @Prop({ required: true, enum: ActionEnum })
   action: ActionEnum;
 
   @Prop({ required: false, type: Object, default: {} })

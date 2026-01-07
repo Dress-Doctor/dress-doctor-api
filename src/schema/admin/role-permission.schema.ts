@@ -18,7 +18,7 @@ export class RolePermission extends Document<Types.ObjectId> {
   })
   permissionId: Types.ObjectId;
 
-  @Prop({ required: true, type: ScopeEnum })
+  @Prop({ required: true, enum: ScopeEnum })
   scope: ScopeEnum;
 
   @Prop({ type: Map, of: MongooseSchema.Types.Mixed, default: {} })

@@ -33,7 +33,7 @@ export class User extends Document<Types.ObjectId> {
   })
   userTypeId: Types.ObjectId;
 
-  @Prop({ required: true, type: GenderEnum })
+  @Prop({ required: true, enum: GenderEnum })
   gender: GenderEnum;
 
   @Prop({ required: true })

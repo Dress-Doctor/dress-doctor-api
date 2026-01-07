@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types, Document } from 'mongoose';
 import { User } from './user.schema';
-import { OTPChannelEnum, OTPPurposeEnum } from './dto/user-schema.dto';
+import { OTPChannelEnum, OTPPurposeEnum } from '../dto/user-schema.dto';
 
 export const otpCodeSchemaName = 'otp_code';
 @Schema({ timestamps: true, collection: otpCodeSchemaName })
@@ -9,10 +9,10 @@ export class OtpCode extends Document<Types.ObjectId> {
   @Prop({ required: true, type: Types.ObjectId, ref: User.name })
   userId: Types.ObjectId;
 
-  @Prop({ required: true, type: OTPChannelEnum, default: OTPChannelEnum.EMAIL })
+  @Prop({ required: true, enum: OTPChannelEnum, default: OTPChannelEnum.EMAIL })
   channel: OTPChannelEnum;
 
-  @Prop({ required: true, type: OTPPurposeEnum })
+  @Prop({ required: true, enum: OTPPurposeEnum })
   purpose: OTPPurposeEnum;
 
   @Prop({ required: true, unique: true })

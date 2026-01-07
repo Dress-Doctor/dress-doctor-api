@@ -2,8 +2,8 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types, Document } from 'mongoose';
 import { User } from '../user/user.schema';
 import { PickupTimeEnum } from '../dto/pickup-request-schema.dto';
-import { Office } from '../user/office.schema';
 import { PickupStatus } from './pickup-status.schema';
+import { Office } from '../office/office.schema';
 
 export const pickupRequestSchemaName = 'pickup_request';
 @Schema({ timestamps: true, collection: pickupRequestSchemaName })
@@ -17,7 +17,7 @@ export class PickupRequest extends Document<Types.ObjectId> {
   @Prop({ required: true })
   pickupDate: Date;
 
-  @Prop({ required: true, type: PickupTimeEnum })
+  @Prop({ required: true, enum: PickupTimeEnum })
   pickupTime: PickupTimeEnum;
 
   @Prop({ required: false })

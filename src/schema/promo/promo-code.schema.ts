@@ -11,7 +11,7 @@ export class PromoCode extends Document<Types.ObjectId> {
   @Prop({ required: true, unique: true })
   promoCodeName: string;
 
-  @Prop({ required: true, type: RewardTypeEnum })
+  @Prop({ required: true, enum: RewardTypeEnum })
   discountType: RewardTypeEnum;
 
   @Prop({ required: true })
@@ -26,7 +26,7 @@ export class PromoCode extends Document<Types.ObjectId> {
   @Prop({ required: false })
   expiresAt: Date;
 
-  @Prop({ required: true, type: EligibilityEnum })
+  @Prop({ required: true, enum: EligibilityEnum })
   eligibility: EligibilityEnum;
 
   @Prop({ required: true, default: true })

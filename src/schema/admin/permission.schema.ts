@@ -8,10 +8,10 @@ import {
 export const permissionSchemaName = 'permission';
 @Schema({ timestamps: true, collection: permissionSchemaName })
 export class Permission extends Document<Types.ObjectId> {
-  @Prop({ required: true, type: PermissionActionEnum })
+  @Prop({ required: true, enum: PermissionActionEnum })
   action: PermissionActionEnum;
 
-  @Prop({ required: true, type: SubjectEnum })
+  @Prop({ required: true, enum: SubjectEnum })
   subject: SubjectEnum;
 
   @Prop({ required: false })

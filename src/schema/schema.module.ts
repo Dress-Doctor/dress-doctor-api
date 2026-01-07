@@ -1,5 +1,13 @@
 import { Global, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { AdminSchemaModule } from './admin/admin.module';
+import { AffiliateSchemaModule } from './affiliate/affiliate.module';
+import { OfficeSchemaModule } from './office/office.module';
+import { OrderSchemaModule } from './order/order.module';
+import { PaymentSchemaModule } from './payment/payment.module';
+import { PickupSchemaModule } from './pickup/pickup.module';
+import { PromoSchemaModule } from './promo/promo.module';
+import { UserSchemaModule } from './user/user.module';
 
 @Global()
 @Module({
@@ -7,6 +15,14 @@ import { MongooseModule } from '@nestjs/mongoose';
     MongooseModule.forRootAsync({
       useFactory: () => ({ uri: process.env.DATABASE_URL }),
     }),
+    UserSchemaModule,
+    OrderSchemaModule,
+    AdminSchemaModule,
+    PromoSchemaModule,
+    OfficeSchemaModule,
+    PickupSchemaModule,
+    PaymentSchemaModule,
+    AffiliateSchemaModule,
   ],
   exports: [MongooseModule],
 })
