@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types, Document } from 'mongoose';
-import { GenderEnum, PreferredLanguageEnum } from '../dto/user-schema.dto';
+import { GenderEnum, PreferredLanguageEnum } from './user.dto';
 import { UserType } from './user-type.schema';
 
 export const userSchemaName = 'user';
@@ -39,7 +39,7 @@ export class User extends Document<Types.ObjectId> {
   @Prop({ required: true })
   passwordHash: string;
 
-  @Prop({ default: true })
+  @Prop({ required: true, default: true })
   isActive: boolean;
 }
 

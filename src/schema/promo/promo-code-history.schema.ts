@@ -1,9 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Schema as MongooseSchema, Types } from 'mongoose';
-import { ActionEnum } from '../dto/permission-schema.dto';
-import { ChangedFieldDto } from '../dto/user-schema.dto';
+import { ChangedFieldDto } from '../user/user.dto';
 import { User } from '../user/user.schema';
 import { PromoCode } from '../promo/promo-code.schema';
+import { ActionEnum } from '../admin/admin.dto';
 
 export const promoCodeHistorySchemaName = 'promo_code_history';
 @Schema({ timestamps: true, collection: promoCodeHistorySchemaName })

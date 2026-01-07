@@ -2,8 +2,8 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 import { User } from './user.schema';
 import { Customer } from './customer.schema';
-import { ChangedFieldDto } from '../dto/user-schema.dto';
-import { ActionEnum } from '../dto/permission-schema.dto';
+import { ChangedFieldDto } from './user.dto';
+import { ActionEnum } from '../admin/admin.dto';
 
 export const customerHistorySchemaName = 'customer_history';
 @Schema({ timestamps: true, collection: customerHistorySchemaName })

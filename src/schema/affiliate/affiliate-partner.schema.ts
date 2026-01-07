@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types, Document } from 'mongoose';
 import { User } from '../user/user.schema';
-import { RewardTypeEnum } from '../dto/affiliate-partner-schema.dto';
+import { RewardTypeEnum } from './affiliate.dto';
 
 export const affiliatePartnerSchemaName = 'affiliate_partner';
 @Schema({ timestamps: true, collection: affiliatePartnerSchemaName })

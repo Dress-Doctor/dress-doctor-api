@@ -4,12 +4,14 @@ import { Permission, PermissionSchema } from './permission.schema';
 import { Role, RoleSchema } from './role.schema';
 import { RolePermission, RolePermissionSchema } from './role-permission.schema';
 import { UserRole, UserRoleSchema } from './user-role.schema';
+import { ApiClient, ApiClientSchema } from './api-client.schema';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Role.name, schema: RoleSchema },
       { name: UserRole.name, schema: UserRoleSchema },
+      { name: ApiClient.name, schema: ApiClientSchema },
       { name: Permission.name, schema: PermissionSchema },
       { name: RolePermission.name, schema: RolePermissionSchema },
     ]),

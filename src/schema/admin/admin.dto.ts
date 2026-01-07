@@ -1,3 +1,9 @@
+export enum PlatformEnum {
+  WEB = 'WEB',
+  MOBILE = 'MOBILE',
+  MICRO_SERVICE = 'MICRO_SERVICE',
+}
+
 export enum ActionEnum {
   CREATE = 'CREATE',
   UPDATE = 'UPDATE',

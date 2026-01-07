@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types, Document } from 'mongoose';
 import { User } from '../user/user.schema';
-import { PickupTimeEnum } from '../dto/pickup-request-schema.dto';
+import { PickupTimeEnum } from './pickup.dto';
 import { PickupStatus } from './pickup-status.schema';
 import { Office } from '../office/office.schema';
 

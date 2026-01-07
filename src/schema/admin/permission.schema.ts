@@ -1,9 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types, Document } from 'mongoose';
-import {
-  PermissionActionEnum,
-  SubjectEnum,
-} from '../dto/permission-schema.dto';
+import { PermissionActionEnum, SubjectEnum } from './admin.dto';
 
 export const permissionSchemaName = 'permission';
 @Schema({ timestamps: true, collection: permissionSchemaName })

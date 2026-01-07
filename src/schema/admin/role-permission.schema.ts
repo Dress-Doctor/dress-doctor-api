@@ -2,7 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 import { Permission } from './permission.schema';
 import { Role } from './role.schema';
-import { ScopeEnum } from '../dto/permission-schema.dto';
+import { ScopeEnum } from './admin.dto';
 
 export const rolePermissionSchemaName = 'role_permission';
 @Schema({ timestamps: true, collection: rolePermissionSchemaName })

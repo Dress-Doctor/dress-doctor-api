@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types, Document } from 'mongoose';
 import { User } from './user.schema';
-import { OTPChannelEnum, OTPPurposeEnum } from '../dto/user-schema.dto';
+import { OTPChannelEnum, OTPPurposeEnum } from './user.dto';
 
 export const otpCodeSchemaName = 'otp_code';
 @Schema({ timestamps: true, collection: otpCodeSchemaName })

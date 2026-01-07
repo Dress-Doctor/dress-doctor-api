@@ -1,9 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import {
-  EligibilityEnum,
-  RewardTypeEnum,
-} from '../dto/affiliate-partner-schema.dto';
+import { EligibilityEnum, RewardTypeEnum } from '../affiliate/affiliate.dto';
 
 export const promoCodeSchemaName = 'promo_code';
 @Schema({ timestamps: true, collection: promoCodeSchemaName })
