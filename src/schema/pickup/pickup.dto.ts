@@ -3,3 +3,14 @@ export enum PickupTimeEnum {
   AFTERNOON = 'AFTERNOON 12PM - 5PM',
   EVENING = 'EVENING 5PM - 8PM',
 }
+
+export enum PickupStatusEnum {
+  PENDING = 'PENDING',
+  CONFIRMED = 'CONFIRMED',
+  ASSIGNED = 'ASSIGNED',
+  PICKED_UP = 'PICKED_UP',
+  IN_PROGRESS = 'IN_PROGRESS',
+  READY = 'READY',
+  DELIVERED = 'DELIVERED',
+  CANCELLED = 'CANCELLED',
+}

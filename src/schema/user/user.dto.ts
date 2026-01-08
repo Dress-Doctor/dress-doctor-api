@@ -1,5 +1,3 @@
-import { Query, Types } from 'mongoose';
-
 export enum PreferredLanguageEnum {
   ENGLISH = 'en',
   FRENCH = 'fr',
@@ -21,3 +19,9 @@ export enum OTPPurposeEnum {
 }
 
 export type ChangedFieldDto = { from: any; to: any };
+
+export enum UserTypeEum {
+  CUSTOMER = 'CUSTOMER',
+  ADMIN = 'ADMIN',
+  AFFILIATE = 'AFFILIATE',
+}
