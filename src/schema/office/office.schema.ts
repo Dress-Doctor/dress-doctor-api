@@ -13,8 +13,17 @@ export class Office extends Document<Types.ObjectId> {
   })
   officeTypeId: Types.ObjectId;
 
-  @Prop({ required: true })
+  @Prop({ required: true, unique: true })
   officeName: string;
+
+  @Prop({ required: true, unique: true, immutable: true })
+  officeCode: string;
+
+  @Prop({ required: true, unique: true, lowercase: true })
+  slug: string;
+
+  @Prop({ required: false, unique: true })
+  qrCodeUrl: string;
 
   @Prop({ required: true })
   address: string;
@@ -26,7 +35,7 @@ export class Office extends Document<Types.ObjectId> {
   region: string;
 
   @Prop({ required: true, unique: true })
-  officeLink: string;
+  signedLink: string;
 
   @Prop({ required: true, default: true })
   isActive: boolean;

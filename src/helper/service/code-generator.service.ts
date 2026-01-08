@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import * as crypto from 'crypto';
 import { Model } from 'mongoose';
 import { Customer } from 'src/schema/user/customer.schema';
 
@@ -32,5 +33,13 @@ export class CodeGeneratorService {
     } while (exists);
 
     return code;
+  }
+
+  signOfficeLink(slug: string): string {
+    return crypto
+      .createHmac('sha256', process.env.DD_OFFICE_LINK_SECRET!)
+      .update(slug)
+      .digest('hex')
+      .slice(0, 12);
   }
 }

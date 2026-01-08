@@ -1,4 +1,9 @@
-import { ConsoleLogger, Logger, VersioningType } from '@nestjs/common';
+import {
+  ConsoleLogger,
+  Logger,
+  RequestMethod,
+  VersioningType,
+} from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { HTTPExceptionFilter } from './helper/exception-filters/http.exception-filter';
@@ -20,7 +25,9 @@ async function bootstrap() {
   });
 
   // API Versioning
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix('api', {
+    exclude: [{ path: 'o/*path', method: RequestMethod.GET }],
+  });
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
 
   // HTTP Interceptor / Exception Filter

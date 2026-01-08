@@ -1,3 +1,5 @@
+import { OfficeTypeEnum } from 'src/schema/office/office.dto';
+
 export default {
   userType: [
     {
@@ -115,6 +117,31 @@ export default {
     {
       paymentStatusName: 'PARTIAL',
       description: 'Payment was completed for only part of the total amount.',
+    },
+  ],
+
+  offices: [
+    {
+      signedLink: '',
+      qrCodeUrl: '',
+      city: 'Douala',
+      region: 'Litoral',
+      officeCode: 'DD-105',
+      slug: '105-bonadale',
+      officeName: 'DD 105 BONADALE',
+      officeType: OfficeTypeEnum.FACTORY,
+      address: '105 Bonadala, Petit Stade, behind Chateau Bonaberi',
+    },
+    {
+      signedLink: '',
+      qrCodeUrl: '',
+      city: 'Douala',
+      slug: 'bonabo',
+      region: 'Litoral',
+      officeCode: 'DD-BNB',
+      officeName: 'DD Bepanda Bonabo',
+      officeType: OfficeTypeEnum.OFFICE,
+      address: 'Bepanda Bonabo, directly opposite Génie Militaire.',
     },
   ],
 };

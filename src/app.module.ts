@@ -5,16 +5,16 @@ import {
   NestModule,
   OnModuleInit,
 } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { ConfigModule } from '@nestjs/config';
-import { LogRequestMiddleware } from './helper/middleware/log-request.middleware';
-import { i18nModule } from './i18n/i18n.module';
-import { SchemaModule } from './schema/schema.module';
-import { PickupModule } from './api/pickup/pickup.module';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, ConnectionStates } from 'mongoose';
-import { SeederService } from './config/seeder.service';
+import { OfficeLinkModule } from './api/office-link/office-link.module';
+import { PickupModule } from './api/pickup/pickup.module';
+import { LogRequestMiddleware } from './helper/middleware/log-request.middleware';
+import { CodeGeneratorService } from './helper/service/code-generator.service';
+import { SeederService } from './helper/service/seeder.service';
+import { i18nModule } from './i18n/i18n.module';
+import { SchemaModule } from './schema/schema.module';
 
 @Module({
   imports: [
@@ -22,9 +22,9 @@ import { SeederService } from './config/seeder.service';
     SchemaModule,
     PickupModule,
     ConfigModule.forRoot({ isGlobal: true }),
+    OfficeLinkModule,
   ],
-  controllers: [AppController],
-  providers: [AppService, SeederService],
+  providers: [SeederService, CodeGeneratorService],
 })
 export class AppModule implements NestModule, OnModuleInit {
   private readonly logger = new Logger(AppModule.name);

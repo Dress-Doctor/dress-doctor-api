@@ -24,6 +24,8 @@ export class HTTPResponseInterceptor implements NestInterceptor {
     const response = httpContext.getResponse<Response>();
     const statusCode = response.statusCode;
 
+    if (statusCode === 302) return next.handle();
+
     return next.handle().pipe(
       tap(() => {
         const [sec, nanoSeconds] = process.hrtime(start);

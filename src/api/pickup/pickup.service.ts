@@ -7,12 +7,21 @@ import { Model } from 'mongoose';
 import { User } from 'src/schema/user/user.schema';
 import { Customer } from 'src/schema/user/customer.schema';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
+import { UserType } from 'src/schema/user/user-type.schema';
+import { UserTypeEum } from 'src/schema/user/user.dto';
+import { OfficeType } from 'src/schema/office/office-type.schema';
+import { OfficeTypeEnum } from 'src/schema/office/office.dto';
+import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
+import { PickupStatusEnum } from 'src/schema/pickup/pickup.dto';
 
 @Injectable()
 export class PickupService {
   private readonly logger = new Logger(PickupRequest.name);
 
   constructor(
+    @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
+    @InjectModel(PickupStatus.name)
+    private readonly pickupStatusModel: Model<PickupStatus>,
     @InjectModel(PickupRequest.name)
     private readonly pickupRequestModel: Model<PickupRequest>,
     private readonly codeService: CodeGeneratorService,
@@ -22,10 +31,14 @@ export class PickupService {
 
   async create(data: CreatePickupDto) {
     const { pickupAddress, pickupTime, pickupDate, ...newUserPayload } = data;
+    const userType = await this.userTypeModel.findOne({
+      userTypeName: UserTypeEum.CUSTOMER,
+    });
+
     // Create or update user
     const foundedUser = await this.userModel.findOneAndUpdate(
       { phone: data.phone },
-      newUserPayload,
+      { ...newUserPayload, userTypeId: userType?._id },
       { upsert: true, new: true },
     );
 
@@ -43,12 +56,17 @@ export class PickupService {
       });
     }
 
+    const pickupStatus = await this.pickupStatusModel.findOne({
+      pickupStatusName: PickupStatusEnum.PENDING,
+    });
+
     // Create pickup
     const newPickupRequest = await this.pickupRequestModel.create({
       pickupTime,
       pickupDate,
       pickupAddress,
       customerId: foundedCustomer._id,
+      pickupStatusId: pickupStatus?._id,
     });
 
     return foundedUser;

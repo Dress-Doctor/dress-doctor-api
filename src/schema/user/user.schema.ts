@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types, Document, HydratedDocument } from 'mongoose';
-import { GenderEnum, PreferredLanguageEnum } from './user.dto';
+import { Document, Types } from 'mongoose';
 import { UserType } from './user-type.schema';
+import { GenderEnum, PreferredLanguageEnum } from './user.dto';
 
 @Schema({ timestamps: true, collection: 'user' })
 export class User extends Document<Types.ObjectId> {
