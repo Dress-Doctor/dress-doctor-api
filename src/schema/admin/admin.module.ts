@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Permission, PermissionSchema } from './permission.schema';
 import { Role, RoleSchema } from './role.schema';
@@ -6,6 +6,7 @@ import { RolePermission, RolePermissionSchema } from './role-permission.schema';
 import { UserRole, UserRoleSchema } from './user-role.schema';
 import { ApiClient, ApiClientSchema } from './api-client.schema';
 
+@Global()
 @Module({
   imports: [
     MongooseModule.forFeature([

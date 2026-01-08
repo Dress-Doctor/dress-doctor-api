@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import {
   AffiliatePartner,
@@ -21,6 +21,7 @@ import {
   AffiliateTransactionHistorySchema,
 } from './affiliate-transaction-history.schema';
 
+@Global()
 @Module({
   imports: [
     MongooseModule.forFeature([

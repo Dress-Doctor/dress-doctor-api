@@ -4,7 +4,7 @@ import { Document, Types } from 'mongoose';
 export const paymentStatusSchemaName = 'payment_status';
 @Schema({ timestamps: true, collection: paymentStatusSchemaName })
 export class PaymentStatus extends Document<Types.ObjectId> {
-  @Prop({ required: true })
+  @Prop({ required: true, unique: true })
   paymentStatusName: string; // PENDING, PAID
 
   @Prop({ required: false })

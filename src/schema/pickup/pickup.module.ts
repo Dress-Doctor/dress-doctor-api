@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import {
   PickupAssignmentHistory,
@@ -15,6 +15,7 @@ import {
 import { PickupRequest, PickupRequestSchema } from './pickup-request.schema';
 import { PickupStatus, PickupStatusSchema } from './pickup-status.schema';
 
+@Global()
 @Module({
   imports: [
     MongooseModule.forFeature([

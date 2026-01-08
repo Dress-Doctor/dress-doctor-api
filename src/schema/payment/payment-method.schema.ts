@@ -4,7 +4,7 @@ import { Document, Types } from 'mongoose';
 export const paymentMethodSchemaName = 'payment_method';
 @Schema({ timestamps: true, collection: paymentMethodSchemaName })
 export class PaymentMethod extends Document<Types.ObjectId> {
-  @Prop({ required: true })
+  @Prop({ required: true, unique: true })
   paymentMethodName: string; // CASH, MOMO, CARD
 
   @Prop({ required: false })

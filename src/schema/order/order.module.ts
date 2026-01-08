@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { OrderHistory, OrderHistorySchema } from './order-history.schema';
 import {
@@ -14,6 +14,7 @@ import { OrderItem, OrderItemSchema } from './order-item.schema';
 import { OrderStatus, OrderStatusSchema } from './order-status.schema';
 import { Order, OrderSchema } from './order.schema';
 
+@Global()
 @Module({
   imports: [
     MongooseModule.forFeature([

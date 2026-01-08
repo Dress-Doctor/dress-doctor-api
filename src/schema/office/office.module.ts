@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { OfficeType, OfficeTypeSchema } from './office-type.schema';
 import { OfficeUser, OfficeUserSchema } from './office-user.schema';
@@ -8,6 +8,7 @@ import {
 } from './office-user-history.schema';
 import { Office, OfficeSchema } from './office.schema';
 
+@Global()
 @Module({
   imports: [
     MongooseModule.forFeature([

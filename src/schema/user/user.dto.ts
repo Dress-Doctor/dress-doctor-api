@@ -1,3 +1,5 @@
+import { Query, Types } from 'mongoose';
+
 export enum PreferredLanguageEnum {
   ENGLISH = 'en',
   FRENCH = 'fr',
@@ -18,4 +20,4 @@ export enum OTPPurposeEnum {
   EMAIL_VERIFICATION = 'EMAIL_VERIFICATION',
 }
 
-export type ChangedFieldDto = { field: string; from: any; to: any };
+export type ChangedFieldDto = { from: any; to: any };

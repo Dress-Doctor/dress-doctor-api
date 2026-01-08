@@ -1,8 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Schema as MongooseSchema, Types } from 'mongoose';
-import { User } from './user.schema';
-import { ChangedFieldDto } from './user.dto';
+import { Document, Types } from 'mongoose';
 import { ActionEnum } from '../admin/admin.dto';
+import { User } from './user.schema';
 
 export const userHistorySchemaName = 'user_history';
 @Schema({ timestamps: true, collection: userHistorySchemaName })
@@ -13,18 +12,8 @@ export class UserHistory extends Document<Types.ObjectId> {
   @Prop({ required: true, type: Types.ObjectId, ref: User.name })
   changedBy: Types.ObjectId;
 
-  @Prop({
-    required: false,
-    type: [
-      {
-        field: String,
-        to: MongooseSchema.Types.Mixed,
-        from: MongooseSchema.Types.Mixed,
-      },
-    ],
-    default: [],
-  })
-  changedFields?: ChangedFieldDto[];
+  @Prop({ required: false, type: Object })
+  changedFields?: Record<string, any>;
 
   @Prop({ required: true, enum: ActionEnum })
   action: ActionEnum;

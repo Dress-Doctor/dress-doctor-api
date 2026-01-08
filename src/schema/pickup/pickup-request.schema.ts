@@ -26,7 +26,7 @@ export class PickupRequest extends Document<Types.ObjectId> {
   @Prop({ required: true, type: Types.ObjectId, ref: PickupStatus.name })
   pickupStatusId: Types.ObjectId;
 
-  @Prop({ required: true, type: Types.ObjectId, ref: User.name })
+  @Prop({ required: false, type: Types.ObjectId, ref: User.name })
   confirmedBy: Types.ObjectId;
 
   @Prop({ required: true, type: Types.ObjectId, ref: Office.name })

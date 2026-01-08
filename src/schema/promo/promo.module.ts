@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { PromoCode, PromoCodeSchema } from './promo-code.schema';
 import {
@@ -14,6 +14,7 @@ import {
   PromoCodeUsageHistorySchema,
 } from './promo-code-usage-history.schema';
 
+@Global()
 @Module({
   imports: [
     MongooseModule.forFeature([

@@ -5,7 +5,7 @@ import { User } from './user.schema';
 export const customerSchemaName = 'customer';
 @Schema({ timestamps: true, collection: customerSchemaName })
 export class Customer extends Document<Types.ObjectId> {
-  @Prop({ required: true, type: Types.ObjectId, ref: User.name })
+  @Prop({ required: true, type: Types.ObjectId, ref: User.name, unique: true })
   userId: Types.ObjectId;
 
   @Prop({ required: true, unique: true })

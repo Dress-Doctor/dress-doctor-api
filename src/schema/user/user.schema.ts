@@ -1,10 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types, Document } from 'mongoose';
+import { Types, Document, HydratedDocument } from 'mongoose';
 import { GenderEnum, PreferredLanguageEnum } from './user.dto';
 import { UserType } from './user-type.schema';
 
-export const userSchemaName = 'user';
-@Schema({ timestamps: true, collection: userSchemaName })
+@Schema({ timestamps: true, collection: 'user' })
 export class User extends Document<Types.ObjectId> {
   @Prop({ required: false })
   firstName: string;
@@ -17,6 +16,9 @@ export class User extends Document<Types.ObjectId> {
 
   @Prop({ required: true, unique: true, index: true })
   phone: string;
+
+  @Prop({ required: false })
+  whatsappPhone: string;
 
   @Prop({
     required: true,
@@ -33,10 +35,10 @@ export class User extends Document<Types.ObjectId> {
   })
   userTypeId: Types.ObjectId;
 
-  @Prop({ required: true, enum: GenderEnum })
+  @Prop({ required: false, enum: GenderEnum })
   gender: GenderEnum;
 
-  @Prop({ required: true })
+  @Prop({ required: false })
   passwordHash: string;
 
   @Prop({ required: true, default: true })

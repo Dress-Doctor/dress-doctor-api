@@ -1,10 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { PaymentHistory, PaymentHistorySchema } from './payment-history.schema';
 import { PaymentMethod, PaymentMethodSchema } from './payment-method.schema';
 import { PaymentStatus, PaymentStatusSchema } from './payment-status.schema';
 import { Payment, PaymentSchema } from './payment.schema';
 
+@Global()
 @Module({
   imports: [
     MongooseModule.forFeature([
