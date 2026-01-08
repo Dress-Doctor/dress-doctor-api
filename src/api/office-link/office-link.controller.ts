@@ -8,6 +8,7 @@ import {
   Res,
   VERSION_NEUTRAL,
 } from '@nestjs/common';
+import { ApiFoundResponse } from '@nestjs/swagger';
 import { type Response } from 'express';
 import { OfficeLinkService } from './office-link.service';
 
@@ -17,6 +18,9 @@ export class OfficeLinkController {
 
   @Get(':slug')
   @HttpCode(HttpStatus.FOUND)
+  @ApiFoundResponse({
+    description: 'The user will be redirected (HTTP 302 Found).',
+  })
   async trackOffice(
     @Res() res: Response,
     @Query('sig') sig: string,
