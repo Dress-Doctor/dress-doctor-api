@@ -1,3 +1,4 @@
+import { PermissionActionEnum, SubjectEnum } from 'src/schema/admin/admin.dto';
 import { OfficeTypeEnum } from 'src/schema/office/office.dto';
 
 export default {
@@ -142,6 +143,37 @@ export default {
       officeName: 'DD Bepanda Bonabo',
       officeType: OfficeTypeEnum.OFFICE,
       address: 'Bepanda Bonabo, directly opposite Génie Militaire.',
+    },
+  ],
+
+  roles: [
+    {
+      roleName: 'Co-Founder',
+      description:
+        'Provides strategic direction, oversees company growth, and supports key decision-making across the business.',
+    },
+    {
+      roleName: 'Manager',
+      description:
+        'Manages daily operations, coordinates teams, and ensures business goals are met efficiently.',
+    },
+    {
+      roleName: 'Office Manager',
+      description:
+        'Oversees office administration, staff coordination, and ensures smooth day-to-day office operations.',
+    },
+    {
+      roleName: 'Factory Manager',
+      description:
+        'Supervises factory operations, manages production workflows, and ensures quality and efficiency standards are maintained.',
+    },
+  ],
+
+  permissions: [
+    {
+      subject: SubjectEnum.All,
+      description: 'Full system access',
+      action: PermissionActionEnum.MANAGE,
     },
   ],
 };

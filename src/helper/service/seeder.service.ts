@@ -10,12 +10,35 @@ import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import seed from 'src/static/seed';
 import { CodeGeneratorService } from './code-generator.service';
+import { User } from 'src/schema/user/user.schema';
+import {
+  GenderEnum,
+  PreferredLanguageEnum,
+  UserTypeEum,
+} from 'src/schema/user/user.dto';
+import { Role } from 'src/schema/admin/role.schema';
+import { Permission } from 'src/schema/admin/permission.schema';
+import {
+  PermissionActionEnum,
+  RoleEnum,
+  ScopeEnum,
+  SubjectEnum,
+} from 'src/schema/admin/admin.dto';
+import { RolePermission } from 'src/schema/admin/role-permission.schema';
+import { UserRole } from 'src/schema/admin/user-role.schema';
 
 @Injectable()
 export class SeederService {
   private readonly logger = new Logger(SeederService.name);
 
   constructor(
+    @InjectModel(UserRole.name) private readonly userRoleModel: Model<UserRole>,
+    @InjectModel(User.name) private readonly userModel: Model<User>,
+    @InjectModel(RolePermission.name)
+    private readonly rolePermissionModel: Model<RolePermission>,
+    @InjectModel(Permission.name)
+    private readonly permissionModel: Model<Permission>,
+    @InjectModel(Role.name) private readonly roleModel: Model<Role>,
     private readonly codeService: CodeGeneratorService,
     @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
     @InjectModel(OfficeType.name)
@@ -143,6 +166,93 @@ export class SeederService {
     this.logger.log(`🌱 Done seeding ${seed.offices.length} data for Office`);
   }
 
+  private async seedRoles() {
+    const operations = seed.roles.map((role) => ({
+      updateOne: {
+        filter: { roleName: role.roleName },
+        update: { $set: role },
+        upsert: true,
+      },
+    }));
+
+    await this.roleModel.bulkWrite(operations);
+    this.logger.log(`🌱 Done seeding ${seed.roles.length} data for Role`);
+  }
+
+  private async seedPermission() {
+    const operations = seed.permissions.map((permission) => ({
+      updateOne: {
+        filter: { action: permission.action, subject: permission.subject },
+        update: { $set: permission },
+        upsert: true,
+      },
+    }));
+
+    await this.permissionModel.bulkWrite(operations);
+    this.logger.log(
+      `🌱 Done seeding ${seed.permissions.length} data for Permission`,
+    );
+  }
+
+  private async seedAdmin() {
+    const phone = '670678660';
+    const adminUserExists = await this.userModel.exists({ phone });
+    if (adminUserExists) return;
+
+    const role = await this.roleModel.findOne({
+      roleName: RoleEnum.CO_FOUNDER.toString(),
+    });
+    const permission = await this.permissionModel.findOne({
+      action: PermissionActionEnum.MANAGE,
+      subject: SubjectEnum.All,
+    });
+
+    const rolePermissionExists = await this.rolePermissionModel.exists({
+      roleId: role?._id,
+      permissionId: permission?._id,
+    });
+    if (!rolePermissionExists) {
+      await this.rolePermissionModel.create({
+        roleId: role!._id,
+        scope: ScopeEnum.GLOBAL,
+        permissionId: permission!._id,
+      });
+    }
+
+    const userType = await this.userTypeModel.findOne({
+      userTypeName: UserTypeEum.ADMIN,
+    });
+
+    const password = process.env.ADMIN_PASSWORD!;
+    const hashedPassword = await this.codeService.hashPlainText(password);
+
+    const adminUser = await this.userModel.create({
+      phone,
+      lastName: 'Raymond',
+      firstName: 'Fedjio',
+      gender: GenderEnum.MALE,
+      whatsappPhone: '670678660',
+      userTypeId: userType?._id,
+      passwordHash: hashedPassword,
+      email: 'fedjio.raymond@dressdoctor.io',
+      preferredLanguage: PreferredLanguageEnum.ENGLISH,
+    });
+
+    const userRoleExists = await this.userRoleModel.exists({
+      roleId: role!._id,
+      userId: adminUser._id,
+    });
+
+    if (!userRoleExists) {
+      await this.userRoleModel.create({
+        roleId: role!._id,
+        userId: adminUser._id,
+      });
+    }
+
+    this.logger.log('✅ Super Admin seeded successfully');
+  }
+
   async run(): Promise<void> {
     await this.seedUserType();
     await this.seedOfficeType();
@@ -151,5 +261,8 @@ export class SeederService {
     await this.seedPaymentMethod();
     await this.seedPaymentStatus();
     await this.seedOffice();
+    await this.seedRoles();
+    await this.seedPermission();
+    await this.seedAdmin();
   }
 }

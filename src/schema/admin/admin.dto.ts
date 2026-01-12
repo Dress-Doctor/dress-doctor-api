@@ -8,6 +8,7 @@ export enum ActionEnum {
   CREATE = 'CREATE',
   UPDATE = 'UPDATE',
   DELETE = 'DELETE',
+  ASSIGN = 'ASSIGN',
 }
 
 export enum PermissionActionEnum {
@@ -26,13 +27,54 @@ export enum ScopeEnum {
 }
 
 export enum SubjectEnum {
-  User = 'User',
+  All = 'All',
+
+  // affiliate
+  AffiliatePartner = 'AffiliatePartner',
+  AffiliateTransaction = 'AffiliateTransaction',
+
+  // admin
   Role = 'Role',
-  Office = 'Office',
-  UserType = 'UserType',
-  Customer = 'Customer',
+  ApiClient = 'ApiClient',
   Permission = 'Permission',
+  RolePermission = 'RolePermission',
+
+  // user
+  User = 'User',
+  UserType = 'UserType',
+  UserRole = 'UserRole',
+  Customer = 'Customer',
+
+  // office
+  Office = 'Office',
   OfficeUser = 'OfficeUser',
   OfficeType = 'OfficeType',
+
+  // pickup
+  PickupStatus = 'PickupStatus',
   PickupRequest = 'PickupRequest',
+  PickupAssignment = 'PickupAssignment',
+
+  // order
+  Order = 'Order',
+  OrderItem = 'OrderItem',
+  OrderStatus = 'OrderStatus',
+  OrderItemType = 'OrderItemType',
+  OrderItemServiceType = 'OrderItemServiceType',
+
+  // payment
+  Payment = 'Payment',
+  PaymentMethod = 'PaymentMethod',
+  PaymentStatus = 'PaymentStatus',
+
+  // promo
+  Promo = 'Promo',
+  PromoCodeUsage = 'PromoCodeUsage',
+}
+
+export enum RoleEnum {
+  MANAGER = 'Manager',
+  CO_FOUNDER = 'Co-Founder',
+  OFFICE_MANAGER = 'Office Manager',
+  FACTORY_MANAGER = 'Factory Manager',
 }
