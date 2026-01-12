@@ -11,7 +11,7 @@ export class ApiClient extends Document<Types.ObjectId> {
   @Prop({ required: false })
   description?: string;
 
-  @Prop({ required: true, type: Types.ObjectId, ref: User.name })
+  @Prop({ required: false, type: Types.ObjectId, ref: User.name })
   createdBy: Types.ObjectId;
 
   @Prop({ required: true, unique: true })

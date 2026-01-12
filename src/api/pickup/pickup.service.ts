@@ -1,18 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { CreatePickupDto } from './dto/create-pickup.dto';
-import { UpdatePickupDto } from './dto/update-pickup.dto';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
-import { Model } from 'mongoose';
-import { User } from 'src/schema/user/user.schema';
-import { Customer } from 'src/schema/user/customer.schema';
+import { Model, Types } from 'mongoose';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
-import { UserType } from 'src/schema/user/user-type.schema';
-import { UserTypeEum } from 'src/schema/user/user.dto';
-import { OfficeType } from 'src/schema/office/office-type.schema';
-import { OfficeTypeEnum } from 'src/schema/office/office.dto';
+import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { PickupStatusEnum } from 'src/schema/pickup/pickup.dto';
+import { Customer } from 'src/schema/user/customer.schema';
+import { UserType } from 'src/schema/user/user-type.schema';
+import { UserTypeEum } from 'src/schema/user/user.dto';
+import { User } from 'src/schema/user/user.schema';
+import { NewPickupDto } from './dto/create-pickup.dto';
 
 @Injectable()
 export class PickupService {
@@ -29,8 +26,14 @@ export class PickupService {
     @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
   ) {}
 
-  async create(data: CreatePickupDto) {
-    const { pickupAddress, pickupTime, pickupDate, ...newUserPayload } = data;
+  async create(data: NewPickupDto) {
+    const {
+      officeId,
+      pickupAddress,
+      pickupTime,
+      pickupDate,
+      ...newUserPayload
+    } = data;
     const userType = await this.userTypeModel.findOne({
       userTypeName: UserTypeEum.CUSTOMER,
     });
@@ -56,35 +59,43 @@ export class PickupService {
       });
     }
 
-    const pickupStatus = await this.pickupStatusModel.findOne({
+    const pendingPickupStatus = await this.pickupStatusModel.findOne({
       pickupStatusName: PickupStatusEnum.PENDING,
     });
 
+    // Check if another pickup request is in progress
+    const pendingPickupRequest = await this.pickupRequestModel.findOne({
+      customerId: foundedUser._id,
+      pickupStatusId: pendingPickupStatus!._id,
+    });
+
+    if (pendingPickupRequest) {
+      this.logger.log(
+        `${data.phone} already have another request in progress.`,
+      );
+      throw new BadRequestException(
+        'You already have another request in progress. Please be patient, we will call you.',
+      );
+    }
     // Create pickup
     const newPickupRequest = await this.pickupRequestModel.create({
       pickupTime,
       pickupDate,
       pickupAddress,
-      customerId: foundedCustomer._id,
-      pickupStatusId: pickupStatus?._id,
+      customerId: foundedUser._id,
+      officeId: new Types.ObjectId(officeId),
+      pickupStatusId: pendingPickupStatus!._id,
     });
 
-    return foundedUser;
-  }
+    const customerInfo = await this.customerModel
+      .findById(foundedCustomer._id)
+      .populate({
+        model: User.name,
+        path: 'userId',
+        populate: { model: UserType.name, path: 'userTypeId' },
+      });
 
-  findAll() {
-    return `This action returns all pickup`;
-  }
-
-  findOne(id: number) {
-    return `This action returns a #${id} pickup`;
-  }
-
-  update(id: number, updatePickupDto: UpdatePickupDto) {
-    return `This action updates a #${id} pickup`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} pickup`;
+    this.logger.log(`${data.phone} has successfully schedule a pickup`);
+    return { customer: customerInfo, pickupRequest: newPickupRequest };
   }
 }

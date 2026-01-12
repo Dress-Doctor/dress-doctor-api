@@ -11,11 +11,13 @@ import {
 import { ApiFoundResponse } from '@nestjs/swagger';
 import { type Response } from 'express';
 import { OfficeLinkService } from './office-link.service';
+import { Public } from 'src/helper/decorator/public.decorator';
 
 @Controller({ path: 'o', version: VERSION_NEUTRAL })
 export class OfficeLinkController {
   constructor(private readonly officeLinkService: OfficeLinkService) {}
 
+  @Public()
   @Get(':slug')
   @HttpCode(HttpStatus.FOUND)
   @ApiFoundResponse({
@@ -32,7 +34,8 @@ export class OfficeLinkController {
     res.cookie('office_ref', office?._id.toString(), {
       httpOnly: true,
       sameSite: 'lax',
-      domain: '.dressdoctor.io',
+      domain: 'localhost',
+      // domain: '.dressdoctor.io',
       maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
     });
 

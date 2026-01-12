@@ -16,6 +16,6 @@ export class OfficeLinkService {
     if (sig !== expectedSig)
       throw new ForbiddenException('Invalid or tampered office link');
 
-    return this.officeModel.findOne({ slug });
+    return await this.officeModel.findOne({ slug });
   }
 }

@@ -15,14 +15,18 @@ import { CodeGeneratorService } from './helper/service/code-generator.service';
 import { SeederService } from './helper/service/seeder.service';
 import { i18nModule } from './i18n/i18n.module';
 import { SchemaModule } from './schema/schema.module';
+import { ApiClientModule } from './api/api-client/api-client.module';
+import { AuthModule } from './api/auth/auth.module';
 
 @Module({
   imports: [
     i18nModule,
+    AuthModule,
     SchemaModule,
     PickupModule,
-    ConfigModule.forRoot({ isGlobal: true }),
     OfficeLinkModule,
+    ApiClientModule,
+    ConfigModule.forRoot({ isGlobal: true }),
   ],
   providers: [SeederService, CodeGeneratorService],
 })

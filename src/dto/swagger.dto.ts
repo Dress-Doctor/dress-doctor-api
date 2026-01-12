@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-class Base {
+export class Base {
   @ApiProperty({
     required: true,
     example: 'false',

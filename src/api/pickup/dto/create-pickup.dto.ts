@@ -113,3 +113,7 @@ export class CreatePickupDto {
   )
   pickupDate: Date;
 }
+
+export class NewPickupDto extends CreatePickupDto {
+  officeId: string;
+}

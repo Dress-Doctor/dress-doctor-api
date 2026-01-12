@@ -1,14 +1,28 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import * as bcrypt from 'bcrypt';
+import { Chance } from 'chance';
 import * as crypto from 'crypto';
 import { Model } from 'mongoose';
 import { Customer } from 'src/schema/user/customer.schema';
+import { OtpCode } from 'src/schema/user/otp-code.schema';
 
 @Injectable()
 export class CodeGeneratorService {
+  private readonly SALT_ROUND = process.env.SALT as string;
+
   constructor(
     @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
+    @InjectModel(OtpCode.name) private readonly otpModel: Model<OtpCode>,
   ) {}
+
+  signOfficeLink(slug: string): string {
+    return crypto
+      .createHmac('sha256', process.env.DD_OFFICE_LINK_SECRET!)
+      .update(slug)
+      .digest('hex')
+      .slice(0, 12);
+  }
 
   async generateReferralCode() {
     let code: string;
@@ -35,11 +49,41 @@ export class CodeGeneratorService {
     return code;
   }
 
-  signOfficeLink(slug: string): string {
-    return crypto
-      .createHmac('sha256', process.env.DD_OFFICE_LINK_SECRET!)
-      .update(slug)
-      .digest('hex')
-      .slice(0, 12);
+  async verifyHash(plain: string, hashed: string) {
+    return await bcrypt.compare(plain, hashed);
+  }
+
+  async hashPlainText(plainPassword: string) {
+    return await bcrypt.hash(plainPassword, this.SALT_ROUND);
+  }
+
+  async generateApiKey() {
+    const chance = new Chance();
+    const key: string = chance.hash({ length: 10 });
+
+    const secret: string = chance.string({ length: 25 });
+    const secretHash = await this.hashPlainText(secret);
+
+    const now = new Date();
+    const nextYear = now.getFullYear() + 1;
+    now.setFullYear(nextYear);
+    const expiresAt = now;
+
+    return { key, secretHash, expiresAt, secret };
+  }
+
+  async generateOtpCode() {
+    let code: string;
+    let exists: boolean;
+
+    const min = 100000;
+    const max = 999999;
+    do {
+      code = (Math.floor(Math.random() * (max - min + 1)) + min).toString();
+      const doc = await this.otpModel.exists({ code });
+      exists = doc ? true : false;
+    } while (exists);
+
+    return code;
   }
 }
