@@ -11,6 +11,7 @@ import {
   ApiCreatedResponse,
   ApiOperation,
   ApiResponse,
+  ApiSecurity,
 } from '@nestjs/swagger';
 import { Public } from 'src/helper/decorator/public.decorator';
 import { AuthService } from './auth.service';
@@ -18,6 +19,8 @@ import { LoginDto } from './dto/login.dto';
 import { LoginEntity } from './entities/auth.entity';
 
 @Controller('auth')
+@ApiSecurity('x-api-key')
+@ApiSecurity('x-api-secret')
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
   constructor(private readonly authService: AuthService) {}

@@ -8,9 +8,9 @@ export default new DocumentBuilder()
   )
   .setVersion('1.0')
   .addBearerAuth()
-  .addApiKey({ type: 'apiKey', name: 'api-key', in: 'header' }, 'Api-Key')
+  .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'Api-Key')
   .addApiKey(
-    { type: 'apiKey', name: 'api-secrete', in: 'header' },
+    { type: 'apiKey', name: 'x-api-secrete', in: 'header' },
     'Api-Secrete',
   )
   .addGlobalResponse({

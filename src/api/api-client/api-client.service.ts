@@ -38,7 +38,6 @@ export class ApiClientService {
       key: apiCredentials.key,
       describe: data.description,
       secret: apiCredentials.secret,
-      expiresAt: apiCredentials.expiresAt,
     };
   }
 }

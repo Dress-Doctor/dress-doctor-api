@@ -64,12 +64,7 @@ export class CodeGeneratorService {
     const secret: string = chance.string({ length: 25 });
     const secretHash = await this.hashPlainText(secret);
 
-    const now = new Date();
-    const nextYear = now.getFullYear() + 1;
-    now.setFullYear(nextYear);
-    const expiresAt = now;
-
-    return { key, secretHash, expiresAt, secret };
+    return { key, secretHash, secret };
   }
 
   async generateOtpCode() {

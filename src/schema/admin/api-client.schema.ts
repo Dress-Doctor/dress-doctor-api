@@ -23,9 +23,6 @@ export class ApiClient extends Document<Types.ObjectId> {
   @Prop({ required: true, type: [String], enum: PlatformEnum })
   scope: PlatformEnum[];
 
-  @Prop({ required: true })
-  expiresAt: Date;
-
   @Prop({ required: true, default: true })
   isActive: boolean;
 }

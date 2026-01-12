@@ -5,12 +5,12 @@ import {
   VersioningType,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import swaggerConfig from './config/swagger.config';
 import { HTTPExceptionFilter } from './helper/exception-filters/http.exception-filter';
 import { HTTPResponseInterceptor } from './helper/interceptor/http.interceptor';
 import { AppValidationPipe } from './helper/pipe/app-validation.pipe';
-import { SwaggerModule } from '@nestjs/swagger';
-import swaggerConfig from './config/swagger.config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {

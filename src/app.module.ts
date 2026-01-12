@@ -17,6 +17,8 @@ import { i18nModule } from './i18n/i18n.module';
 import { SchemaModule } from './schema/schema.module';
 import { ApiClientModule } from './api/api-client/api-client.module';
 import { AuthModule } from './api/auth/auth.module';
+import { APP_GUARD } from '@nestjs/core';
+import { ApiKeyGuard } from './helper/guard/api-key.guard';
 
 @Module({
   imports: [
@@ -28,7 +30,11 @@ import { AuthModule } from './api/auth/auth.module';
     ApiClientModule,
     ConfigModule.forRoot({ isGlobal: true }),
   ],
-  providers: [SeederService, CodeGeneratorService],
+  providers: [
+    SeederService,
+    CodeGeneratorService,
+    { provide: APP_GUARD, useClass: ApiKeyGuard },
+  ],
 })
 export class AppModule implements NestModule, OnModuleInit {
   private readonly logger = new Logger(AppModule.name);
