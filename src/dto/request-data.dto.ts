@@ -1,5 +1,11 @@
+import { type Request } from 'express';
+import { Types } from 'mongoose';
+
 export class RequestDataDto {
   language: 'en' | 'fr';
-  officeId: string;
   platform: string;
+  officeId: Types.ObjectId;
+  apiClientId: Types.ObjectId;
 }
+
+export type AppRequest = Request & { data: RequestDataDto };

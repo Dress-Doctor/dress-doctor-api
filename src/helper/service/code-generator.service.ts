@@ -57,7 +57,7 @@ export class CodeGeneratorService {
     return await bcrypt.hash(plainPassword, this.SALT_ROUND);
   }
 
-  async generateApiKey() {
+  async generateApiClient() {
     const chance = new Chance();
     const key: string = chance.hash({ length: 10 });
 

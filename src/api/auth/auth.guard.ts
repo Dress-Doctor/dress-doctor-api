@@ -13,7 +13,8 @@ import { Model } from 'mongoose';
 import constant from 'src/helper/constant';
 import { IS_PUBLIC_KEY } from 'src/helper/decorator/public.decorator';
 import { User } from 'src/schema/user/user.schema';
-import { JWTUserDto } from './dto/jwt.dto';
+import { JWTUserDto, UserRequestDto } from './dto/jwt.dto';
+import { CaslAbilityService } from 'src/helper/casl/casl-ability.service';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -22,6 +23,7 @@ export class AuthGuard implements CanActivate {
   constructor(
     private reflector: Reflector,
     private jwtService: JwtService,
+    private readonly abilityService: CaslAbilityService,
     @InjectModel(User.name) private readonly userModel: Model<User>,
   ) {}
 
@@ -55,7 +57,13 @@ export class AuthGuard implements CanActivate {
         throw new UnauthorizedException(constant.UNAUTHORIZED);
       }
 
-      request['user'] = payload;
+      const ability = await this.abilityService.createForUser(user);
+      const userPayload: UserRequestDto = {
+        ability,
+        userId: payload.sub,
+        phone: payload.phone,
+      };
+      request['user'] = userPayload;
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : constant.UNAUTHORIZED;

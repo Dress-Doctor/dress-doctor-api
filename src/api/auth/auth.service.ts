@@ -13,6 +13,7 @@ import {
 } from 'src/schema/user/user.dto';
 import { OtpCode } from 'src/schema/user/otp-code.schema';
 import { MergeType } from 'mongoose';
+import { AppRequest } from 'src/dto/request-data.dto';
 
 @Injectable()
 export class AuthService {
@@ -32,7 +33,8 @@ export class AuthService {
     });
   }
 
-  async login(data: LoginDto) {
+  async login(data: LoginDto, req: AppRequest['data']) {
+    const platform = req.platform;
     const foundedUser = await this.userModel
       .findOne({ phone: data.phone })
       .populate<{
@@ -40,15 +42,42 @@ export class AuthService {
       }>({ model: UserType.name, path: 'userTypeId' });
 
     if (!foundedUser) {
-      this.logger.error(`This user ${data.phone} doesn't exists`);
+      this.logger.error(`[${platform}] This user ${data.phone} doesn't exists`);
       throw new BadRequestException('Invalid login credentials');
     }
 
     if (foundedUser && !foundedUser.isActive) {
-      this.logger.error(`This account ${data.phone} has been deactivate`);
+      this.logger.error(
+        `[${platform}] This account ${data.phone} has been deactivate`,
+      );
       throw new BadRequestException(
         'Your account has been deactivated. Please contact admin',
       );
+    }
+
+    const otpCodeExists = await this.otpModel.findOne({
+      isUsed: false,
+      userId: foundedUser._id,
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (otpCodeExists) {
+      const now = new Date();
+      const expiresAt = otpCodeExists.expiresAt;
+
+      const remainingTimeInSeconds = Math.ceil(
+        (expiresAt.getTime() - now.getTime()) / 1000,
+      );
+
+      if (remainingTimeInSeconds > 0) {
+        const waitTime = Math.ceil(remainingTimeInSeconds / 60);
+        this.logger.error(
+          `[${platform}] Please wait for ${waitTime} minute(s) before requesting another code.`,
+        );
+        throw new BadRequestException(
+          `Please wait for ${waitTime} minute(s) before requesting another code.`,
+        );
+      }
     }
 
     const otpCode = await this.codeService.generateOtpCode();
@@ -58,13 +87,13 @@ export class AuthService {
       userId: foundedUser._id,
       purpose: OTPPurposeEnum.LOGIN,
       channel: OTPChannelEnum.WHATSAPP,
-      expiredAt: new Date(Date.now() + 1000 * 60 * 5), // 5min
+      expiresAt: new Date(Date.now() + 1000 * 60 * 5), // 5min
     });
 
     const res = {
       isUsed: false,
       purpose: OTPPurposeEnum.LOGIN,
-      expiredAt: newOtpCode.expiredAt,
+      expiresAt: newOtpCode.expiresAt,
       channel: OTPChannelEnum.WHATSAPP,
       message: 'We have sent you a code to verify your phone.',
     };
@@ -72,7 +101,9 @@ export class AuthService {
     if (
       foundedUser.userTypeId.userTypeName === UserTypeEum.CUSTOMER.toString()
     ) {
-      this.logger.log(`OTP verification code ${otpCode} send to ${data.phone}`);
+      this.logger.log(
+        `[${platform}] OTP verification code ${otpCode} send to ${data.phone}`,
+      );
       return res;
     }
 
@@ -81,11 +112,15 @@ export class AuthService {
       foundedUser.passwordHash,
     );
     if (!isValid) {
-      this.logger.error(`This user ${data.phone} sent the wrong password`);
+      this.logger.error(
+        `[${platform}] This user ${data.phone} sent the wrong password`,
+      );
       throw new BadRequestException('Invalid login credentials');
     }
 
-    this.logger.log(`OTP verification code ${otpCode} send to ${data.phone}`);
+    this.logger.log(
+      `[${platform}] OTP verification code ${otpCode} send to ${data.phone}`,
+    );
     return res;
   }
 }

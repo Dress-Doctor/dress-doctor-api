@@ -26,13 +26,17 @@ import {
 } from 'src/schema/admin/admin.dto';
 import { RolePermission } from 'src/schema/admin/role-permission.schema';
 import { UserRole } from 'src/schema/admin/user-role.schema';
+import { ApiClient } from 'src/schema/admin/api-client.schema';
 
 @Injectable()
 export class SeederService {
+  private readonly phone = '670678660';
   private readonly logger = new Logger(SeederService.name);
 
   constructor(
     @InjectModel(UserRole.name) private readonly userRoleModel: Model<UserRole>,
+    @InjectModel(ApiClient.name)
+    private readonly apiClientModel: Model<ApiClient>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(RolePermission.name)
     private readonly rolePermissionModel: Model<RolePermission>,
@@ -195,7 +199,7 @@ export class SeederService {
   }
 
   private async seedAdmin() {
-    const phone = '670678660';
+    const phone = this.phone;
     const adminUserExists = await this.userModel.exists({ phone });
     if (adminUserExists) return;
 
@@ -253,6 +257,28 @@ export class SeederService {
     this.logger.log('✅ Super Admin seeded successfully');
   }
 
+  private async seedSystemApiClient() {
+    const adminUser = await this.userModel.findOne({ phone: this.phone });
+    const { key, secret, secretHash } =
+      await this.codeService.generateApiClient();
+
+    const apiClientExists = await this.apiClientModel.findOne({
+      name: seed.apiClient.name,
+    });
+    if (apiClientExists) return;
+
+    await this.apiClientModel.create({
+      key,
+      secretHash,
+      ...seed.apiClient,
+      createdBy: adminUser!._id,
+    });
+
+    this.logger.log(
+      `🌱 Done seeding default API Client with ${JSON.stringify({ key, secret })}`,
+    );
+  }
+
   async run(): Promise<void> {
     await this.seedUserType();
     await this.seedOfficeType();
@@ -264,5 +290,6 @@ export class SeederService {
     await this.seedRoles();
     await this.seedPermission();
     await this.seedAdmin();
+    await this.seedSystemApiClient();
   }
 }

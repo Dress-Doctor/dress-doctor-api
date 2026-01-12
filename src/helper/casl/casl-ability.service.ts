@@ -7,12 +7,12 @@ import { RolePermission } from 'src/schema/admin/role-permission.schema';
 import { UserRole } from 'src/schema/admin/user-role.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { User } from 'src/schema/user/user.schema';
-import { AppAbility, AppAbilityDto, Conditions } from './casl.dto';
+import { AppAbility, AppAbilityDto, ConditionsDto } from './casl.dto';
 
 type UserDto = User | MergeType<User, { userTypeId: UserType }>;
 
 @Injectable()
-export class CaslAbilityFactory {
+export class CaslAbilityService {
   constructor(
     @InjectModel(UserRole.name)
     private readonly userRoleModel: Model<UserRole>,
@@ -23,7 +23,7 @@ export class CaslAbilityFactory {
 
   async createForUser(
     user: UserDto,
-  ): Promise<MongoAbility<AppAbilityDto, Conditions>> {
+  ): Promise<MongoAbility<AppAbilityDto, ConditionsDto>> {
     const { can, build } = new AbilityBuilder(AppAbility);
 
     const userRoles = await this.userRoleModel.find({ userId: user._id });

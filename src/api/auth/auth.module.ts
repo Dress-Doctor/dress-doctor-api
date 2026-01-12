@@ -6,6 +6,7 @@ import { CodeGeneratorService } from 'src/helper/service/code-generator.service'
 import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
 import { AuthService } from './auth.service';
+import { CaslAbilityService } from 'src/helper/casl/casl-ability.service';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { AuthService } from './auth.service';
   controllers: [AuthController],
   providers: [
     AuthService,
+    CaslAbilityService,
     CodeGeneratorService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],

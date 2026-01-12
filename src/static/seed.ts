@@ -1,4 +1,8 @@
-import { PermissionActionEnum, SubjectEnum } from 'src/schema/admin/admin.dto';
+import {
+  PermissionActionEnum,
+  PlatformEnum,
+  SubjectEnum,
+} from 'src/schema/admin/admin.dto';
 import { OfficeTypeEnum } from 'src/schema/office/office.dto';
 
 export default {
@@ -176,4 +180,10 @@ export default {
       action: PermissionActionEnum.MANAGE,
     },
   ],
+
+  apiClient: {
+    name: 'System',
+    description: 'Created by the system by default',
+    scope: [PlatformEnum.WEB, PlatformEnum.MOBILE, PlatformEnum.MICRO_SERVICE],
+  },
 };

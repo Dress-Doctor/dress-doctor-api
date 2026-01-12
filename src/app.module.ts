@@ -18,7 +18,7 @@ import { SchemaModule } from './schema/schema.module';
 import { ApiClientModule } from './api/api-client/api-client.module';
 import { AuthModule } from './api/auth/auth.module';
 import { APP_GUARD } from '@nestjs/core';
-import { ApiKeyGuard } from './helper/guard/api-key.guard';
+import { ApiClientGuard } from './helper/guard/api-client.guard';
 
 @Module({
   imports: [
@@ -33,7 +33,7 @@ import { ApiKeyGuard } from './helper/guard/api-key.guard';
   providers: [
     SeederService,
     CodeGeneratorService,
-    { provide: APP_GUARD, useClass: ApiKeyGuard },
+    { provide: APP_GUARD, useClass: ApiClientGuard },
   ],
 })
 export class AppModule implements NestModule, OnModuleInit {

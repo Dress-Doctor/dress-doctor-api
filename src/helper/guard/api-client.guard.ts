@@ -9,7 +9,7 @@ import { Reflector } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
 import * as acceptLanguageParser from 'accept-language-parser';
 import { Request } from 'express';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import appConfig from 'src/config/app-config';
 import { RequestDataDto } from 'src/dto/request-data.dto';
 import { ApiClient } from 'src/schema/admin/api-client.schema';
@@ -17,13 +17,12 @@ import { OfficeType } from 'src/schema/office/office-type.schema';
 import { OfficeTypeEnum } from 'src/schema/office/office.dto';
 import { Office } from 'src/schema/office/office.schema';
 import constant from '../constant';
-import { IS_PUBLIC_KEY } from '../decorator/public.decorator';
-import { CodeGeneratorService } from '../service/code-generator.service';
 import { SKIP_API_KEY } from '../decorator/skip-api-key.decorator';
+import { CodeGeneratorService } from '../service/code-generator.service';
 
 @Injectable()
-export class ApiKeyGuard implements CanActivate {
-  private readonly logger = new Logger(ApiKeyGuard.name);
+export class ApiClientGuard implements CanActivate {
+  private readonly logger = new Logger(ApiClientGuard.name);
 
   constructor(
     private reflector: Reflector,
@@ -64,7 +63,7 @@ export class ApiKeyGuard implements CanActivate {
       throw new UnauthorizedException('Invalid API credentials');
     }
 
-    return apiClient.name;
+    return { platform: apiClient.name, apiClientId: apiClient._id };
   }
 
   private async getOfficeId(cookie: string | undefined) {
@@ -85,7 +84,7 @@ export class ApiKeyGuard implements CanActivate {
       officeId = foundedOffice!._id.toString();
     }
 
-    return officeId;
+    return new Types.ObjectId(officeId);
   }
 
   private getLanguage(acceptLanguage: string | undefined) {
@@ -102,26 +101,22 @@ export class ApiKeyGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
-    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
 
     const skipApiKeyCheck = this.reflector.getAllAndOverride<boolean>(
       SKIP_API_KEY,
       [context.getHandler(), context.getClass()],
     );
 
-    if (isPublic || skipApiKeyCheck) return true;
+    if (skipApiKeyCheck) return true;
 
     const apiKey = request.headers['x-api-key'] as string | undefined;
     const apiSecret = request.headers['x-api-secret'] as string | undefined;
 
-    const platform = await this.getPlatformName(apiKey, apiSecret);
+    const apiClient = await this.getPlatformName(apiKey, apiSecret);
     const officeId = await this.getOfficeId(request.headers.cookie);
     const language = this.getLanguage(request.headers['accept-language']);
 
-    request['data'] = { language, officeId, platform } as RequestDataDto;
+    request['data'] = { language, officeId, ...apiClient } as RequestDataDto;
     return true;
   }
 }

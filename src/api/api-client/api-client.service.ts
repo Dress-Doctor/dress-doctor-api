@@ -28,7 +28,7 @@ export class ApiClientService {
       );
     }
 
-    const apiCredentials = await this.codeService.generateApiKey();
+    const apiCredentials = await this.codeService.generateApiClient();
     await this.apiClientModel.create({ ...apiCredentials, ...data });
     this.logger.log('Api client created successfully');
 

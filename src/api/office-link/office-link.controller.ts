@@ -12,6 +12,7 @@ import { ApiFoundResponse } from '@nestjs/swagger';
 import { type Response } from 'express';
 import { OfficeLinkService } from './office-link.service';
 import { Public } from 'src/helper/decorator/public.decorator';
+import { SkipApiKeyCheck } from 'src/helper/decorator/skip-api-key.decorator';
 
 @Controller({ path: 'o', version: VERSION_NEUTRAL })
 export class OfficeLinkController {
@@ -19,6 +20,7 @@ export class OfficeLinkController {
 
   @Public()
   @Get(':slug')
+  @SkipApiKeyCheck()
   @HttpCode(HttpStatus.FOUND)
   @ApiFoundResponse({
     description: 'The user will be redirected (HTTP 302 Found).',

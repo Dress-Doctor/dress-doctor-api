@@ -30,7 +30,7 @@ export class LogRequestMiddleware implements NestMiddleware {
     const apiSecret = req.headers['x-api-secret'] as string | undefined;
 
     const platform = await this.getPlatformName(apiKey, apiSecret);
-    this.logger.log(`${req.method} ${req.originalUrl} ${platform}`);
+    this.logger.log(`${req.method} ${req.originalUrl} [${platform}]`);
     next();
   }
 }

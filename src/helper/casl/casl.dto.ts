@@ -5,6 +5,6 @@ export type CaslActionsDto = `${PermissionActionEnum}`;
 export type CaslSubjectsDto = `${SubjectEnum}`;
 
 export type AppAbilityDto = [CaslActionsDto, CaslSubjectsDto];
-export type Conditions = MongoQuery;
+export type ConditionsDto = MongoQuery;
 
-export const AppAbility = createMongoAbility<AppAbilityDto, Conditions>;
+export const AppAbility = createMongoAbility<AppAbilityDto, ConditionsDto>;

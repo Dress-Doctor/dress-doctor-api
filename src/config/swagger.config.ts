@@ -8,10 +8,10 @@ export default new DocumentBuilder()
   )
   .setVersion('1.0')
   .addBearerAuth()
-  .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'Api-Key')
+  .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'x-api-key')
   .addApiKey(
-    { type: 'apiKey', name: 'x-api-secrete', in: 'header' },
-    'Api-Secrete',
+    { type: 'apiKey', name: 'x-api-secret', in: 'header' },
+    'x-api-secret',
   )
   .addGlobalResponse({
     status: 400,

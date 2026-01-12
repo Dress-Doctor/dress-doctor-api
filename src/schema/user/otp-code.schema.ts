@@ -19,7 +19,7 @@ export class OtpCode extends Document<Types.ObjectId> {
   code: string;
 
   @Prop({ required: true })
-  expiredAt: Date;
+  expiresAt: Date;
 
   @Prop({ required: true, default: false })
   isUsed: boolean;

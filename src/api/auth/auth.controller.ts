@@ -5,6 +5,7 @@ import {
   HttpStatus,
   Logger,
   Post,
+  Req,
 } from '@nestjs/common';
 import {
   ApiBody,
@@ -17,6 +18,8 @@ import { Public } from 'src/helper/decorator/public.decorator';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { LoginEntity } from './entities/auth.entity';
+import { type Request } from 'express';
+import { type AppRequest } from 'src/dto/request-data.dto';
 
 @Controller('auth')
 @ApiSecurity('x-api-key')
@@ -32,8 +35,9 @@ export class AuthController {
   @ApiCreatedResponse({ type: LoginEntity })
   @ApiResponse({ status: HttpStatus.CREATED })
   @ApiOperation({ summary: 'Used to login client' })
-  async login(@Body() data: LoginDto) {
-    this.logger.log(`${data.phone} is trying to login`);
-    return await this.authService.login(data);
+  async login(@Body() data: LoginDto, @Req() req: AppRequest) {
+    const platform = req.data.platform;
+    this.logger.log(`[${platform}] ${data.phone} is trying to login`);
+    return await this.authService.login(data, req.data);
   }
 }
