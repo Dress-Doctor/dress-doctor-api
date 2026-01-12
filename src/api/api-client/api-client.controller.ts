@@ -6,9 +6,10 @@ import {
   Logger,
   Post,
 } from '@nestjs/common';
+import { ApiBody, ApiOperation } from '@nestjs/swagger';
+import { SkipApiKeyCheck } from 'src/helper/decorator/skip-api-key.decorator';
 import { ApiClientService } from './api-client.service';
 import { CreateApiClientDto } from './dto/create-api-client.dto';
-import { ApiBody, ApiOperation } from '@nestjs/swagger';
 
 @Controller('api-client')
 export class ApiClientController {
@@ -17,6 +18,7 @@ export class ApiClientController {
   constructor(private readonly apiClientService: ApiClientService) {}
 
   @Post()
+  @SkipApiKeyCheck()
   @HttpCode(HttpStatus.CREATED)
   @ApiBody({ type: CreateApiClientDto })
   @ApiOperation({ summary: 'Used to create an api-client' })

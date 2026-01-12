@@ -19,6 +19,7 @@ import { Office } from 'src/schema/office/office.schema';
 import constant from '../constant';
 import { IS_PUBLIC_KEY } from '../decorator/public.decorator';
 import { CodeGeneratorService } from '../service/code-generator.service';
+import { SKIP_API_KEY } from '../decorator/skip-api-key.decorator';
 
 @Injectable()
 export class ApiKeyGuard implements CanActivate {
@@ -106,7 +107,12 @@ export class ApiKeyGuard implements CanActivate {
       context.getClass(),
     ]);
 
-    if (isPublic) return true;
+    const skipApiKeyCheck = this.reflector.getAllAndOverride<boolean>(
+      SKIP_API_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+
+    if (isPublic || skipApiKeyCheck) return true;
 
     const apiKey = request.headers['x-api-key'] as string | undefined;
     const apiSecret = request.headers['x-api-secret'] as string | undefined;

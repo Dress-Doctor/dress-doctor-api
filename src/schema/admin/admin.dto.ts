@@ -17,7 +17,7 @@ export enum PermissionActionEnum {
   UPDATE = 'UPDATE',
   DELETE = 'DELETE',
   ASSIGN = 'ASSIGN',
-  MANAGE = 'MANAGE',
+  MANAGE = 'manage',
   CONFIRM = 'CONFIRM',
 }
 
@@ -27,7 +27,7 @@ export enum ScopeEnum {
 }
 
 export enum SubjectEnum {
-  All = 'All',
+  All = 'all',
 
   // affiliate
   AffiliatePartner = 'AffiliatePartner',

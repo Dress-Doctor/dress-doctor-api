@@ -1,8 +1,9 @@
+import type { MongoQuery } from '@casl/ability';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types, Schema as MongooseSchema } from 'mongoose';
+import { Document, Types } from 'mongoose';
+import { ScopeEnum } from './admin.dto';
 import { Permission } from './permission.schema';
 import { Role } from './role.schema';
-import { ScopeEnum } from './admin.dto';
 
 export const rolePermissionSchemaName = 'role_permission';
 @Schema({ timestamps: true, collection: rolePermissionSchemaName })
@@ -21,8 +22,8 @@ export class RolePermission extends Document<Types.ObjectId> {
   @Prop({ required: true, enum: ScopeEnum })
   scope: ScopeEnum;
 
-  @Prop({ type: Map, of: MongooseSchema.Types.Mixed, default: {} })
-  conditions: Map<string, any>;
+  @Prop({ type: Object })
+  conditions: MongoQuery<any>;
 }
 
 export const RolePermissionSchema =
