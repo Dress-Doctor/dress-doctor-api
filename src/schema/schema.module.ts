@@ -8,6 +8,7 @@ import { PaymentSchemaModule } from './payment/payment.module';
 import { PickupSchemaModule } from './pickup/pickup.module';
 import { PromoSchemaModule } from './promo/promo.module';
 import { UserSchemaModule } from './user/user.module';
+import { OtpSchemaModule } from './otp/otp.module';
 
 @Global()
 @Module({
@@ -16,6 +17,7 @@ import { UserSchemaModule } from './user/user.module';
       useFactory: () => ({ uri: process.env.DATABASE_URL }),
     }),
     UserSchemaModule,
+    OtpSchemaModule,
     OrderSchemaModule,
     AdminSchemaModule,
     PromoSchemaModule,

@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { ActionEnum } from '../admin/admin.dto';
+import { HistoryActionEnum } from '../admin/admin.dto';
 import { User } from '../user/user.schema';
 import { PickupRequest } from './pickup-request.schema';
 
@@ -21,8 +21,8 @@ export class PickupRequestHistory extends Document<Types.ObjectId> {
   @Prop({ required: false, type: Object })
   changedFields?: Record<string, any>;
 
-  @Prop({ required: true, enum: ActionEnum })
-  action: ActionEnum;
+  @Prop({ required: true, enum: HistoryActionEnum })
+  action: HistoryActionEnum;
 
   @Prop({ required: false, type: Object, default: {} })
   snapshot?: Record<string, any>;

@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Base } from 'src/dto/swagger.dto';
-import { OTPPurposeEnum } from 'src/schema/user/user.dto';
+import { OTPPurposeEnum } from 'src/schema/otp/otp.dto';
 
 class LoginDataEntity {
   @ApiProperty({

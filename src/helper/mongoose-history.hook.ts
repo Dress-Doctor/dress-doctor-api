@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { Model, Query, Schema, Types, Document } from 'mongoose';
-import { ActionEnum } from '../schema/admin/admin.dto';
+import { HistoryActionEnum } from '../schema/admin/admin.dto';
 import { ChangedFieldDto } from '../schema/user/user.dto';
 
 interface QueryWithPrevious<T> extends Query<T, T> {
@@ -48,7 +48,7 @@ export function attachHistoryHooks<T extends Document>(
     try {
       await historyModel.create({
         changedBy: doc._id,
-        action: ActionEnum.CREATE,
+        action: HistoryActionEnum.CREATE,
         [idField]: doc[idField as keyof T] || doc._id,
         snapshot: doc.toObject() as Record<string, any>,
       });
@@ -74,7 +74,7 @@ export function attachHistoryHooks<T extends Document>(
         await historyModel.create({
           [idField]: doc[idField as keyof T] || doc._id,
           changedBy: doc._id,
-          action: ActionEnum.CREATE,
+          action: HistoryActionEnum.CREATE,
           snapshot: doc.toObject() as Record<string, any>,
         });
         logger.log(`History recorded for ${resourceName} CREATE (via update)`);
@@ -106,7 +106,7 @@ export function attachHistoryHooks<T extends Document>(
 
       await historyModel.create({
         changedFields,
-        action: ActionEnum.UPDATE,
+        action: HistoryActionEnum.UPDATE,
         changedBy: context?.changedBy ?? doc._id,
         [idField]: doc[idField as keyof T] || doc._id,
         snapshot: doc.toObject() as Record<string, any>,

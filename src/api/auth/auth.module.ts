@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
 import { AuthService } from './auth.service';
 import { CaslAbilityService } from 'src/helper/casl/casl-ability.service';
+import { OtpService } from 'src/helper/service/otp.service';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { CaslAbilityService } from 'src/helper/casl/casl-ability.service';
   ],
   controllers: [AuthController],
   providers: [
+    OtpService,
     AuthService,
     CaslAbilityService,
     CodeGeneratorService,

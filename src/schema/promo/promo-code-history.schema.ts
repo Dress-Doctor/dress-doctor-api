@@ -3,7 +3,7 @@ import { Document, Schema as MongooseSchema, Types } from 'mongoose';
 import { ChangedFieldDto } from '../user/user.dto';
 import { User } from '../user/user.schema';
 import { PromoCode } from '../promo/promo-code.schema';
-import { ActionEnum } from '../admin/admin.dto';
+import { HistoryActionEnum } from '../admin/admin.dto';
 
 export const promoCodeHistorySchemaName = 'promo_code_history';
 @Schema({ timestamps: true, collection: promoCodeHistorySchemaName })
@@ -32,8 +32,8 @@ export class PromoCodeHistory extends Document<Types.ObjectId> {
   })
   changedFields?: ChangedFieldDto[];
 
-  @Prop({ required: true, enum: ActionEnum })
-  action: ActionEnum;
+  @Prop({ required: true, enum: HistoryActionEnum })
+  action: HistoryActionEnum;
 
   @Prop({ required: false, type: Object, default: {} })
   snapshot?: Record<string, any>;

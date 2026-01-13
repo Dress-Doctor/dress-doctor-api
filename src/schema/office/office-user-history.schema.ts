@@ -3,7 +3,7 @@ import { Types, Document, Schema as MongooseSchema } from 'mongoose';
 import { OfficeUser } from './office-user.schema';
 import { User } from '../user/user.schema';
 import { ChangedFieldDto } from '../user/user.dto';
-import { ActionEnum } from '../admin/admin.dto';
+import { HistoryActionEnum } from '../admin/admin.dto';
 
 export const officeUserHistorySchemaName = 'office_user_history';
 @Schema({ timestamps: true, collection: officeUserHistorySchemaName })
@@ -27,8 +27,8 @@ export class OfficeUserHistory extends Document<Types.ObjectId> {
   })
   changedFields?: ChangedFieldDto[];
 
-  @Prop({ required: true, enum: ActionEnum })
-  action: ActionEnum;
+  @Prop({ required: true, enum: HistoryActionEnum })
+  action: HistoryActionEnum;
 
   @Prop({ required: false, type: Object, default: {} })
   snapshot?: Record<string, any>;

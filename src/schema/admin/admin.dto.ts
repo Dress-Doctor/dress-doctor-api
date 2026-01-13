@@ -4,7 +4,7 @@ export enum PlatformEnum {
   MICRO_SERVICE = 'MICRO_SERVICE',
 }
 
-export enum ActionEnum {
+export enum HistoryActionEnum {
   CREATE = 'CREATE',
   UPDATE = 'UPDATE',
   DELETE = 'DELETE',
@@ -18,6 +18,7 @@ export enum PermissionActionEnum {
   DELETE = 'DELETE',
   ASSIGN = 'ASSIGN',
   MANAGE = 'manage',
+  UNLOCK = 'UNLOCK',
   CONFIRM = 'CONFIRM',
 }
 
@@ -28,6 +29,10 @@ export enum ScopeEnum {
 
 export enum SubjectEnum {
   All = 'all',
+
+  // OTP
+  OtpRequest = 'OtpRequest',
+  OtpSecurityState = 'OtpSecurityState',
 
   // affiliate
   AffiliatePartner = 'AffiliatePartner',

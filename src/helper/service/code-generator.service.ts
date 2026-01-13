@@ -5,7 +5,6 @@ import { Chance } from 'chance';
 import * as crypto from 'crypto';
 import { Model } from 'mongoose';
 import { Customer } from 'src/schema/user/customer.schema';
-import { OtpCode } from 'src/schema/user/otp-code.schema';
 
 @Injectable()
 export class CodeGeneratorService {
@@ -13,7 +12,6 @@ export class CodeGeneratorService {
 
   constructor(
     @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
-    @InjectModel(OtpCode.name) private readonly otpModel: Model<OtpCode>,
   ) {}
 
   signOfficeLink(slug: string): string {
@@ -65,20 +63,5 @@ export class CodeGeneratorService {
     const secretHash = await this.hashPlainText(secret);
 
     return { key, secretHash, secret };
-  }
-
-  async generateOtpCode() {
-    let code: string;
-    let exists: boolean;
-
-    const min = 100000;
-    const max = 999999;
-    do {
-      code = (Math.floor(Math.random() * (max - min + 1)) + min).toString();
-      const doc = await this.otpModel.exists({ code });
-      exists = doc ? true : false;
-    } while (exists);
-
-    return code;
   }
 }
