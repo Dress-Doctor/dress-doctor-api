@@ -1,38 +1,23 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Base } from 'src/dto/swagger.dto';
-import { OTPPurposeEnum } from 'src/schema/otp/otp.dto';
 
 class LoginDataEntity {
-  @ApiProperty({
-    required: true,
-    example: false,
-    description: 'Is otp used already',
-  })
-  isUsed: boolean;
-
-  @ApiProperty({
-    required: true,
-    example: 'LOGIN',
-    description: 'Purpose of the OTP code',
-  })
-  purpose: OTPPurposeEnum;
-
   @ApiProperty({
     required: true,
     example: '2026-01-12T03:41:59.432Z',
     description: 'The expiration date of the OTP code',
   })
-  expiredAt: Date;
+  expiresAt: Date;
 
   @ApiProperty({
     required: true,
-    example: 'WhatsApp',
-    description: 'OTP channel',
+    description: 'OTP reference',
+    example: '3d617878-7c58-4963-9a5f-f709a6133653',
   })
-  channel: 'WhatsApp';
+  otpRef: string;
 }
 
-export class LoginEntity extends Base {
+export class InitiateLoginEntity extends Base {
   @ApiProperty({
     required: true,
     description: 'A message describing the response',
@@ -42,4 +27,20 @@ export class LoginEntity extends Base {
 
   @ApiProperty({ required: true, type: LoginDataEntity })
   data: LoginDataEntity;
+}
+
+export class CompleteLoginEntity extends Base {
+  @ApiProperty({
+    required: true,
+    example: 'Login successful',
+    description: 'A message describing the response',
+  })
+  message: string;
+
+  @ApiProperty({
+    required: true,
+    example: 'JWT Token',
+    description: 'Client token',
+  })
+  accessToken: string;
 }

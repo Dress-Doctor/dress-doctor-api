@@ -1,9 +1,13 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Types, Document, HydratedDocument } from 'mongoose';
 import { OTPChannelEnum, OTPPurposeEnum } from './otp.dto';
+import { v4 as uuid4 } from 'uuid';
 
 @Schema({ timestamps: true, collection: 'otp_request' })
 export class OtpRequest extends Document<Types.ObjectId> {
+  @Prop({ required: true, type: Types.UUID, default: uuid4 })
+  otpRef: string;
+
   @Prop({ required: true })
   identifier: string;
 

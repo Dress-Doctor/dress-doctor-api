@@ -25,6 +25,8 @@ import { CodeGeneratorService } from './code-generator.service';
 @Injectable()
 export class OtpService {
   private readonly logger = new Logger(OtpService.name);
+  private readonly expiredCode = 'Invalid or expired verification code';
+  private readonly accountLocked = 'account has been locked due to OTP abuse';
   private readonly BASE_COOL_DOWN_MINUTES = appConfig.otpBaseCoolDownMin;
 
   constructor(
@@ -77,10 +79,10 @@ export class OtpService {
     if (state.verifyCoolDownUntil && state.verifyCoolDownUntil > now) {
       const waitTime = this.getWaitTime(state.verifyCoolDownUntil);
       this.logger.error(
-        `[${platform}] ${identifier} has to wait for ${waitTime} minute(s) before requesting another code.`,
+        `[${platform}] ${identifier} has to wait for ${waitTime} minute(s) before trying.`,
       );
       throw new BadRequestException(
-        `Please wait for ${waitTime} minute(s) before requesting another code.`,
+        `Please wait for ${waitTime} minute(s) before trying.`,
       );
     }
 
@@ -90,6 +92,7 @@ export class OtpService {
       return;
     }
 
+    console.log('hello');
     state.verifyCoolDownLevel += 1;
     const coolDownMinutes = this.getCoolDownMinutes(state.verifyCoolDownLevel);
 
@@ -131,11 +134,9 @@ export class OtpService {
     const identifier = state.identifier;
 
     if (state.isLocked) {
-      this.logger.error(
-        `[${platform}] ${identifier} account has been locked due to OTP abuse`,
-      );
+      this.logger.error(`[${platform}] ${identifier} ${this.accountLocked}`);
       throw new ForbiddenException(
-        'Your account has been locked due to OTP abuse. Please contact support',
+        `Your ${this.accountLocked}. Please contact support`,
       );
     }
 
@@ -202,67 +203,57 @@ export class OtpService {
       expiresAt: this.addMinutes(new Date(), this.BASE_COOL_DOWN_MINUTES),
     });
 
-    return { code, channel, expiresAt: newOtpRequest.expiresAt, purpose };
+    return {
+      code,
+      otpRef: newOtpRequest.otpRef,
+      expiresAt: newOtpRequest.expiresAt,
+    };
   }
 
-  async verifyOtp(data: VerifyOtpDto) {
-    const platform = this.request.data.platform;
-    const { identifier, channel, purpose, code } = data;
-
-    const normalized = this.normalize(identifier);
-    const state = await this.getOrCreateState({
-      channel,
-      purpose,
-      identifier: normalized,
-    });
-
-    if (state.isLocked) {
-      this.logger.error(
-        `[${platform}] ${identifier} account has been locked due to OTP abuse`,
-      );
-      throw new ForbiddenException(
-        'Your account has been locked due to OTP abuse. Please contact support',
-      );
-    }
-
+  async verifyOtp({ code, otpRef, identifier }: VerifyOtpDto) {
     const now = new Date();
-    if (state.verifyCoolDownUntil && state.verifyCoolDownUntil > now) {
-      const waitTime = this.getWaitTime(state.verifyCoolDownUntil);
-      this.logger.error(
-        `[${platform}] ${identifier} has to wait for ${waitTime} minute(s) before requesting another code.`,
-      );
-      throw new BadRequestException(
-        `Please wait for ${waitTime} minute(s) before requesting another code.`,
-      );
-    }
-
-    const otp = await this.otpRequestModel.findOne({
-      channel,
-      purpose,
+    const platform = this.request.data.platform;
+    const otpRequest = await this.otpRequestModel.findOne({
+      otpRef,
+      identifier,
       isUsed: false,
-      identifier: normalized,
       expiresAt: { $gt: now },
       usedAt: { $exists: false },
     });
 
-    if (!otp) {
-      await this.handleFailure(state);
-      this.logger.error(
-        `[${platform}] Invalid or expired verification code for ${identifier}`,
-      );
-      throw new UnauthorizedException('Invalid or expired verification code');
+    if (!otpRequest) {
+      this.logger.error(`[${platform}] ${this.expiredCode}`);
+      throw new UnauthorizedException(this.expiredCode);
     }
 
-    const isValid = await this.codeService.verifyHash(code, otp.codeHash);
+    const state = await this.getOrCreateState({
+      channel: otpRequest.channel,
+      purpose: otpRequest.purpose,
+      identifier: otpRequest.identifier,
+    });
+
+    if (state.isLocked) {
+      this.logger.error(
+        `[${platform}] ${otpRequest.identifier} ${this.accountLocked}`,
+      );
+      throw new ForbiddenException(
+        `Your ${this.accountLocked}. Please contact support`,
+      );
+    }
+
+    const isValid = await this.codeService.verifyHash(
+      code,
+      otpRequest.codeHash,
+    );
     if (!isValid) {
       await this.handleFailure(state);
       this.logger.error(
-        `[${platform}] Invalid or expired verification code for ${identifier}`,
+        `[${platform}] ${this.expiredCode} for ${otpRequest.identifier}`,
       );
-      throw new UnauthorizedException('Invalid or expired verification code');
+      throw new UnauthorizedException(this.expiredCode);
     }
 
-    await this.handleSuccess(state, otp);
+    await this.handleSuccess(state, otpRequest);
     return true;
   }
 

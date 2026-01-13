@@ -4,8 +4,10 @@ export class RequestOtpDto {
   purpose: OTPPurposeEnum;
 }
 
-export class VerifyOtpDto extends RequestOtpDto {
+export class VerifyOtpDto {
   code: string;
+  otpRef: string;
+  identifier: string;
 }
 
 export enum OTPChannelEnum {

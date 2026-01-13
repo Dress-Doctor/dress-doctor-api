@@ -14,12 +14,14 @@ import {
   ApiResponse,
   ApiSecurity,
 } from '@nestjs/swagger';
+import { type AppRequest } from 'src/dto/request-data.dto';
 import { Public } from 'src/helper/decorator/public.decorator';
 import { AuthService } from './auth.service';
-import { LoginDto } from './dto/login.dto';
-import { LoginEntity } from './entities/auth.entity';
-import { type Request } from 'express';
-import { type AppRequest } from 'src/dto/request-data.dto';
+import { CompleteLoginDto, InitiateLoginDto } from './dto/login.dto';
+import {
+  CompleteLoginEntity,
+  InitiateLoginEntity,
+} from './entities/auth.entity';
 
 @Controller('auth')
 @ApiSecurity('x-api-key')
@@ -29,15 +31,32 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
-  @Post('login')
-  @ApiBody({ type: LoginDto })
+  @Post('initiate-login')
   @HttpCode(HttpStatus.CREATED)
-  @ApiCreatedResponse({ type: LoginEntity })
+  @ApiBody({ type: InitiateLoginDto })
   @ApiResponse({ status: HttpStatus.CREATED })
-  @ApiOperation({ summary: 'Used to login client' })
-  async login(@Body() data: LoginDto, @Req() req: AppRequest) {
+  @ApiCreatedResponse({ type: InitiateLoginEntity })
+  @ApiOperation({ summary: 'Used to initiate login' })
+  async initiateLogin(@Body() data: InitiateLoginDto, @Req() req: AppRequest) {
     const platform = req.data.platform;
+
     this.logger.log(`[${platform}] ${data.phone} is trying to login`);
-    return await this.authService.login(data, req.data);
+    return await this.authService.initiateLogin(data);
+  }
+
+  @Public()
+  @Post('complete-login')
+  @HttpCode(HttpStatus.OK)
+  @ApiResponse({ status: HttpStatus.OK })
+  @ApiCreatedResponse({ type: CompleteLoginEntity })
+  @ApiOperation({ summary: 'Used to complete login' })
+  async completeLogin(@Body() data: CompleteLoginDto, @Req() req: AppRequest) {
+    const platform = req.data.platform;
+
+    this.logger.log(
+      `[${platform}] ${data.identifier} is trying to verify their otp with ${JSON.stringify(data)}`,
+    );
+
+    return await this.authService.completeLogin(data);
   }
 }

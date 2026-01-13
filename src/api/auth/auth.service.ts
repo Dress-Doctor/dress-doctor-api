@@ -1,14 +1,19 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { User } from 'src/schema/user/user.schema';
-import { LoginDto } from './dto/login.dto';
+import { CompleteLoginDto, InitiateLoginDto } from './dto/login.dto';
 
-import { MergeType } from 'mongoose';
-import { AppRequest } from 'src/dto/request-data.dto';
+import { REQUEST } from '@nestjs/core';
+import { type AppRequest } from 'src/dto/request-data.dto';
 import { OtpService } from 'src/helper/service/otp.service';
 import { OTPChannelEnum, OTPPurposeEnum } from 'src/schema/otp/otp.dto';
 import { UserTypeEum } from 'src/schema/user/user.dto';
@@ -21,18 +26,19 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly otpService: OtpService,
     private readonly codeService: CodeGeneratorService,
+    @Inject(REQUEST) private readonly request: AppRequest,
     @InjectModel(User.name) private readonly userModel: Model<User>,
   ) {}
 
-  private async signToken(user: MergeType<User, { userTypeId: UserType }>) {
+  private async signToken(user: User) {
     return await this.jwtService.signAsync({
       sub: user._id,
       phone: user.phone,
     });
   }
 
-  async login(data: LoginDto, req: AppRequest['data']) {
-    const platform = req.platform;
+  async initiateLogin(data: InitiateLoginDto) {
+    const platform = this.request.data.platform;
     const foundedUser = await this.userModel
       .findOne({ phone: data.phone })
       .populate<{
@@ -60,9 +66,7 @@ export class AuthService {
     });
 
     const res = {
-      isUsed: false,
-      purpose: otpCode.purpose,
-      channel: otpCode.channel,
+      otpRef: otpCode.otpRef,
       expiresAt: otpCode.expiresAt,
       message: 'We have sent you a code to verify your phone.',
     };
@@ -77,7 +81,7 @@ export class AuthService {
     }
 
     const isValid = await this.codeService.verifyHash(
-      data.password,
+      data.password!,
       foundedUser.passwordHash,
     );
     if (!isValid) {
@@ -91,5 +95,25 @@ export class AuthService {
       `[${platform}] OTP verification code ${otpCode.code} send to ${data.phone}`,
     );
     return res;
+  }
+
+  async completeLogin(data: CompleteLoginDto) {
+    const platform = this.request.data.platform;
+
+    const foundedUser = await this.userModel.findOne({
+      phone: data.identifier,
+    });
+    if (!foundedUser) {
+      this.logger.error(
+        `[${platform}] This user ${data.identifier} doesn't exists.`,
+      );
+      throw new BadRequestException(`Invalid ${data.identifier}`);
+    }
+
+    await this.otpService.verifyOtp(data);
+    const token = await this.signToken(foundedUser);
+
+    this.logger.log(`[${platform}] ${data.identifier} have successfully login`);
+    return { accessToken: token, message: 'Login successful' };
   }
 }
