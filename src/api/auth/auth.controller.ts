@@ -8,13 +8,14 @@ import {
   Req,
 } from '@nestjs/common';
 import {
+  ApiBearerAuth,
   ApiBody,
   ApiCreatedResponse,
   ApiOperation,
   ApiResponse,
   ApiSecurity,
 } from '@nestjs/swagger';
-import { type AppRequest } from 'src/dto/request-data.dto';
+import type { AppRequestWithUser, AppRequest } from 'src/dto/request-data.dto';
 import { Public } from 'src/helper/decorator/public.decorator';
 import { AuthService } from './auth.service';
 import { CompleteLoginDto, InitiateLoginDto } from './dto/login.dto';
@@ -22,6 +23,7 @@ import {
   CompleteLoginEntity,
   InitiateLoginEntity,
 } from './entities/auth.entity';
+import { CreateUserDto } from './dto/create-user.dto';
 
 @Controller('auth')
 @ApiSecurity('x-api-key')
@@ -58,5 +60,21 @@ export class AuthController {
     );
 
     return await this.authService.completeLogin(data);
+  }
+
+  @Post('create-a-new-user')
+  @ApiBearerAuth('access-token')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiBody({ type: CreateUserDto })
+  @ApiResponse({ status: HttpStatus.OK })
+  @ApiOperation({ summary: 'Used to create user account' })
+  async newUser(@Req() req: AppRequestWithUser, @Body() data: CreateUserDto) {
+    const platform = req.data.platform;
+    const phone = req.user.phone;
+
+    const log = `[${platform}] ${phone} is trying is creating a user with ${JSON.stringify(data)}`;
+    this.logger.log(log);
+
+    return await this.authService.createNewUser(data);
   }
 }

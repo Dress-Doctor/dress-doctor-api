@@ -11,10 +11,12 @@ import {
   ApiBody,
   ApiCreatedResponse,
   ApiOperation,
+  ApiResponse,
   ApiSecurity,
 } from '@nestjs/swagger';
-import type { AppRequest } from 'src/dto/request-data.dto';
+import type { AppRequest, AppRequestWithUser } from 'src/dto/request-data.dto';
 import { Public } from 'src/helper/decorator/public.decorator';
+import { AssignPickupDto } from './dto/assign-pickup.dto';
 import { CreatePickupDto } from './dto/create-pickup.dto';
 import { SchedulePickupEntity } from './entities/pickup.entity';
 import { PickupService } from './pickup.service';
@@ -26,10 +28,9 @@ export class PickupController {
   private readonly logger = new Logger(PickupController.name);
   constructor(private readonly pickupService: PickupService) {}
 
-  @Post()
   @Public()
+  @Post('schedule-pickup')
   @HttpCode(HttpStatus.CREATED)
-  @ApiBody({ type: CreatePickupDto })
   @ApiBody({ type: CreatePickupDto })
   @ApiCreatedResponse({ type: SchedulePickupEntity })
   @ApiOperation({ summary: 'Used to schedule a pickup' })
@@ -39,5 +40,18 @@ export class PickupController {
 
     this.logger.log(log);
     return await this.pickupService.schedulePickup(data);
+  }
+
+  @Post('assign-to-agent')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiBody({ type: AssignPickupDto })
+  @ApiResponse({ status: HttpStatus.CREATED })
+  @ApiOperation({ summary: 'Assign pickup to agent to an agent' })
+  assignPickup(@Req() req: AppRequestWithUser) {
+    const phone = req.user.phone;
+    const platform = req.data.platform;
+
+    const log = `[${platform}] ${phone} is trying to assign pickup to an agent`;
+    this.logger.log(log);
   }
 }

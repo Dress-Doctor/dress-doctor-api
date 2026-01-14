@@ -6,17 +6,18 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { User } from 'src/schema/user/user.schema';
 import { CompleteLoginDto, InitiateLoginDto } from './dto/login.dto';
 
 import { REQUEST } from '@nestjs/core';
-import { type AppRequest } from 'src/dto/request-data.dto';
+import type { AppRequestWithUser } from 'src/dto/request-data.dto';
 import { OtpService } from 'src/helper/service/otp.service';
 import { OTPChannelEnum, OTPPurposeEnum } from 'src/schema/otp/otp.dto';
 import { UserTypeEum } from 'src/schema/user/user.dto';
+import { CreateUserDto } from './dto/create-user.dto';
 
 @Injectable()
 export class AuthService {
@@ -26,8 +27,9 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly otpService: OtpService,
     private readonly codeService: CodeGeneratorService,
-    @Inject(REQUEST) private readonly request: AppRequest,
+    @Inject(REQUEST) private readonly req: AppRequestWithUser,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
   ) {}
 
   private async signToken(user: User) {
@@ -38,7 +40,7 @@ export class AuthService {
   }
 
   async initiateLogin(data: InitiateLoginDto) {
-    const platform = this.request.data.platform;
+    const platform = this.req.data.platform;
     const foundedUser = await this.userModel
       .findOne({ phone: data.phone })
       .populate<{
@@ -98,7 +100,7 @@ export class AuthService {
   }
 
   async completeLogin(data: CompleteLoginDto) {
-    const platform = this.request.data.platform;
+    const platform = this.req.data.platform;
 
     const foundedUser = await this.userModel.findOne({
       phone: data.identifier,
@@ -115,5 +117,31 @@ export class AuthService {
 
     this.logger.log(`[${platform}] ${data.identifier} have successfully login`);
     return { accessToken: token, message: 'Login successful' };
+  }
+
+  async createNewUser(data: CreateUserDto) {
+    const platform = this.req.data.platform;
+    const { phone, ability } = this.req.user;
+
+    if (!ability.can('CREATE', 'User')) {
+      const log = 'not authorized to perform this action';
+      this.logger.error(`[${platform}] ${phone} ${log}`);
+      throw new BadRequestException(`You are ${log}`);
+    }
+
+    const userTypeId = new Types.ObjectId(data.userTypeId);
+    const userTypeExists = await this.userTypeModel.findOne({
+      _id: userTypeId,
+    });
+    if (!userTypeExists) {
+      this.logger.error(`[${platform}] ${phone} the user type id is invalid`);
+      throw new BadRequestException('Invalid user type id');
+    }
+
+    this.logger.log(
+      `[${platform}] ${phone} has successfully created a new user with type ${userTypeExists.userTypeName}.`,
+    );
+    await this.userModel.create({ ...data, userTypeId });
+    return 'User successfully created';
   }
 }
