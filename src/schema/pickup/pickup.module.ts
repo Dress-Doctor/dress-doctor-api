@@ -34,6 +34,19 @@ import { attachHistoryHooks } from 'src/helper/mongoose-history.hook';
           });
         },
       },
+      {
+        name: PickupAssignment.name,
+        inject: [getModelToken(PickupAssignmentHistory.name)],
+        useFactory: (historyModel: Model<PickupAssignmentHistory>) => {
+          const schema = PickupAssignmentSchema;
+          return attachHistoryHooks({
+            schema,
+            historyModel,
+            idField: 'pickupAssignmentId',
+            resourceName: PickupAssignment.name,
+          });
+        },
+      },
     ]),
     MongooseModule.forFeature([
       {
@@ -41,7 +54,7 @@ import { attachHistoryHooks } from 'src/helper/mongoose-history.hook';
         schema: PickupAssignmentHistorySchema,
       },
       { name: PickupStatus.name, schema: PickupStatusSchema },
-      { name: PickupAssignment.name, schema: PickupAssignmentSchema },
+      // { name: PickupAssignment.name, schema: PickupAssignmentSchema },
       { name: PickupRequestHistory.name, schema: PickupRequestHistorySchema },
     ]),
   ],

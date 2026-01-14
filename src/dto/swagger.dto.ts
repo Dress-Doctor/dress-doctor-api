@@ -1,4 +1,16 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiHeaderOptions, ApiProperty } from '@nestjs/swagger';
+
+export const xApiKey: ApiHeaderOptions = {
+  required: true,
+  name: 'x-api-key',
+  schema: { default: '{{apiKey}}' },
+};
+
+export const xApiSecret: ApiHeaderOptions = {
+  required: true,
+  name: 'x-api-secret',
+  schema: { default: '{{apiSecret}}' },
+};
 
 export class Base {
   @ApiProperty({

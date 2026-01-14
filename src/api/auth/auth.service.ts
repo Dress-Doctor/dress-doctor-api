@@ -18,6 +18,7 @@ import { OtpService } from 'src/helper/service/otp.service';
 import { OTPChannelEnum, OTPPurposeEnum } from 'src/schema/otp/otp.dto';
 import { UserTypeEum } from 'src/schema/user/user.dto';
 import { CreateUserDto } from './dto/create-user.dto';
+import { Customer } from 'src/schema/user/customer.schema';
 
 @Injectable()
 export class AuthService {
@@ -30,6 +31,7 @@ export class AuthService {
     @Inject(REQUEST) private readonly req: AppRequestWithUser,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
+    @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
   ) {}
 
   private async signToken(user: User) {
@@ -120,8 +122,10 @@ export class AuthService {
   }
 
   async createNewUser(data: CreateUserDto) {
+    // todo: check for duplicate email
     const platform = this.req.data.platform;
     const { phone, ability } = this.req.user;
+    const userId = new Types.ObjectId(this.req.user.userId);
 
     if (!ability.can('CREATE', 'User')) {
       const log = 'not authorized to perform this action';
@@ -138,10 +142,40 @@ export class AuthService {
       throw new BadRequestException('Invalid user type id');
     }
 
+    const userExists = await this.userModel.findOne({ phone: data.phone });
+    if (userExists) {
+      const log = `[${platform}] ${phone} this user ${data.phone} already exists.`;
+      this.logger.error(log);
+      throw new BadRequestException('This user already exists');
+    }
+
+    const emailExists = await this.userModel.findOne({ email: data.email });
+    if (emailExists && emailExists.phone !== data.phone) {
+      const log = `[${platform}] ${phone} this email ${data.email} is already taken`;
+      this.logger.error(log);
+      throw new BadRequestException('The provided email has been taken.');
+    }
+
+    const newUser = await this.userModel.findOneAndUpdate(
+      { phone: data.phone },
+      { ...data, userTypeId },
+      { context: { changedBy: userId }, upsert: true, new: true } as never,
+    );
+
+    if (userTypeExists.userTypeName === UserTypeEum.CUSTOMER.toString()) {
+      // Create new customer document
+      const referralCode = await this.codeService.generateReferralCode();
+      await this.customerModel.findOneAndUpdate(
+        { userId: (newUser as unknown as User)._id },
+        { referralCode, userId: (newUser as unknown as User)._id },
+        { context: { changedBy: userId }, upsert: true, new: true } as never,
+      );
+    }
+
     this.logger.log(
       `[${platform}] ${phone} has successfully created a new user with type ${userTypeExists.userTypeName}.`,
     );
-    await this.userModel.create({ ...data, userTypeId });
+
     return 'User successfully created';
   }
 }

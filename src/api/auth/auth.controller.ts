@@ -11,21 +11,25 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiCreatedResponse,
+  ApiHeader,
   ApiOperation,
   ApiResponse,
   ApiSecurity,
 } from '@nestjs/swagger';
-import type { AppRequestWithUser, AppRequest } from 'src/dto/request-data.dto';
+import type { AppRequest, AppRequestWithUser } from 'src/dto/request-data.dto';
+import { xApiKey, xApiSecret } from 'src/dto/swagger.dto';
 import { Public } from 'src/helper/decorator/public.decorator';
 import { AuthService } from './auth.service';
+import { CreateUserDto } from './dto/create-user.dto';
 import { CompleteLoginDto, InitiateLoginDto } from './dto/login.dto';
 import {
   CompleteLoginEntity,
   InitiateLoginEntity,
 } from './entities/auth.entity';
-import { CreateUserDto } from './dto/create-user.dto';
 
 @Controller('auth')
+@ApiHeader(xApiKey)
+@ApiHeader(xApiSecret)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
 export class AuthController {

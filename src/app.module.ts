@@ -19,6 +19,7 @@ import { ApiClientModule } from './api/api-client/api-client.module';
 import { AuthModule } from './api/auth/auth.module';
 import { APP_GUARD } from '@nestjs/core';
 import { ApiClientGuard } from './helper/guard/api-client.guard';
+import { UtilModule } from './api/util/util.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { ApiClientGuard } from './helper/guard/api-client.guard';
     OfficeLinkModule,
     ApiClientModule,
     ConfigModule.forRoot({ isGlobal: true }),
+    UtilModule,
   ],
   providers: [
     SeederService,

@@ -29,7 +29,7 @@ export class CaslAbilityService {
     const userRoles = await this.userRoleModel.find({ userId: user._id });
     if (!userRoles.length) return build();
 
-    const roleIds = userRoles.map((userRole) => userRole._id);
+    const roleIds = userRoles.map((userRole) => userRole.roleId);
     const rolePermissions = await this.rolePermissionModel
       .find({ roleId: { $in: roleIds } })
       .populate<{ permissionId: Permission }>({
@@ -53,6 +53,7 @@ export class CaslAbilityService {
 
     return build({
       detectSubjectType(subject: any) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access
         return subject.__caslSubjectType__ ?? subject.constructor.name;
       },
     });

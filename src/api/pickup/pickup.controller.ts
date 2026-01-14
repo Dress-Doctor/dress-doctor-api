@@ -10,6 +10,7 @@ import {
 import {
   ApiBody,
   ApiCreatedResponse,
+  ApiHeader,
   ApiOperation,
   ApiResponse,
   ApiSecurity,
@@ -20,8 +21,11 @@ import { AssignPickupDto } from './dto/assign-pickup.dto';
 import { CreatePickupDto } from './dto/create-pickup.dto';
 import { SchedulePickupEntity } from './entities/pickup.entity';
 import { PickupService } from './pickup.service';
+import { xApiKey, xApiSecret } from 'src/dto/swagger.dto';
 
+@ApiHeader(xApiKey)
 @Controller('pickup')
+@ApiHeader(xApiSecret)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
 export class PickupController {
@@ -47,11 +51,15 @@ export class PickupController {
   @ApiBody({ type: AssignPickupDto })
   @ApiResponse({ status: HttpStatus.CREATED })
   @ApiOperation({ summary: 'Assign pickup to agent to an agent' })
-  assignPickup(@Req() req: AppRequestWithUser) {
+  async assignPickup(
+    @Req() req: AppRequestWithUser,
+    @Body() data: AssignPickupDto,
+  ) {
     const phone = req.user.phone;
     const platform = req.data.platform;
 
-    const log = `[${platform}] ${phone} is trying to assign pickup to an agent`;
+    const log = `[${platform}] ${phone} is trying to assign pickup to an agent with ${JSON.stringify(data)}`;
     this.logger.log(log);
+    return await this.pickupService.assignPickup(data);
   }
 }

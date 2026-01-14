@@ -11,6 +11,40 @@ interface QueryContext {
   changedBy?: Types.ObjectId;
 }
 
+function normalize(value: any): any {
+  if (value instanceof Types.ObjectId) {
+    return value.toString();
+  }
+
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(normalize);
+  }
+
+  if (value && typeof value === 'object') {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+    return Object.keys(value)
+      .sort()
+      .reduce(
+        (acc, key) => {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+          acc[key] = normalize(value[key]);
+          return acc;
+        },
+        {} as Record<string, any>,
+      );
+  }
+
+  return value;
+}
+
+function isEqual(a: any, b: any): boolean {
+  return JSON.stringify(normalize(a)) === JSON.stringify(normalize(b));
+}
+
 /**
  * Attaches history tracking hooks (pre/post) to a Mongoose schema.
  * Automatically tracks CREATE and UPDATE actions with before/after snapshots.
@@ -69,12 +103,15 @@ export function attachHistoryHooks<T extends Document>(
       const query = this as QueryWithPrevious<T>;
       const previous = query._previous;
 
+      // Get context (who made the change)
+      const context = query.getOptions()?.context as QueryContext | undefined;
+
       if (!previous) {
         // No previous record means it was a create
         await historyModel.create({
-          [idField]: doc[idField as keyof T] || doc._id,
-          changedBy: doc._id,
           action: HistoryActionEnum.CREATE,
+          changedBy: context?.changedBy ?? doc._id,
+          [idField]: doc[idField as keyof T] || doc._id,
           snapshot: doc.toObject() as Record<string, any>,
         });
         logger.log(`History recorded for ${resourceName} CREATE (via update)`);
@@ -90,19 +127,16 @@ export function attachHistoryHooks<T extends Document>(
       if (update.$set) {
         for (const key of Object.keys(update.$set)) {
           if (key === 'updatedAt') continue;
-          if (previous[key as keyof T] !== update.$set?.[key as keyof T]) {
-            changedFields[key] = {
-              from: previous[key as keyof T],
-              to: update.$set?.[key as keyof T],
-            };
+
+          const prev = previous[key as keyof T];
+          const next = update.$set?.[key as keyof T];
+          if (!isEqual(prev, next)) {
+            changedFields[key] = { from: prev, to: next };
           }
         }
       }
 
       if (!Object.keys(changedFields).length) return next();
-
-      // Get context (who made the change)
-      const context = query.getOptions()?.context as QueryContext | undefined;
 
       await historyModel.create({
         changedFields,

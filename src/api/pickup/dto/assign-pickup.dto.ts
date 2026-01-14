@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsDefined, IsMongoId, MinDate } from 'class-validator';
+import { IsDefined, IsMongoId, IsOptional, MinDate } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class AssignPickupDto {
@@ -14,11 +14,11 @@ export class AssignPickupDto {
   pickupRequestId: string;
 
   @ApiProperty({
-    required: true,
+    required: false,
     example: new Date().toISOString(),
     description: 'Date pickup was assign to agent',
   })
-  @IsDefined({ message: 'Pickup date is required' })
+  @IsOptional()
   @Transform(
     ({ value }): Date =>
       typeof value === 'string' ? new Date(value) : (value as Date),
@@ -29,7 +29,7 @@ export class AssignPickupDto {
       date.setHours(0, 0, 0, 0);
       return date;
     },
-    { message: 'assignedAt date must be greater than or equal to today.' },
+    { message: 'AssignedAt date must be greater than or equal to today.' },
   )
-  assignedAt: Date;
+  assignedAt?: Date;
 }

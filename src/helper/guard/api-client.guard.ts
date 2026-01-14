@@ -79,7 +79,7 @@ export class ApiClientGuard implements CanActivate {
       });
 
       const foundedOffice = await this.officeModel.exists({
-        officeTypeId: officeType!.id,
+        officeTypeId: officeType!._id,
       });
       officeId = foundedOffice!._id.toString();
     }
