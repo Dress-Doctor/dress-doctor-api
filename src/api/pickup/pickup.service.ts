@@ -1,6 +1,13 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
+import { REQUEST } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import type { AppRequest } from 'src/dto/request-data.dto';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
@@ -9,31 +16,28 @@ import { Customer } from 'src/schema/user/customer.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { UserTypeEum } from 'src/schema/user/user.dto';
 import { User } from 'src/schema/user/user.schema';
-import { NewPickupDto } from './dto/create-pickup.dto';
+import { CreatePickupDto } from './dto/create-pickup.dto';
 
 @Injectable()
 export class PickupService {
   private readonly logger = new Logger(PickupRequest.name);
 
   constructor(
-    @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
     @InjectModel(PickupStatus.name)
     private readonly pickupStatusModel: Model<PickupStatus>,
+
     @InjectModel(PickupRequest.name)
     private readonly pickupRequestModel: Model<PickupRequest>,
+
+    @Inject(REQUEST) private readonly req: AppRequest,
     private readonly codeService: CodeGeneratorService,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
     @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
   ) {}
 
-  async create(data: NewPickupDto) {
-    const {
-      officeId,
-      pickupAddress,
-      pickupTime,
-      pickupDate,
-      ...newUserPayload
-    } = data;
+  async schedulePickup(data: CreatePickupDto) {
+    const { platform, apiClientId, officeId } = this.req.data;
     const userType = await this.userTypeModel.findOne({
       userTypeName: UserTypeEum.CUSTOMER,
     });
@@ -41,7 +45,7 @@ export class PickupService {
     // Create or update user
     const foundedUser = await this.userModel.findOneAndUpdate(
       { phone: data.phone },
-      { ...newUserPayload, userTypeId: userType?._id },
+      { ...data, userTypeId: userType!._id },
       { upsert: true, new: true },
     );
 
@@ -71,7 +75,7 @@ export class PickupService {
 
     if (pendingPickupRequest) {
       this.logger.log(
-        `${data.phone} already have another request in progress.`,
+        `[${platform}] ${data.phone} already have another request in progress.`,
       );
       throw new BadRequestException(
         'You already have another request in progress. Please be patient, we will call you.',
@@ -79,13 +83,15 @@ export class PickupService {
     }
     // Create pickup
     const newPickupRequest = await this.pickupRequestModel.create({
-      pickupTime,
-      pickupDate,
-      pickupAddress,
       customerId: foundedUser._id,
+      pickupTime: data.pickupTime,
+      pickupDate: data.pickupDate,
+      pickupAddress: data.pickupAddress,
       officeId: new Types.ObjectId(officeId),
       pickupStatusId: pendingPickupStatus!._id,
+      apiClientId: new Types.ObjectId(apiClientId),
     });
+    await newPickupRequest.populate({ path: 'pickupStatusId' });
 
     const customerInfo = await this.customerModel
       .findById(foundedCustomer._id)

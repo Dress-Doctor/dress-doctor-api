@@ -41,7 +41,6 @@ import { attachHistoryHooks } from 'src/helper/mongoose-history.hook';
         schema: PickupAssignmentHistorySchema,
       },
       { name: PickupStatus.name, schema: PickupStatusSchema },
-      { name: PickupRequest.name, schema: PickupRequestSchema },
       { name: PickupAssignment.name, schema: PickupAssignmentSchema },
       { name: PickupRequestHistory.name, schema: PickupRequestHistorySchema },
     ]),

@@ -4,10 +4,14 @@ import { User } from '../user/user.schema';
 import { PickupTimeEnum } from './pickup.dto';
 import { PickupStatus } from './pickup-status.schema';
 import { Office } from '../office/office.schema';
+import { ApiClient } from '../admin/api-client.schema';
 
 export const pickupRequestSchemaName = 'pickup_request';
 @Schema({ timestamps: true, collection: pickupRequestSchemaName })
 export class PickupRequest extends Document<Types.ObjectId> {
+  @Prop({ required: true, type: Types.ObjectId, ref: ApiClient.name })
+  apiClientId: Types.ObjectId;
+
   @Prop({ required: true, index: true, type: Types.ObjectId, ref: User.name })
   customerId: Types.ObjectId;
 
