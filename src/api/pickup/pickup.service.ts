@@ -3,12 +3,16 @@ import {
   Inject,
   Injectable,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import type { AppRequestWithUser } from 'src/dto/request-data.dto';
+import { AppUtilService } from 'src/helper/service/app-util.service';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
+import { OfficeType } from 'src/schema/office/office-type.schema';
+import { Office } from 'src/schema/office/office.schema';
 import { PickupAssignment } from 'src/schema/pickup/pickup-assignment.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
@@ -19,12 +23,15 @@ import { UserTypeEum } from 'src/schema/user/user.dto';
 import { User } from 'src/schema/user/user.schema';
 import { AssignPickupDto } from './dto/assign-pickup.dto';
 import { CreatePickupDto } from './dto/create-pickup.dto';
+import { FindPickupDto } from './dto/find-pickup.dto';
 
 @Injectable()
 export class PickupService {
   private readonly logger = new Logger(PickupRequest.name);
 
   constructor(
+    private readonly appUtilService: AppUtilService,
+
     @InjectModel(PickupStatus.name)
     private readonly pickupStatusModel: Model<PickupStatus>,
 
@@ -107,6 +114,7 @@ export class PickupService {
           officeId: new Types.ObjectId(officeId),
           pickupStatusId: pendingPickupStatus!._id,
           apiClientId: new Types.ObjectId(apiClientId),
+          reference: this.codeService.generatePickupReference(),
         },
         {
           context: { changedBy: foundedUser._id },
@@ -202,5 +210,61 @@ export class PickupService {
       `[${platform}] ${phone} pickup-request successfully assigned to ${userExists.phone}`,
     );
     return 'Pickup request successfully assigned';
+  }
+
+  async findAllPickup({ page, size, ...query }: FindPickupDto) {
+    const platform = this.req.data.platform;
+    const { phone, ability } = this.req.user;
+
+    if (!ability.can('READ', 'PickupRequest')) {
+      const log = 'not authorized to perform this action';
+      this.logger.error(`[${platform}] ${phone} ${log}`);
+      throw new BadRequestException(`You are ${log}`);
+    }
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(query.sort);
+
+    let whereClause = {};
+
+    // Pickup Status Filter
+    if (query.pickupStatusId) {
+      const pickupStatus = await this.pickupStatusModel.findOne({
+        _id: new Types.ObjectId(query.pickupStatusId),
+      });
+      if (!pickupStatus) {
+        const log = `[${platform}] ${phone} pickupStatusId=${query.pickupStatusId} doesn't exists`;
+        this.logger.error(log);
+        throw new NotFoundException('Invalid pickupStatusId');
+      }
+
+      whereClause = { ...whereClause, pickupStatusId: pickupStatus._id };
+    }
+
+    // Pickup Reference Filter
+    if (query.reference)
+      whereClause = { ...whereClause, reference: query.reference };
+
+    const pickups = await this.pickupRequestModel
+      .find(whereClause)
+      .populate({ model: User.name, path: 'customerId' })
+      .populate({
+        model: Office.name,
+        path: 'officeId',
+        populate: { model: OfficeType.name, path: 'officeTypeId' },
+      })
+      .populate({ path: 'pickupStatusId', model: PickupStatus.name })
+      .sort(sort)
+      .skip(skip)
+      .limit(size);
+
+    const totalPickups =
+      await this.pickupRequestModel.countDocuments(whereClause);
+    const nextPage = page < totalPickups ? page + 1 : null;
+
+    this.logger.log(
+      `[${platform}] ${phone} has successfully retrieve all pickups`,
+    );
+    return { total: totalPickups, data: pickups, nextPage };
   }
 }

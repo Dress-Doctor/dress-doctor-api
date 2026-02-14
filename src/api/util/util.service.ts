@@ -49,6 +49,11 @@ export class UtilService {
 
     const totalPages = Math.ceil(totalUserTypes / size);
     const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(
+      `[${platform}] ${phone} has successfully retrieve all user types`,
+    );
+
     return { total: totalUserTypes, data: userTypes, nextPage };
   }
 
@@ -78,6 +83,10 @@ export class UtilService {
     const totalAdminUsers = await this.userModel.countDocuments();
     const totalPages = Math.ceil(totalAdminUsers / size);
     const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(
+      `[${platform}] ${phone} has successfully retrieve all admin users`,
+    );
     return { total: totalAdminUsers, data: adminUsers, nextPage };
   }
 }

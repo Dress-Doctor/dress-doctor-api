@@ -1,33 +1,43 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Logger,
   Post,
+  Query,
   Req,
 } from '@nestjs/common';
 import {
+  ApiBearerAuth,
   ApiBody,
   ApiCreatedResponse,
   ApiHeader,
   ApiOperation,
+  ApiQuery,
   ApiResponse,
   ApiSecurity,
 } from '@nestjs/swagger';
-import type { AppRequest, AppRequestWithUser } from 'src/dto/request-data.dto';
+import {
+  PaginationDto,
+  type AppRequest,
+  type AppRequestWithUser,
+} from 'src/dto/request-data.dto';
 import { Public } from 'src/helper/decorator/public.decorator';
 import { AssignPickupDto } from './dto/assign-pickup.dto';
 import { CreatePickupDto } from './dto/create-pickup.dto';
 import { SchedulePickupEntity } from './entities/pickup.entity';
 import { PickupService } from './pickup.service';
 import { xApiKey, xApiSecret } from 'src/dto/swagger.dto';
+import { FindPickupDto } from './dto/find-pickup.dto';
 
 @ApiHeader(xApiKey)
 @Controller('pickup')
 @ApiHeader(xApiSecret)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
+@ApiBearerAuth('access-token')
 export class PickupController {
   private readonly logger = new Logger(PickupController.name);
   constructor(private readonly pickupService: PickupService) {}
@@ -61,5 +71,20 @@ export class PickupController {
     const log = `[${platform}] ${phone} is trying to assign pickup to an agent with ${JSON.stringify(data)}`;
     this.logger.log(log);
     return await this.pickupService.assignPickup(data);
+  }
+
+  @Get('get-all')
+  @HttpCode(HttpStatus.OK)
+  @ApiQuery({ type: PaginationDto })
+  @ApiResponse({ status: HttpStatus.OK })
+  @ApiOperation({ summary: 'Get all pickups' })
+  async findAll(@Query() query: FindPickupDto, @Req() req: AppRequestWithUser) {
+    const platform = req.data.platform;
+    const phone = req.user.phone;
+
+    const log = `[${platform}] ${phone} is getting all user type with query ${JSON.stringify(query)}`;
+    this.logger.log(log);
+
+    return await this.pickupService.findAllPickup(query);
   }
 }

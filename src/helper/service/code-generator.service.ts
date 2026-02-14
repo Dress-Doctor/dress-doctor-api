@@ -4,6 +4,7 @@ import * as bcrypt from 'bcrypt';
 import { Chance } from 'chance';
 import * as crypto from 'crypto';
 import { Model } from 'mongoose';
+import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { Customer } from 'src/schema/user/customer.schema';
 
 @Injectable()
@@ -12,7 +13,22 @@ export class CodeGeneratorService {
 
   constructor(
     @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
+
+    @InjectModel(PickupRequest.name)
+    private readonly pickupRequestModel: Model<PickupRequest>,
   ) {}
+
+  private generateCode(len: number, prefix?: string) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    // removed confusing chars: 0,O,1,I
+
+    let code = '';
+    for (let i = 0; i < len; i++) {
+      const randomIndex = Math.floor(Math.random() * chars.length);
+      code += chars[randomIndex];
+    }
+    return prefix ? `${prefix}-${code}` : code;
+  }
 
   signOfficeLink(slug: string): string {
     return crypto
@@ -26,21 +42,22 @@ export class CodeGeneratorService {
     let code: string;
     let exists: boolean;
 
-    function generateCode(): string {
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-      const length = 8;
+    do {
+      code = this.generateCode(6);
+      const doc = await this.customerModel.exists({ referralCode: code });
+      exists = doc ? true : false;
+    } while (exists);
 
-      let code = '';
-      for (let i = 0; i < length; i++) {
-        const randomIndex = Math.floor(Math.random() * chars.length);
-        code += chars[randomIndex];
-      }
-      return code;
-    }
+    return code;
+  }
+
+  async generatePickupReference() {
+    let code: string;
+    let exists: boolean;
 
     do {
-      code = generateCode();
-      const doc = await this.customerModel.exists({ referralCode: code });
+      code = this.generateCode(6, 'PU');
+      const doc = await this.pickupRequestModel.exists({ reference: code });
       exists = doc ? true : false;
     } while (exists);
 

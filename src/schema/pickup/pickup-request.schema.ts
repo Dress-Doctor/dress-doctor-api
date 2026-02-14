@@ -15,6 +15,9 @@ export class PickupRequest extends Document<Types.ObjectId> {
   @Prop({ required: true, index: true, type: Types.ObjectId, ref: User.name })
   customerId: Types.ObjectId;
 
+  @Prop({ required: true, index: true, unique: true })
+  reference: string;
+
   @Prop({ required: true })
   pickupAddress: string;
 
