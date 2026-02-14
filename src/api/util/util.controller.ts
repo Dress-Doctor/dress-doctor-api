@@ -68,4 +68,21 @@ export class UtilController {
 
     return await this.utilService.findAllAdminUsers(query);
   }
+
+  @Get('get-all-pickup-statuses')
+  @HttpCode(HttpStatus.OK)
+  @ApiResponse({ status: HttpStatus.OK })
+  @ApiOperation({ summary: 'Get all pickup statuses' })
+  async findAllPickupStatuses(
+    @Query() query: PaginationDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const platform = req.data.platform;
+    const phone = req.user.phone;
+
+    const log = `[${platform}] ${phone} is getting all admin users with query ${JSON.stringify(query)}`;
+    this.logger.log(log);
+
+    return await this.utilService.findAllPickupStatuses(query);
+  }
 }

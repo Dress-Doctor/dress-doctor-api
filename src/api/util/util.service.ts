@@ -11,7 +11,9 @@ import {
   type AppRequestWithUser,
   PaginationDto,
 } from 'src/dto/request-data.dto';
+import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
+import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { UserTypeEum } from 'src/schema/user/user.dto';
 import { User } from 'src/schema/user/user.schema';
@@ -25,17 +27,27 @@ export class UtilService {
     @Inject(REQUEST) private readonly req: AppRequestWithUser,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
+
+    @InjectModel(PickupStatus.name)
+    private readonly pickupStatusModel: Model<PickupStatus>,
   ) {}
 
-  async findAllUserType({ page, size, ...query }: PaginationDto) {
+  private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
     const platform = this.req.data.platform;
     const { phone, ability } = this.req.user;
 
-    if (!ability.can('READ', 'UserType')) {
+    if (!ability.can(action, subject)) {
       const log = 'not authorized to perform this action';
-      this.logger.error(`[${platform}] ${phone} ${log}`);
+      this.logger.error(`[${platform}] ${phone} ${log} is`);
       throw new BadRequestException(`You are ${log}`);
     }
+  }
+
+  async findAllUserType({ page, size, ...query }: PaginationDto) {
+    this.can('READ', 'UserType');
+
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
 
     const skip = (page - 1) * size;
     const sort = this.appUtilService.parseSortParam(query.sort);
@@ -58,14 +70,10 @@ export class UtilService {
   }
 
   async findAllAdminUsers({ page, size, ...query }: PaginationDto) {
-    const platform = this.req.data.platform;
-    const { phone, ability } = this.req.user;
+    this.can('READ', 'User');
 
-    if (!ability.can('READ', 'User')) {
-      const log = 'not authorized to perform this action';
-      this.logger.error(`[${platform}] ${phone} ${log}`);
-      throw new BadRequestException(`You are ${log}`);
-    }
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
 
     const adminUserType = await this.userTypeModel.findOne({
       userTypeName: UserTypeEum.ADMIN,
@@ -88,5 +96,29 @@ export class UtilService {
       `[${platform}] ${phone} has successfully retrieve all admin users`,
     );
     return { total: totalAdminUsers, data: adminUsers, nextPage };
+  }
+
+  async findAllPickupStatuses({ page, size, ...query }: PaginationDto) {
+    this.can('READ', 'PickupRequest');
+
+    const platform = this.req.data.platform;
+    const phone = this.req.user.phone;
+    const logBase = `[${platform}] ${phone}`;
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(query.sort);
+
+    const totalPickupStatus = await this.pickupStatusModel.countDocuments();
+    const pickupStatuses = await this.pickupStatusModel
+      .find()
+      .sort(sort)
+      .skip(skip)
+      .limit(size);
+
+    const totalPages = Math.ceil(totalPickupStatus / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(`${logBase} has successfully retrieve all pickup statuses`);
+    return { total: totalPickupStatus, data: pickupStatuses, nextPage };
   }
 }
