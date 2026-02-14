@@ -42,7 +42,10 @@ export class AuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request & JWTUserDto>();
     const token = this.extractTokenFromHeader(request);
-    if (!token) throw new UnauthorizedException(constant.UNAUTHORIZED);
+    if (!token) {
+      this.logger.error('No JWT token');
+      throw new UnauthorizedException(constant.UNAUTHORIZED);
+    }
 
     try {
       const options = { secret: process.env.JWT_SECRET };

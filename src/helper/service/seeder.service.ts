@@ -30,7 +30,7 @@ import { ApiClient } from 'src/schema/admin/api-client.schema';
 
 @Injectable()
 export class SeederService {
-  private readonly phone = '670678660';
+  private readonly phone = '237670678660';
   private readonly logger = new Logger(SeederService.name);
 
   constructor(
@@ -200,7 +200,10 @@ export class SeederService {
 
   private async seedAdmin() {
     const phone = this.phone;
-    const adminUserExists = await this.userModel.exists({ phone });
+    const email = 'fedjio.raymond@dressdoctor.io';
+    const adminUserExists = await this.userModel.exists({
+      $or: [{ phone }, { email }],
+    });
     if (adminUserExists) return;
 
     const role = await this.roleModel.findOne({
@@ -232,13 +235,13 @@ export class SeederService {
 
     const adminUser = await this.userModel.create({
       phone,
+      email,
       lastName: 'Raymond',
       firstName: 'Fedjio',
       gender: GenderEnum.MALE,
-      whatsappPhone: '670678660',
       userTypeId: userType?._id,
       passwordHash: hashedPassword,
-      email: 'fedjio.raymond@dressdoctor.io',
+      whatsappPhone: '237670678660',
       preferredLanguage: PreferredLanguageEnum.ENGLISH,
     });
 

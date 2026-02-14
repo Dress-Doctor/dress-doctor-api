@@ -4,17 +4,21 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  Query,
   Req,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiCreatedResponse,
   ApiHeader,
   ApiOperation,
+  ApiQuery,
   ApiResponse,
   ApiSecurity,
 } from '@nestjs/swagger';
-import type { AppRequestWithUser } from 'src/dto/request-data.dto';
+import {
+  type AppRequestWithUser,
+  PaginationDto,
+} from 'src/dto/request-data.dto';
 import { xApiKey, xApiSecret } from 'src/dto/swagger.dto';
 import { FindAllUserTypeEntity } from './entities/user-type.entity';
 import { UtilService } from './util.service';
@@ -30,18 +34,38 @@ export class UtilController {
 
   constructor(private readonly utilService: UtilService) {}
 
-  @Get('get-user-types')
+  @Get('get-all-user-types')
   @HttpCode(HttpStatus.OK)
-  @ApiResponse({ status: HttpStatus.OK })
-  @ApiCreatedResponse({ type: FindAllUserTypeEntity })
-  @ApiOperation({ summary: 'Used to get user types' })
-  async findAllUserType(@Req() req: AppRequestWithUser) {
+  @ApiQuery({ type: PaginationDto })
+  @ApiOperation({ summary: 'Get all user types' })
+  @ApiResponse({ status: HttpStatus.OK, type: FindAllUserTypeEntity })
+  async findAllUserType(
+    @Query() query: PaginationDto,
+    @Req() req: AppRequestWithUser,
+  ) {
     const platform = req.data.platform;
     const phone = req.user.phone;
 
-    const log = `[${platform}] ${phone} is getting all user type`;
+    const log = `[${platform}] ${phone} is getting all user type with query ${JSON.stringify(query)}`;
     this.logger.log(log);
 
-    return await this.utilService.findAllUserType();
+    return await this.utilService.findAllUserType(query);
+  }
+
+  @Get('get-all-admin-users')
+  @HttpCode(HttpStatus.OK)
+  @ApiResponse({ status: HttpStatus.OK })
+  @ApiOperation({ summary: 'Get all admin users' })
+  async findAllAdminUsers(
+    @Query() query: PaginationDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const platform = req.data.platform;
+    const phone = req.user.phone;
+
+    const log = `[${platform}] ${phone} is getting all admin users with query ${JSON.stringify(query)}`;
+    this.logger.log(log);
+
+    return await this.utilService.findAllAdminUsers(query);
   }
 }

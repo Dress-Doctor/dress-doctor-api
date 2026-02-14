@@ -15,13 +15,13 @@ export const xApiSecret: ApiHeaderOptions = {
 export class Base {
   @ApiProperty({
     required: true,
-    example: 'false',
+    example: true,
     description: 'Describe is the request was successful or not',
   })
   success: boolean;
 
   @ApiProperty({
-    example: 400,
+    example: 200,
     required: true,
     description: 'The HTTP status code',
   })
@@ -36,6 +36,20 @@ export class Base {
 }
 
 export class ApiErrorResponse extends Base {
+  @ApiProperty({
+    required: true,
+    example: false,
+    description: 'Describe is the request was successful or not',
+  })
+  declare success: boolean;
+
+  @ApiProperty({
+    example: 400,
+    required: true,
+    description: 'The HTTP status code',
+  })
+  declare statusCode: number;
+
   @ApiProperty({
     required: true,
     example: 'Bad Request',
