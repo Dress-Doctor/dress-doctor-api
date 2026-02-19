@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { OfficeType } from 'src/schema/office/office-type.schema';
 import { Office } from 'src/schema/office/office.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
@@ -27,6 +27,22 @@ import {
 import { RolePermission } from 'src/schema/admin/role-permission.schema';
 import { UserRole } from 'src/schema/admin/user-role.schema';
 import { ApiClient } from 'src/schema/admin/api-client.schema';
+import { google } from 'googleapis';
+import { GoogleAuth } from 'google-auth-library';
+import { CatalogDto } from 'src/schema/catalog/catalog.dto';
+import { Category } from 'src/schema/catalog/category.schema';
+import { Currency } from 'src/schema/catalog/currency.schema';
+import { Item } from 'src/schema/catalog/item.schema';
+import { ServiceType } from 'src/schema/catalog/service-type.schema';
+import { Service } from 'src/schema/catalog/service.schema';
+import { SubCategory } from 'src/schema/catalog/sub-category.schema';
+import currencyData from 'src/static/currency.data';
+import categoryData from 'src/static/category.data';
+import subCategoryData from 'src/static/sub-category.data';
+import serviceData from 'src/static/service.data';
+import serviceTypeData from 'src/static/service-type.data';
+import { ItemCategory } from 'src/schema/catalog/item-category.schema';
+import { ItemSubCategory } from 'src/schema/catalog/item-sub-category.schema';
 
 @Injectable()
 export class SeederService {
@@ -34,28 +50,60 @@ export class SeederService {
   private readonly logger = new Logger(SeederService.name);
 
   constructor(
+    private readonly codeService: CodeGeneratorService,
+
     @InjectModel(UserRole.name) private readonly userRoleModel: Model<UserRole>,
+
     @InjectModel(ApiClient.name)
     private readonly apiClientModel: Model<ApiClient>,
+
     @InjectModel(User.name) private readonly userModel: Model<User>,
+
     @InjectModel(RolePermission.name)
     private readonly rolePermissionModel: Model<RolePermission>,
+
     @InjectModel(Permission.name)
     private readonly permissionModel: Model<Permission>,
+
     @InjectModel(Role.name) private readonly roleModel: Model<Role>,
-    private readonly codeService: CodeGeneratorService,
+
     @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
+
     @InjectModel(OfficeType.name)
     private readonly officeTypeModel: Model<OfficeType>,
+
     @InjectModel(PickupStatus.name)
     private readonly pickupStatusModel: Model<PickupStatus>,
+
     @InjectModel(OrderStatus.name)
     private readonly orderStatusModel: Model<OrderStatus>,
+
     @InjectModel(PaymentMethod.name)
     private readonly paymentMethodModel: Model<PaymentMethod>,
     @InjectModel(PaymentStatus.name)
     private readonly paymentStatusModel: Model<PaymentStatus>,
+
     @InjectModel(Office.name) private readonly officeModel: Model<Office>,
+
+    @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
+
+    @InjectModel(Currency.name) private readonly currencyModel: Model<Currency>,
+
+    @InjectModel(Item.name) private readonly itemModel: Model<Item>,
+
+    @InjectModel(ServiceType.name)
+    private readonly serviceTypeModel: Model<ServiceType>,
+
+    @InjectModel(Service.name) private readonly serviceModel: Model<Service>,
+
+    @InjectModel(SubCategory.name)
+    private readonly subCategoryModel: Model<SubCategory>,
+
+    @InjectModel(ItemCategory.name)
+    private readonly itemCategoryModel: Model<ItemCategory>,
+
+    @InjectModel(ItemSubCategory.name)
+    private readonly itemSubCategoryModel: Model<ItemSubCategory>,
   ) {}
 
   private async seedUserType() {
@@ -282,6 +330,234 @@ export class SeederService {
     );
   }
 
+  private async seedCurrency() {
+    const operations = currencyData.map((currency) => ({
+      updateOne: {
+        filter: { isoCode: currency.isoCode },
+        update: { $set: currency },
+        upsert: true,
+      },
+    }));
+
+    await this.currencyModel.bulkWrite(operations);
+    this.logger.log(`🌱 Done seeding ${currencyData.length} data for Currency`);
+  }
+
+  private async seedCategory() {
+    const operations = categoryData.map((category) => ({
+      updateOne: {
+        filter: { categoryName: category.categoryName },
+        update: { $set: category },
+        upsert: true,
+      },
+    }));
+
+    await this.categoryModel.bulkWrite(operations);
+    this.logger.log(`🌱 Done seeding ${categoryData.length} data for Category`);
+  }
+
+  private async seedSubCategory() {
+    const operations = subCategoryData.map((subCategory) => ({
+      updateOne: {
+        filter: { subCategoryName: subCategory.subCategoryName },
+        update: { $set: subCategory },
+        upsert: true,
+      },
+    }));
+
+    await this.subCategoryModel.bulkWrite(operations);
+    this.logger.log(
+      `🌱 Done seeding ${subCategoryData.length} data for SubCategory`,
+    );
+  }
+
+  private async seedService() {
+    const operations = serviceData.map((service) => ({
+      updateOne: {
+        filter: { serviceName: service.serviceName },
+        update: { $set: service },
+        upsert: true,
+      },
+    }));
+
+    await this.serviceModel.bulkWrite(operations);
+    this.logger.log(`🌱 Done seeding ${serviceData.length} data for Service`);
+  }
+
+  private async seedServiceType() {
+    const operations = serviceTypeData.map((serviceType) => ({
+      updateOne: {
+        filter: { serviceTypeName: serviceType.serviceTypeName },
+        update: { $set: serviceType },
+        upsert: true,
+      },
+    }));
+
+    await this.serviceTypeModel.bulkWrite(operations);
+    this.logger.log(
+      `🌱 Done seeding ${serviceTypeData.length} data for ServiceType`,
+    );
+  }
+
+  private async seedItems() {
+    try {
+      const auth = new GoogleAuth({
+        scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+      });
+      const sheets = google.sheets({ version: 'v4', auth });
+      const spreadsheetId = '1up-JE2aP-kWm7fk7C6t24QlDLP0CwVftsepfj9D91dg';
+
+      const res = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: 'Douala Laundry Price List',
+      });
+      const rows = res.data.values ?? [];
+
+      if (rows.length === 0) {
+        this.logger.warn('No inventory data found in sheet');
+        return;
+      }
+
+      const headers = rows[0]; // first row
+      const dataRows = rows.slice(1);
+      const items = dataRows.map((row) => {
+        const obj: CatalogDto = {
+          item: '',
+          type: '',
+          service: '',
+          category: '',
+          subcategory: '',
+          'price low (xaf)': '',
+          'price high (xaf)': '',
+        };
+
+        headers.forEach((header, index) => {
+          obj[(header as string).toLowerCase()] = row[index] as string;
+        });
+        return obj;
+      });
+
+      const adminUser = await this.userModel.findOne({ phone: this.phone });
+      const currency = await this.currencyModel.findOne({ isoCode: 'XAF' });
+
+      // Loop Through Data
+      const tempService = new Map<string, Types.ObjectId>();
+      const tempCategory = new Map<string, Types.ObjectId>();
+      const tempSubCategory = new Map<string, Types.ObjectId>();
+      const tempServiceType = new Map<string, Types.ObjectId>();
+
+      for (const item of items) {
+        // Category
+        let categoryId = tempCategory.get(item.category);
+        if (!categoryId) {
+          const category = await this.categoryModel.findOne({
+            categoryName: item.category,
+          });
+
+          if (!category) {
+            this.logger.warn(`Category=${item.category} not found`);
+            continue;
+          }
+
+          categoryId = category._id;
+          tempCategory.set(item.category, category._id);
+        }
+
+        // Sub Category
+        let subCategoryId = tempSubCategory.get(item.subcategory);
+        if (!subCategoryId) {
+          const subCategory = await this.subCategoryModel.findOne({
+            subCategoryName: item.subcategory,
+          });
+
+          if (!subCategory) {
+            this.logger.warn(`SubCategory=${item.subcategory} not found`);
+            continue;
+          }
+
+          subCategoryId = subCategory._id;
+          tempSubCategory.set(item.subcategory, subCategory._id);
+        }
+
+        // Service
+        let serviceId = tempService.get(item.service);
+        if (!serviceId) {
+          const service = await this.serviceModel.findOne({
+            serviceName: item.service,
+          });
+
+          if (!service) {
+            this.logger.warn(`Service=${item.service} not found`);
+            continue;
+          }
+
+          serviceId = service._id;
+          tempService.set(item.service, service._id);
+        }
+
+        // Service Type
+        let serviceTypeId = tempServiceType.get(item.type);
+        if (!serviceTypeId) {
+          const serviceType = await this.serviceTypeModel.findOne({
+            serviceTypeName: item.type,
+          });
+
+          if (!serviceType) {
+            this.logger.warn(`ServiceType=${item.type} not found`);
+            continue;
+          }
+
+          serviceTypeId = serviceType._id;
+          tempServiceType.set(item.type, serviceType._id);
+        }
+
+        const newItem = await this.itemModel.findOneAndUpdate(
+          { itemName: item.item },
+          {
+            serviceId,
+            serviceTypeId,
+            itemName: item.item,
+            currencyId: currency?._id,
+            priceLow: Number(item['price low (xaf)'].replaceAll(',', '')),
+            priceHigh: Number(item['price high (xaf)'].replaceAll(',', '')),
+          },
+          {
+            context: { changedBy: adminUser?._id },
+            upsert: true,
+            new: true,
+          } as never,
+        );
+
+        const itemCategoryExists = await this.itemCategoryModel.exists({
+          categoryId,
+          itemId: (newItem as unknown as Item)._id,
+        });
+        if (!itemCategoryExists) {
+          await this.itemCategoryModel.create({
+            categoryId,
+            itemId: (newItem as unknown as Item)._id,
+          });
+        }
+
+        const itemSubCategoryExists = await this.itemSubCategoryModel.exists({
+          subCategoryId,
+          itemId: (newItem as unknown as Item)._id,
+        });
+        if (!itemSubCategoryExists) {
+          await this.itemSubCategoryModel.create({
+            subCategoryId,
+            itemId: (newItem as unknown as Item)._id,
+          });
+        }
+      }
+
+      this.logger.log(`🌱 Done seeding ${items.length} data for Item`);
+    } catch (error) {
+      this.logger.error(`An error occur when trying to seed inventory`);
+      this.logger.error(error);
+    }
+  }
+
   async run(): Promise<void> {
     await this.seedUserType();
     await this.seedOfficeType();
@@ -290,9 +566,20 @@ export class SeederService {
     await this.seedPaymentMethod();
     await this.seedPaymentStatus();
     await this.seedOffice();
+
+    // Admin
     await this.seedRoles();
     await this.seedPermission();
     await this.seedAdmin();
     await this.seedSystemApiClient();
+
+    // Catalogs
+    await this.seedCurrency();
+    await this.seedCategory();
+    await this.seedSubCategory();
+    await this.seedService();
+    await this.seedServiceType();
+
+    if (process.env.SEED_ITEMS === 'YES') await this.seedItems();
   }
 }

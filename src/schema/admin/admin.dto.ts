@@ -75,6 +75,14 @@ export enum SubjectEnum {
   // promo
   Promo = 'Promo',
   PromoCodeUsage = 'PromoCodeUsage',
+
+  // Catalog
+  Item = 'Item',
+  Service = 'Service',
+  Category = 'Category',
+  Currency = 'Currency',
+  SubCategory = 'SubCategory',
+  ServiceType = 'ServiceType',
 }
 
 export enum RoleEnum {
