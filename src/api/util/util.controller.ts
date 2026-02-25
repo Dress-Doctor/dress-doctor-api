@@ -22,6 +22,7 @@ import {
 import { xApiKey, xApiSecret } from 'src/dto/swagger.dto';
 import { FindAllUserTypeEntity } from './entities/user-type.entity';
 import { FindAllCategoryEntity } from './entities/category.entity';
+import { FindAllSubCategoryEntity } from './entities/sub-category.entity';
 import { UtilService } from './util.service';
 
 @Controller('util')
@@ -86,5 +87,23 @@ export class UtilController {
     this.logger.log(log);
 
     return await this.utilService.findAllCategories(query);
+  }
+
+  @Get('get-all-sub-categories')
+  @HttpCode(HttpStatus.OK)
+  @ApiQuery({ type: PaginationDto })
+  @ApiOperation({ summary: 'Get all sub categories' })
+  @ApiResponse({ status: HttpStatus.OK, type: FindAllSubCategoryEntity })
+  async findAllSubCategories(
+    @Query() query: PaginationDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const platform = req.data.platform;
+    const phone = req.user.phone;
+
+    const log = `[${platform}] ${phone} is getting all sub categories with query ${JSON.stringify(query)}`;
+    this.logger.log(log);
+
+    return await this.utilService.findAllSubCategories(query);
   }
 }
