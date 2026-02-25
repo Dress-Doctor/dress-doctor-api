@@ -73,7 +73,7 @@ export class PickupController {
     return await this.pickupService.assignPickup(data);
   }
 
-  @Get('get-all')
+  @Get()
   @HttpCode(HttpStatus.OK)
   @ApiQuery({ type: PaginationDto })
   @ApiResponse({ status: HttpStatus.OK })

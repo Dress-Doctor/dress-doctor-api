@@ -14,18 +14,33 @@ import { UserType } from 'src/schema/user/user-type.schema';
 import { UserTypeEum } from 'src/schema/user/user.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { User } from 'src/schema/user/user.schema';
+import { FindAllUserDto } from './dto/find-all-user.dto';
+import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
+import { AppUtilService } from 'src/helper/service/app-util.service';
 
 @Injectable()
 export class UserService {
   private readonly logger = new Logger(UserService.name);
 
   constructor(
+    private readonly appUtilService: AppUtilService,
     private readonly codeService: CodeGeneratorService,
     @Inject(REQUEST) private readonly req: AppRequestWithUser,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
     @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
   ) {}
+
+  private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
+    const platform = this.req.data.platform;
+    const { phone, ability } = this.req.user;
+
+    if (!ability.can(action, subject)) {
+      const log = 'not authorized to perform this action';
+      this.logger.error(`[${platform}] ${phone} ${log} is`);
+      throw new BadRequestException(`You are ${log}`);
+    }
+  }
 
   async newUser({ password, ...data }: CreateUserDto) {
     const platform = this.req.data.platform;
@@ -97,5 +112,35 @@ export class UserService {
     );
 
     return 'User successfully created';
+  }
+
+  async findAll({ page, size, ...query }: FindAllUserDto) {
+    this.can('READ', 'User');
+
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+
+    let whereClause = {};
+    if (query.userTypeId)
+      whereClause = { userTypeId: new Types.ObjectId(query.userTypeId) };
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(query.sort);
+
+    const users = await this.userModel
+      .find(whereClause)
+      .populate({ model: UserType.name, path: 'userTypeId' })
+      .sort(sort)
+      .skip(skip)
+      .limit(size);
+
+    const totalUsers = await this.userModel.countDocuments(whereClause);
+    const totalPages = Math.ceil(totalUsers / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(
+      `[${platform}] ${phone} has successfully retrieved all users`,
+    );
+    return { total: totalUsers, data: users, nextPage };
   }
 }

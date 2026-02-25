@@ -15,7 +15,6 @@ import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
-import { UserTypeEum } from 'src/schema/user/user.dto';
 import { User } from 'src/schema/user/user.schema';
 
 @Injectable()
@@ -67,35 +66,6 @@ export class UtilService {
     );
 
     return { total: totalUserTypes, data: userTypes, nextPage };
-  }
-
-  async findAllAdminUsers({ page, size, ...query }: PaginationDto) {
-    this.can('READ', 'User');
-
-    const platform = this.req.data.platform;
-    const { phone } = this.req.user;
-
-    const adminUserType = await this.userTypeModel.findOne({
-      userTypeName: UserTypeEum.ADMIN,
-    });
-    const skip = (page - 1) * size;
-    const sort = this.appUtilService.parseSortParam(query.sort);
-
-    const adminUsers = await this.userModel
-      .find({ userTypeId: adminUserType?._id })
-      .populate({ model: UserType.name, path: 'userTypeId' })
-      .sort(sort)
-      .skip(skip)
-      .limit(size);
-
-    const totalAdminUsers = await this.userModel.countDocuments();
-    const totalPages = Math.ceil(totalAdminUsers / size);
-    const nextPage = page < totalPages ? page + 1 : null;
-
-    this.logger.log(
-      `[${platform}] ${phone} has successfully retrieve all admin users`,
-    );
-    return { total: totalAdminUsers, data: adminUsers, nextPage };
   }
 
   async findAllPickupStatuses({ page, size, ...query }: PaginationDto) {

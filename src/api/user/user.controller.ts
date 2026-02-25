@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Logger,
   Post,
+  Query,
   Req,
 } from '@nestjs/common';
 import {
@@ -16,15 +18,22 @@ import {
   ApiSecurity,
 } from '@nestjs/swagger';
 import type { AppRequestWithUser } from 'src/dto/request-data.dto';
-import { ApiSuccessResponse, xApiKey, xApiSecret } from 'src/dto/swagger.dto';
+import {
+  ApiSuccessResponse,
+  ApiSuccessResponseWithPagination,
+  xApiKey,
+  xApiSecret,
+} from 'src/dto/swagger.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UserService } from './user.service';
+import { FindAllUserDto } from './dto/find-all-user.dto';
 
 @Controller('user')
 @ApiHeader(xApiKey)
 @ApiHeader(xApiSecret)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
+@ApiBearerAuth('access-token')
 export class UserController {
   private readonly logger = new Logger(UserController.name);
   constructor(private readonly userService: UserService) {}
@@ -43,5 +52,26 @@ export class UserController {
     this.logger.log(log);
 
     return await this.userService.newUser(data);
+  }
+
+  @Get()
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Get all users' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    type: ApiSuccessResponseWithPagination,
+  })
+  async getUserDetails(
+    @Query() query: FindAllUserDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const platform = req.data.platform;
+    const phone = req.user.phone;
+
+    const log = `[${platform}] ${phone} is trying to get all users with query ${JSON.stringify(query)}`;
+    this.logger.log(log);
+
+    return await this.userService.findAll(query);
   }
 }
