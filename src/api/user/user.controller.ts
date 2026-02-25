@@ -14,6 +14,7 @@ import {
   ApiBody,
   ApiHeader,
   ApiOperation,
+  ApiQuery,
   ApiResponse,
   ApiSecurity,
 } from '@nestjs/swagger';
@@ -57,6 +58,7 @@ export class UserController {
   @Get()
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth('access-token')
+  @ApiQuery({ type: FindAllUserDto })
   @ApiOperation({ summary: 'Get all users' })
   @ApiResponse({
     status: HttpStatus.OK,

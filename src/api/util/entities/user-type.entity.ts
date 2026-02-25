@@ -2,22 +2,24 @@ import { ApiProperty } from '@nestjs/swagger';
 import { ApiSuccessResponse } from 'src/dto/swagger.dto';
 
 export class UserTypeEntity {
-  @ApiProperty()
+  @ApiProperty({ example: '64b8c9f1e4b0a2d3c4f5g6h' })
   _id: string;
 
   @ApiProperty({ example: 'CUSTOMER' })
   userTypeName: string;
 
-  @ApiProperty()
+  @ApiProperty({
+    example: 'End user who places laundry pickup and delivery orders.',
+  })
   description: string;
 
-  @ApiProperty()
+  @ApiProperty({ example: true })
   isActive: boolean;
 
-  @ApiProperty()
+  @ApiProperty({ example: '2023-07-21T12:00:00Z' })
   createdAt: string;
 
-  @ApiProperty()
+  @ApiProperty({ example: '2023-07-21T12:00:00Z' })
   updatedAt: string;
 }
 

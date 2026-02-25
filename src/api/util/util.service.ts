@@ -13,6 +13,7 @@ import {
 } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
+import { Category } from 'src/schema/catalog/category.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { User } from 'src/schema/user/user.schema';
@@ -26,6 +27,7 @@ export class UtilService {
     @Inject(REQUEST) private readonly req: AppRequestWithUser,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
+    @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
 
     @InjectModel(PickupStatus.name)
     private readonly pickupStatusModel: Model<PickupStatus>,
@@ -90,5 +92,29 @@ export class UtilService {
 
     this.logger.log(`${logBase} has successfully retrieve all pickup statuses`);
     return { total: totalPickupStatus, data: pickupStatuses, nextPage };
+  }
+
+  async findAllCategories({ page, size, ...query }: PaginationDto) {
+    this.can('READ', 'Category');
+
+    const platform = this.req.data.platform;
+    const phone = this.req.user.phone;
+    const logBase = `[${platform}] ${phone}`;
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(query.sort);
+
+    const categories = await this.categoryModel
+      .find()
+      .sort(sort)
+      .skip(skip)
+      .limit(size);
+
+    const totalCategories = await this.categoryModel.countDocuments();
+    const totalPages = Math.ceil(totalCategories / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(`${logBase} has successfully retrieve all categories`);
+    return { total: totalCategories, data: categories, nextPage };
   }
 }
