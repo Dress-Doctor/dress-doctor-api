@@ -114,7 +114,7 @@ export class PickupService {
           officeId: new Types.ObjectId(officeId),
           pickupStatusId: pendingPickupStatus!._id,
           apiClientId: new Types.ObjectId(apiClientId),
-          reference: this.codeService.generatePickupReference(),
+          reference: await this.codeService.generatePickupReference(),
         },
         {
           context: { changedBy: foundedUser._id },

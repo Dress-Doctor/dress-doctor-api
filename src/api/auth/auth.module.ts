@@ -16,7 +16,7 @@ import { OtpService } from 'src/helper/service/otp.service';
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => ({
         global: true,
-        signOptions: { expiresIn: '5h' },
+        signOptions: { expiresIn: '5d' },
         secret: config.get<string>('JWT_SECRET'),
       }),
     }),

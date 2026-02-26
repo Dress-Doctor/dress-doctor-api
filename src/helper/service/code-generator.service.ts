@@ -4,6 +4,7 @@ import * as bcrypt from 'bcrypt';
 import { Chance } from 'chance';
 import * as crypto from 'crypto';
 import { Model } from 'mongoose';
+import { Order } from 'src/schema/order/order.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { Customer } from 'src/schema/user/customer.schema';
 
@@ -12,6 +13,7 @@ export class CodeGeneratorService {
   private readonly SALT_ROUND = process.env.SALT as string;
 
   constructor(
+    @InjectModel(Order.name) private readonly orderModel: Model<Order>,
     @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
 
     @InjectModel(PickupRequest.name)
@@ -58,6 +60,19 @@ export class CodeGeneratorService {
     do {
       code = this.generateCode(6, 'PU');
       const doc = await this.pickupRequestModel.exists({ reference: code });
+      exists = doc ? true : false;
+    } while (exists);
+
+    return code;
+  }
+
+  async generateOrderReference() {
+    let code: string;
+    let exists: boolean;
+
+    do {
+      code = this.generateCode(6, 'OR');
+      const doc = await this.orderModel.exists({ orderCode: code });
       exists = doc ? true : false;
     } while (exists);
 

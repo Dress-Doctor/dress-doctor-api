@@ -74,6 +74,10 @@ export default {
 
   orderStatus: [
     {
+      orderStatusName: 'PENDING',
+      description: 'Order has been created by the rider.',
+    },
+    {
       orderStatusName: 'RECEIVED',
       description: 'Order has been received at the factory after pickup.',
     },
@@ -88,6 +92,10 @@ export default {
     {
       orderStatusName: 'DELIVERED',
       description: 'Order has been delivered to the customer.',
+    },
+    {
+      orderStatusName: 'CANCELLED',
+      description: 'Order is cancelled by the client.',
     },
   ],
 

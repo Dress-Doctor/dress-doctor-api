@@ -580,6 +580,6 @@ export class SeederService {
     await this.seedService();
     await this.seedServiceType();
 
-    if (process.env.SEED_ITEMS === 'YES') await this.seedItems();
+    // if (process.env.SEED_ITEMS === 'YES') await this.seedItems();
   }
 }

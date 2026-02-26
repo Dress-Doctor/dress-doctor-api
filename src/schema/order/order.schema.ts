@@ -40,3 +40,4 @@ export class Order extends Document<Types.ObjectId> {
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);
+OrderSchema.index({ pickupRequestId: 1, customerId: 1 }, { unique: true });

@@ -21,6 +21,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ApiClientGuard } from './helper/guard/api-client.guard';
 import { UtilModule } from './api/util/util.module';
 import { UserModule } from './api/user/user.module';
+import { OrderModule } from './api/order/order.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { UserModule } from './api/user/user.module';
     ConfigModule.forRoot({ isGlobal: true }),
     UtilModule,
     UserModule,
+    OrderModule,
   ],
   providers: [
     SeederService,
