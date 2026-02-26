@@ -19,6 +19,7 @@ import { ServiceType } from 'src/schema/catalog/service-type.schema';
 import { Service } from 'src/schema/catalog/service.schema';
 import { SubCategory } from 'src/schema/catalog/sub-category.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
+import { Currency } from 'src/schema/catalog/currency.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { User } from 'src/schema/user/user.schema';
 
@@ -38,6 +39,9 @@ export class UtilService {
     @InjectModel(Item.name) private readonly itemModel: Model<Item>,
     @InjectModel(ServiceType.name)
     private readonly serviceTypeModel: Model<ServiceType>,
+
+    @InjectModel(Currency.name)
+    private readonly currencyModel: Model<Currency>,
 
     @InjectModel(PickupStatus.name)
     private readonly pickupStatusModel: Model<PickupStatus>,
@@ -102,6 +106,30 @@ export class UtilService {
 
     this.logger.log(`${logBase} has successfully retrieve all pickup statuses`);
     return { total: totalPickupStatus, data: pickupStatuses, nextPage };
+  }
+
+  async findAllCurrencies({ page, size, ...query }: PaginationDto) {
+    this.can('READ', 'Currency');
+
+    const platform = this.req.data.platform;
+    const phone = this.req.user.phone;
+    const logBase = `[${platform}] ${phone}`;
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(query.sort);
+
+    const totalCurrencies = await this.currencyModel.countDocuments();
+    const currencies = await this.currencyModel
+      .find()
+      .sort(sort)
+      .skip(skip)
+      .limit(size);
+
+    const totalPages = Math.ceil(totalCurrencies / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(`${logBase} has successfully retrieve all currencies`);
+    return { total: totalCurrencies, data: currencies, nextPage };
   }
 
   async findAllCategories({ page, size, ...query }: PaginationDto) {

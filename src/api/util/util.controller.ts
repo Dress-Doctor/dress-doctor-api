@@ -26,6 +26,7 @@ import { FindAllSubCategoryEntity } from './entities/sub-category.entity';
 import { FindAllServiceEntity } from './entities/service.entity';
 import { FindAllItemEntity } from './entities/item.entity';
 import { FindAllServiceTypeEntity } from './entities/service-type.entity';
+import { FindAllCurrencyEntity } from './entities/currency.entity';
 import { UtilService } from './util.service';
 
 @Controller('util')
@@ -162,5 +163,23 @@ export class UtilController {
     this.logger.log(log);
 
     return await this.utilService.findAllServiceTypes(query);
+  }
+
+  @Get('get-all-currencies')
+  @HttpCode(HttpStatus.OK)
+  @ApiQuery({ type: PaginationDto })
+  @ApiOperation({ summary: 'Get all currencies' })
+  @ApiResponse({ status: HttpStatus.OK, type: FindAllCurrencyEntity })
+  async findAllCurrencies(
+    @Query() query: PaginationDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const platform = req.data.platform;
+    const phone = req.user.phone;
+
+    const log = `[${platform}] ${phone} is getting all currencies with query ${JSON.stringify(query)}`;
+    this.logger.log(log);
+
+    return await this.utilService.findAllCurrencies(query);
   }
 }
