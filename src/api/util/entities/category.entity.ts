@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { ApiSuccessResponseWithPagination } from 'src/dto/swagger.dto';
 
-class CategoryEntity {
+export class CategoryEntity {
   @ApiProperty({ example: '64b8c9f1e4b0a2d3c4f5g6h' })
   _id: string;
 

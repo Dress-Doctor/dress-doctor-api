@@ -64,8 +64,6 @@ export enum SubjectEnum {
   Order = 'Order',
   OrderItem = 'OrderItem',
   OrderStatus = 'OrderStatus',
-  OrderItemType = 'OrderItemType',
-  OrderItemServiceType = 'OrderItemServiceType',
 
   // payment
   Payment = 'Payment',

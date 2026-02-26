@@ -48,6 +48,7 @@ async function bootstrap() {
     const logger = new Logger('Bootstrap');
     logger.log(`Service running on http://localhost:${PORT}`);
     logger.log(`API Documentation: http://localhost:${PORT}/api/docs`);
+    logger.log(`JSON Documentation: http://localhost:${PORT}/api/docs/json`);
   });
 }
 

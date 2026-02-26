@@ -5,11 +5,6 @@ import {
   OrderItemHistory,
   OrderItemHistorySchema,
 } from './order-item-history.schema';
-import {
-  OrderItemServiceType,
-  OrderItemServiceTypeSchema,
-} from './order-item-service-type.schema';
-import { OrderItemType, OrderItemTypeSchema } from './order-item-type.schema';
 import { OrderItem, OrderItemSchema } from './order-item.schema';
 import { OrderStatus, OrderStatusSchema } from './order-status.schema';
 import { Order, OrderSchema } from './order.schema';
@@ -22,9 +17,7 @@ import { Order, OrderSchema } from './order.schema';
       { name: OrderItem.name, schema: OrderItemSchema },
       { name: OrderStatus.name, schema: OrderStatusSchema },
       { name: OrderHistory.name, schema: OrderHistorySchema },
-      { name: OrderItemType.name, schema: OrderItemTypeSchema },
       { name: OrderItemHistory.name, schema: OrderItemHistorySchema },
-      { name: OrderItemServiceType.name, schema: OrderItemServiceTypeSchema },
     ]),
   ],
   exports: [MongooseModule],

@@ -14,6 +14,9 @@ import {
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { Category } from 'src/schema/catalog/category.schema';
+import { Item } from 'src/schema/catalog/item.schema';
+import { ServiceType } from 'src/schema/catalog/service-type.schema';
+import { Service } from 'src/schema/catalog/service.schema';
 import { SubCategory } from 'src/schema/catalog/sub-category.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
@@ -31,6 +34,10 @@ export class UtilService {
     @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
     @InjectModel(SubCategory.name)
     private readonly subCategoryModel: Model<SubCategory>,
+    @InjectModel(Service.name) private readonly serviceModel: Model<Service>,
+    @InjectModel(Item.name) private readonly itemModel: Model<Item>,
+    @InjectModel(ServiceType.name)
+    private readonly serviceTypeModel: Model<ServiceType>,
 
     @InjectModel(PickupStatus.name)
     private readonly pickupStatusModel: Model<PickupStatus>,
@@ -143,5 +150,147 @@ export class UtilService {
 
     this.logger.log(`${logBase} has successfully retrieve all sub categories`);
     return { total: totalSubCategories, data: subCategories, nextPage };
+  }
+
+  async findAllServices({ page, size, ...query }: PaginationDto) {
+    this.can('READ', 'Service');
+
+    const platform = this.req.data.platform;
+    const phone = this.req.user.phone;
+    const logBase = `[${platform}] ${phone}`;
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(query.sort);
+
+    const services = await this.serviceModel
+      .find()
+      .sort(sort)
+      .skip(skip)
+      .limit(size);
+
+    const totalServices = await this.serviceModel.countDocuments();
+    const totalPages = Math.ceil(totalServices / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(`${logBase} has successfully retrieve all services`);
+    return { total: totalServices, data: services, nextPage };
+  }
+
+  async findAllItems({ page, size, ...query }: PaginationDto) {
+    this.can('READ', 'Item');
+
+    const platform = this.req.data.platform;
+    const phone = this.req.user.phone;
+    const logBase = `[${platform}] ${phone}`;
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(query.sort);
+
+    const items = await this.itemModel.aggregate([
+      { $sort: sort },
+      { $skip: skip },
+      { $limit: size },
+      {
+        $lookup: {
+          as: 'service',
+          from: 'service',
+          foreignField: '_id',
+          localField: 'serviceId',
+        },
+      },
+
+      { $unwind: { path: '$service', preserveNullAndEmptyArrays: true } },
+
+      {
+        $lookup: {
+          as: 'currency',
+          from: 'currency',
+          foreignField: '_id',
+          localField: 'currencyId',
+        },
+      },
+      { $unwind: { path: '$currency', preserveNullAndEmptyArrays: true } },
+
+      // Service Type
+      {
+        $lookup: {
+          as: 'serviceType',
+          foreignField: '_id',
+          from: 'service_type',
+          localField: 'serviceTypeId',
+        },
+      },
+      { $unwind: { path: '$serviceType', preserveNullAndEmptyArrays: true } },
+
+      // Item → Categories
+      {
+        $lookup: {
+          localField: '_id',
+          from: 'item_category',
+          as: 'itemCategories',
+          foreignField: 'itemId',
+        },
+      },
+
+      {
+        $lookup: {
+          from: 'category',
+          as: 'categories',
+          foreignField: '_id',
+          localField: 'itemCategories.categoryId',
+        },
+      },
+      // Item → Subcategories
+      {
+        $lookup: {
+          localField: '_id',
+          foreignField: 'itemId',
+          as: 'itemSubCategories',
+          from: 'item_sub_category',
+        },
+      },
+
+      {
+        $lookup: {
+          foreignField: '_id',
+          as: 'subCategories',
+          from: 'sub_category',
+          localField: 'itemSubCategories.subCategoryId',
+        },
+      },
+
+      { $project: { itemCategories: 0, itemSubCategories: 0 } },
+    ]);
+
+    const totalItems = await this.itemModel.countDocuments();
+    const totalPages = Math.ceil(totalItems / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(`${logBase} has successfully retrieve all items`);
+    return { total: totalItems, data: items, nextPage };
+  }
+
+  async findAllServiceTypes({ page, size, ...query }: PaginationDto) {
+    this.can('READ', 'ServiceType');
+
+    const platform = this.req.data.platform;
+    const phone = this.req.user.phone;
+    const logBase = `[${platform}] ${phone}`;
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(query.sort);
+
+    const serviceTypes = await this.serviceTypeModel
+      .find()
+      .sort(sort)
+      .skip(skip)
+      .limit(size);
+
+    const totalServiceTypes = await this.serviceTypeModel.countDocuments();
+    const totalPages = Math.ceil(totalServiceTypes / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(`${logBase} has successfully retrieve all service types`);
+    return { total: totalServiceTypes, data: serviceTypes, nextPage };
   }
 }

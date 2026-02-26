@@ -23,6 +23,9 @@ import { xApiKey, xApiSecret } from 'src/dto/swagger.dto';
 import { FindAllUserTypeEntity } from './entities/user-type.entity';
 import { FindAllCategoryEntity } from './entities/category.entity';
 import { FindAllSubCategoryEntity } from './entities/sub-category.entity';
+import { FindAllServiceEntity } from './entities/service.entity';
+import { FindAllItemEntity } from './entities/item.entity';
+import { FindAllServiceTypeEntity } from './entities/service-type.entity';
 import { UtilService } from './util.service';
 
 @Controller('util')
@@ -105,5 +108,59 @@ export class UtilController {
     this.logger.log(log);
 
     return await this.utilService.findAllSubCategories(query);
+  }
+
+  @Get('get-all-services')
+  @HttpCode(HttpStatus.OK)
+  @ApiQuery({ type: PaginationDto })
+  @ApiOperation({ summary: 'Get all services' })
+  @ApiResponse({ status: HttpStatus.OK, type: FindAllServiceEntity })
+  async findAllServices(
+    @Query() query: PaginationDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const platform = req.data.platform;
+    const phone = req.user.phone;
+
+    const log = `[${platform}] ${phone} is getting all services with query ${JSON.stringify(query)}`;
+    this.logger.log(log);
+
+    return await this.utilService.findAllServices(query);
+  }
+
+  @Get('get-all-items')
+  @HttpCode(HttpStatus.OK)
+  @ApiQuery({ type: PaginationDto })
+  @ApiOperation({ summary: 'Get all items' })
+  @ApiResponse({ status: HttpStatus.OK, type: FindAllItemEntity })
+  async findAllItems(
+    @Query() query: PaginationDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const platform = req.data.platform;
+    const phone = req.user.phone;
+
+    const log = `[${platform}] ${phone} is getting all items with query ${JSON.stringify(query)}`;
+    this.logger.log(log);
+
+    return await this.utilService.findAllItems(query);
+  }
+
+  @Get('get-all-service-types')
+  @HttpCode(HttpStatus.OK)
+  @ApiQuery({ type: PaginationDto })
+  @ApiOperation({ summary: 'Get all service types' })
+  @ApiResponse({ status: HttpStatus.OK, type: FindAllServiceTypeEntity })
+  async findAllServiceTypes(
+    @Query() query: PaginationDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const platform = req.data.platform;
+    const phone = req.user.phone;
+
+    const log = `[${platform}] ${phone} is getting all service types with query ${JSON.stringify(query)}`;
+    this.logger.log(log);
+
+    return await this.utilService.findAllServiceTypes(query);
   }
 }
