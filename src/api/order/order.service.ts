@@ -12,11 +12,13 @@ import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { Currency } from 'src/schema/catalog/currency.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
+import { AppUtilService } from 'src/helper/service/app-util.service';
 import { OrderStatusEnum } from 'src/schema/order/order.dto';
 import { Order } from 'src/schema/order/order.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { User } from 'src/schema/user/user.schema';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { FindOrderDto } from './dto/find-order.dto';
 
 @Injectable()
 export class OrderService {
@@ -28,6 +30,7 @@ export class OrderService {
 
     @Inject(REQUEST) private readonly req: AppRequestWithUser,
     private readonly codeService: CodeGeneratorService,
+    private readonly appUtilService: AppUtilService,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Currency.name) private readonly currencyModel: Model<Currency>,
     @InjectModel(OrderStatus.name)
@@ -47,46 +50,6 @@ export class OrderService {
       throw new BadRequestException(`You are ${log}`);
     }
   }
-
-  // async create(createOrderDto: CreateOrderDto): Promise<Order> {
-  //   // allow mongoose defaults to kick in for optional numeric fields
-  //   const order = await this.orderModel.create(createOrderDto as any);
-  //   this.logger.log(`created order ${order._id}`);
-  //   return order;
-  // }
-
-  // async findAll(): Promise<Order[]> {
-  //   return this.orderModel.find().exec();
-  // }
-
-  // async findOne(id: string): Promise<Order> {
-  //   if (!Types.ObjectId.isValid(id)) {
-  //     throw new BadRequestException('Invalid order id');
-  //   }
-  //   const order = await this.orderModel.findById(id).exec();
-  //   if (!order) throw new NotFoundException('Order not found');
-  //   return order;
-  // }
-
-  // async update(id: string, updateOrderDto: UpdateOrderDto): Promise<Order> {
-  //   if (!Types.ObjectId.isValid(id)) {
-  //     throw new BadRequestException('Invalid order id');
-  //   }
-  //   const order = await this.orderModel
-  //     .findByIdAndUpdate(id, updateOrderDto as any, { new: true })
-  //     .exec();
-  //   if (!order) throw new NotFoundException('Order not found');
-  //   this.logger.log(`updated order ${id}`);
-  //   return order;
-  // }
-
-  // async remove(id: string): Promise<void> {
-  //   if (!Types.ObjectId.isValid(id)) {
-  //     throw new BadRequestException('Invalid order id');
-  //   }
-  //   await this.orderModel.findByIdAndDelete(id).exec();
-  //   this.logger.log(`deleted order ${id}`);
-  // }
 
   async createOrder(data: CreateOrderDto) {
     this.can('CREATE', 'Order');
@@ -169,35 +132,113 @@ export class OrderService {
     return { message: 'Order created successfully' };
   }
 
-  // async findByPickup(pickupRequestId: string): Promise<Order[]> {
-  //   if (!Types.ObjectId.isValid(pickupRequestId)) {
-  //     throw new BadRequestException('Invalid pickup request id');
-  //   }
-  //   return this.orderModel
-  //     .find({ pickupRequestId: new Types.ObjectId(pickupRequestId) })
-  //     .exec();
-  // }
+  async findAll({ page, size, ...query }: FindOrderDto) {
+    this.can('READ', 'Order');
 
-  // async updateForPickup(
-  //   pickupRequestId: string,
-  //   id: string,
-  //   updateOrderDto: UpdateOrderDto,
-  // ): Promise<Order> {
-  //   if (!Types.ObjectId.isValid(pickupRequestId)) {
-  //     throw new BadRequestException('Invalid pickup request id');
-  //   }
-  //   if (!Types.ObjectId.isValid(id)) {
-  //     throw new BadRequestException('Invalid order id');
-  //   }
-  //   const order = await this.orderModel
-  //     .findOneAndUpdate(
-  //       { _id: id, pickupRequestId: new Types.ObjectId(pickupRequestId) },
-  //       updateOrderDto as any,
-  //       { new: true },
-  //     )
-  //     .exec();
-  //   if (!order) throw new NotFoundException('Order not found');
-  //   this.logger.log(`updated order ${id} for pickup ${pickupRequestId}`);
-  //   return order;
-  // }
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+    const logBase = `[${platform}] ${phone}`;
+
+    const whereClause = {};
+    const customerId = query.customerId;
+    if (customerId) whereClause['customerId'] = new Types.ObjectId(customerId);
+
+    const pickupRequestId = query.pickupRequestId;
+    if (pickupRequestId)
+      whereClause['pickupRequestId'] = new Types.ObjectId(pickupRequestId);
+
+    const orderStatusId = query.orderStatusId;
+    if (orderStatusId)
+      whereClause['orderStatusId'] = new Types.ObjectId(orderStatusId);
+
+    const orderCode = query.orderCode;
+    if (orderCode) whereClause['orderCode'] = orderCode;
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(query.sort);
+    const total = await this.orderModel.countDocuments(whereClause);
+    const data = await this.orderModel.aggregate([
+      { $match: whereClause },
+      { $sort: sort },
+      { $skip: skip },
+      { $limit: size },
+
+      {
+        $lookup: {
+          from: 'order_item',
+          localField: '_id',
+          foreignField: 'orderId',
+          as: 'orderItems',
+          pipeline: [
+            {
+              $lookup: {
+                from: 'item',
+                localField: 'itemId',
+                foreignField: '_id',
+                as: 'item',
+                pipeline: [
+                  {
+                    $lookup: {
+                      from: 'service',
+                      localField: 'serviceId',
+                      foreignField: '_id',
+                      as: 'service',
+                    },
+                  },
+                  {
+                    $unwind: {
+                      path: '$service',
+                      preserveNullAndEmptyArrays: true,
+                    },
+                  },
+
+                  {
+                    $lookup: {
+                      from: 'service_type',
+                      localField: 'serviceTypeId',
+                      foreignField: '_id',
+                      as: 'serviceType',
+                    },
+                  },
+                  {
+                    $unwind: {
+                      path: '$serviceType',
+                      preserveNullAndEmptyArrays: true,
+                    },
+                  },
+
+                  {
+                    $lookup: {
+                      from: 'currency',
+                      localField: 'currencyId',
+                      foreignField: '_id',
+                      as: 'currency',
+                    },
+                  },
+                  {
+                    $unwind: {
+                      path: '$currency',
+                      preserveNullAndEmptyArrays: true,
+                    },
+                  },
+                ],
+              },
+            },
+            {
+              $unwind: {
+                path: '$item',
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const totalPages = Math.ceil(total / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(`${logBase} has successfully retrieve all items`);
+    return { total, data, nextPage };
+  }
 }

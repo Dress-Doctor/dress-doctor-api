@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Logger,
   Post,
+  Query,
   Req,
 } from '@nestjs/common';
 import {
@@ -12,16 +14,18 @@ import {
   ApiBody,
   ApiHeader,
   ApiOperation,
+  ApiQuery,
   ApiResponse,
   ApiSecurity,
 } from '@nestjs/swagger';
-import type { AppRequestWithUser } from 'src/dto/request-data.dto';
+import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { ApiSuccessResponse, xApiKey, xApiSecret } from 'src/dto/swagger.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { FindOrderDto } from './dto/find-order.dto';
 import { OrderService } from './order.service';
-
-@Controller('order')
+import { FindAllOrderWithItemsEntity } from './entities/find-all-order-with-items.entity';
 @ApiHeader(xApiKey)
+@Controller('order')
 @ApiHeader(xApiSecret)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
@@ -29,6 +33,23 @@ import { OrderService } from './order.service';
 export class OrderController {
   private readonly logger = new Logger(OrderController.name);
   constructor(private readonly orderService: OrderService) {}
+
+  @Get()
+  @HttpCode(HttpStatus.OK)
+  @ApiQuery({ type: FindOrderDto })
+  @ApiOperation({ summary: 'Get all orders with items and optional filters' })
+  @ApiResponse({ status: HttpStatus.OK, type: FindAllOrderWithItemsEntity })
+  async getOrders(
+    @Query() query: FindOrderDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const { platform } = req.data;
+    const phone = req.user.phone;
+    this.logger.log(
+      `[${platform}] ${phone} is fetching orders with query ${JSON.stringify(query)}`,
+    );
+    return await this.orderService.findAll(query);
+  }
 
   @Post('pickup')
   @HttpCode(HttpStatus.CREATED)
@@ -40,120 +61,10 @@ export class OrderController {
     @Req() req: AppRequestWithUser,
   ) {
     const { platform } = req.data;
-    const phone = req.user?.phone || 'anonymous';
+    const phone = req.user.phone;
     this.logger.log(
       `[${platform}] ${phone} is creating order for pickup ${data.pickupRequestId} with body ${JSON.stringify(data)}`,
     );
     return await this.orderService.createOrder(data);
   }
-
-  // @Get('pickup/:pickupRequestId')
-  // @HttpCode(HttpStatus.OK)
-  // @ApiOperation({ summary: 'Get orders for a specific pickup request' })
-  // @ApiResponse({
-  //   status: HttpStatus.OK,
-  //   type: ApiSuccessResponseWithPagination,
-  // })
-  // async findByPickup(
-  //   @Param('pickupRequestId') pickupRequestId: string,
-  //   @Req() req: AppRequestWithUser,
-  // ) {
-  //   const { platform } = req.data;
-  //   const phone = req.user?.phone || 'anonymous';
-  //   this.logger.log(
-  //     `[${platform}] ${phone} is fetching orders for pickup ${pickupRequestId}`,
-  //   );
-  //   return await this.orderService.findByPickup(pickupRequestId);
-  // }
-
-  // @Patch('pickup/:pickupRequestId/:id')
-  // @HttpCode(HttpStatus.OK)
-  // @ApiBody({ type: UpdateOrderDto })
-  // @ApiOperation({ summary: 'Update an order tied to a pickup request' })
-  // @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
-  // async updateForPickup(
-  //   @Param('pickupRequestId') pickupRequestId: string,
-  //   @Param('id') id: string,
-  //   @Body() updateOrderDto: UpdateOrderDto,
-  //   @Req() req: AppRequestWithUser,
-  // ) {
-  //   const { platform } = req.data;
-  //   const phone = req.user?.phone || 'anonymous';
-  //   this.logger.log(
-  //     `[${platform}] ${phone} is updating order ${id} for pickup ${pickupRequestId}`,
-  //   );
-  //   return await this.orderService.updateForPickup(
-  //     pickupRequestId,
-  //     id,
-  //     updateOrderDto,
-  //   );
-  // }
-
-  // // generic endpoints kept for backwards compatibility
-  // @Post()
-  // @HttpCode(HttpStatus.CREATED)
-  // @ApiBody({ type: CreateOrderDto })
-  // @ApiOperation({ summary: 'Create an order' })
-  // @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
-  // async create(
-  //   @Body() createOrderDto: CreateOrderDto,
-  //   @Req() req: AppRequestWithUser,
-  // ) {
-  //   const { platform } = req.data;
-  //   const phone = req.user?.phone || 'anonymous';
-  //   this.logger.log(`[${platform}] ${phone} is creating a new order`);
-  //   return await this.orderService.create(createOrderDto);
-  // }
-
-  // @Get()
-  // @HttpCode(HttpStatus.OK)
-  // @ApiOperation({ summary: 'Get all orders' })
-  // @ApiResponse({
-  //   status: HttpStatus.OK,
-  //   type: ApiSuccessResponseWithPagination,
-  // })
-  // async findAll(@Req() req: AppRequestWithUser) {
-  //   const { platform } = req.data;
-  //   const phone = req.user?.phone || 'anonymous';
-  //   this.logger.log(`[${platform}] ${phone} is fetching all orders`);
-  //   return await this.orderService.findAll();
-  // }
-
-  // @Get(':id')
-  // @HttpCode(HttpStatus.OK)
-  // @ApiOperation({ summary: 'Get order by id' })
-  // @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
-  // async findOne(@Param('id') id: string, @Req() req: AppRequestWithUser) {
-  //   const { platform } = req.data;
-  //   const phone = req.user?.phone || 'anonymous';
-  //   this.logger.log(`[${platform}] ${phone} is fetching order ${id}`);
-  //   return await this.orderService.findOne(id);
-  // }
-
-  // @Patch(':id')
-  // @HttpCode(HttpStatus.OK)
-  // @ApiBody({ type: UpdateOrderDto })
-  // @ApiOperation({ summary: 'Update order by id' })
-  // @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
-  // async update(
-  //   @Param('id') id: string,
-  //   @Body() updateOrderDto: UpdateOrderDto,
-  //   @Req() req: AppRequestWithUser,
-  // ) {
-  //   const { platform } = req.data;
-  //   const phone = req.user?.phone || 'anonymous';
-  //   this.logger.log(`[${platform}] ${phone} is updating order ${id}`);
-  //   return await this.orderService.update(id, updateOrderDto);
-  // }
-
-  // @Delete(':id')
-  // @HttpCode(HttpStatus.OK)
-  // @ApiOperation({ summary: 'Remove order by id' })
-  // @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
-  // async remove(@Param('id') id: string, @Req() req: AppRequestWithUser) {
-  //   const { platform } = req.data;
-  //   const phone = req.user?.phone || 'anonymous';
-  //   this.logger.log(`[${platform}] ${phone} is deleting order ${id}`);
-  //   return await this.orderService.remove(id);
-  // }
 }
