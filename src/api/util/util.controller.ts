@@ -27,6 +27,7 @@ import { FindAllServiceEntity } from './entities/service.entity';
 import { FindAllItemEntity } from './entities/item.entity';
 import { FindAllServiceTypeEntity } from './entities/service-type.entity';
 import { FindAllCurrencyEntity } from './entities/currency.entity';
+import { FindAllOrderStatusEntity } from './entities/order-status.entity';
 import { UtilService } from './util.service';
 
 @Controller('util')
@@ -181,5 +182,23 @@ export class UtilController {
     this.logger.log(log);
 
     return await this.utilService.findAllCurrencies(query);
+  }
+
+  @Get('get-all-order-statuses')
+  @HttpCode(HttpStatus.OK)
+  @ApiQuery({ type: PaginationDto })
+  @ApiOperation({ summary: 'Get all order statuses' })
+  @ApiResponse({ status: HttpStatus.OK, type: FindAllOrderStatusEntity })
+  async findAllOrderStatuses(
+    @Query() query: PaginationDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const platform = req.data.platform;
+    const phone = req.user.phone;
+
+    const log = `[${platform}] ${phone} is getting all order statuses with query ${JSON.stringify(query)}`;
+    this.logger.log(log);
+
+    return await this.utilService.findAllOrderStatuses(query);
   }
 }

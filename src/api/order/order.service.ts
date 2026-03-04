@@ -98,13 +98,13 @@ export class OrderService {
       );
     }
 
-    const orderStatusPending = OrderStatusEnum.PENDING;
+    const orderStatusDraft = OrderStatusEnum.DRAFT;
     const orderStatus = await this.orderStatusModel.findOne({
-      orderStatusName: orderStatusPending,
+      orderStatusName: orderStatusDraft,
     });
     if (!orderStatus) {
       this.logger.error(
-        `[${platform}] ${phone} order status ${orderStatusPending} not found in database`,
+        `[${platform}] ${phone} order status ${orderStatusDraft} not found in database`,
       );
       throw new BadRequestException('Order status not found');
     }

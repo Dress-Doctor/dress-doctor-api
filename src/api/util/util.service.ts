@@ -20,6 +20,7 @@ import { Service } from 'src/schema/catalog/service.schema';
 import { SubCategory } from 'src/schema/catalog/sub-category.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { Currency } from 'src/schema/catalog/currency.schema';
+import { OrderStatus } from 'src/schema/order/order-status.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { User } from 'src/schema/user/user.schema';
 
@@ -45,6 +46,9 @@ export class UtilService {
 
     @InjectModel(PickupStatus.name)
     private readonly pickupStatusModel: Model<PickupStatus>,
+
+    @InjectModel(OrderStatus.name)
+    private readonly orderStatusModel: Model<OrderStatus>,
   ) {}
 
   private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
@@ -72,7 +76,8 @@ export class UtilService {
       .find()
       .sort(sort)
       .skip(skip)
-      .limit(size);
+      .limit(size)
+      .lean();
 
     const totalPages = Math.ceil(totalUserTypes / size);
     const nextPage = page < totalPages ? page + 1 : null;
@@ -99,7 +104,8 @@ export class UtilService {
       .find()
       .sort(sort)
       .skip(skip)
-      .limit(size);
+      .limit(size)
+      .lean();
 
     const totalPages = Math.ceil(totalPickupStatus / size);
     const nextPage = page < totalPages ? page + 1 : null;
@@ -123,7 +129,8 @@ export class UtilService {
       .find()
       .sort(sort)
       .skip(skip)
-      .limit(size);
+      .limit(size)
+      .lean();
 
     const totalPages = Math.ceil(totalCurrencies / size);
     const nextPage = page < totalPages ? page + 1 : null;
@@ -146,7 +153,8 @@ export class UtilService {
       .find()
       .sort(sort)
       .skip(skip)
-      .limit(size);
+      .limit(size)
+      .lean();
 
     const totalCategories = await this.categoryModel.countDocuments();
     const totalPages = Math.ceil(totalCategories / size);
@@ -170,7 +178,8 @@ export class UtilService {
       .find()
       .sort(sort)
       .skip(skip)
-      .limit(size);
+      .limit(size)
+      .lean();
 
     const totalSubCategories = await this.subCategoryModel.countDocuments();
     const totalPages = Math.ceil(totalSubCategories / size);
@@ -194,7 +203,8 @@ export class UtilService {
       .find()
       .sort(sort)
       .skip(skip)
-      .limit(size);
+      .limit(size)
+      .lean();
 
     const totalServices = await this.serviceModel.countDocuments();
     const totalPages = Math.ceil(totalServices / size);
@@ -312,7 +322,8 @@ export class UtilService {
       .find()
       .sort(sort)
       .skip(skip)
-      .limit(size);
+      .limit(size)
+      .lean();
 
     const totalServiceTypes = await this.serviceTypeModel.countDocuments();
     const totalPages = Math.ceil(totalServiceTypes / size);
@@ -320,5 +331,30 @@ export class UtilService {
 
     this.logger.log(`${logBase} has successfully retrieve all service types`);
     return { total: totalServiceTypes, data: serviceTypes, nextPage };
+  }
+
+  async findAllOrderStatuses({ page, size, ...query }: PaginationDto) {
+    this.can('READ', 'OrderStatus');
+
+    const platform = this.req.data.platform;
+    const phone = this.req.user.phone;
+    const logBase = `[${platform}] ${phone}`;
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(query.sort);
+
+    const totalOrderStatuses = await this.orderStatusModel.countDocuments();
+    const orderStatuses = await this.orderStatusModel
+      .find()
+      .sort(sort)
+      .skip(skip)
+      .limit(size)
+      .lean();
+
+    const totalPages = Math.ceil(totalOrderStatuses / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(`${logBase} has successfully retrieve all order statuses`);
+    return { total: totalOrderStatuses, data: orderStatuses, nextPage };
   }
 }

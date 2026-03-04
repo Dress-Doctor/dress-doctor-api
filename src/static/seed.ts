@@ -74,6 +74,11 @@ export default {
 
   orderStatus: [
     {
+      orderStatusName: 'DRAFT',
+      description:
+        'Order under preparation; not confirmed and not ready for payment.',
+    },
+    {
       orderStatusName: 'PENDING',
       description: 'Order has been created by the rider.',
     },
