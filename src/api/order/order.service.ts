@@ -9,16 +9,24 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
+import { AppUtilService } from 'src/helper/service/app-util.service';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { Currency } from 'src/schema/catalog/currency.schema';
+import { Item } from 'src/schema/catalog/item.schema';
+import { OrderItem } from 'src/schema/order/order-item.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
-import { AppUtilService } from 'src/helper/service/app-util.service';
 import { OrderStatusEnum } from 'src/schema/order/order.dto';
 import { Order } from 'src/schema/order/order.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { User } from 'src/schema/user/user.schema';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderItemDto } from './dto/create-order-item.dto';
+import {
+  CreateOrderDto,
+  CreateOrderWithPickupDto,
+} from './dto/create-order.dto';
 import { FindOrderDto } from './dto/find-order.dto';
+import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
+import { PickupStatusEnum } from 'src/schema/pickup/pickup.dto';
 
 @Injectable()
 export class OrderService {
@@ -31,8 +39,14 @@ export class OrderService {
     @Inject(REQUEST) private readonly req: AppRequestWithUser,
     private readonly codeService: CodeGeneratorService,
     private readonly appUtilService: AppUtilService,
+
+    @InjectModel(Item.name) private readonly itemModel: Model<Item>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Currency.name) private readonly currencyModel: Model<Currency>,
+
+    @InjectModel(OrderItem.name)
+    private readonly orderItemModel: Model<OrderItem>,
+
     @InjectModel(OrderStatus.name)
     private readonly orderStatusModel: Model<OrderStatus>,
 
@@ -51,51 +65,38 @@ export class OrderService {
     }
   }
 
-  async createOrder(data: CreateOrderDto) {
+  async createOrderWithPickup(data: CreateOrderWithPickupDto) {
     this.can('CREATE', 'Order');
 
     const platform = this.req.data.platform;
     const { phone } = this.req.user;
+    const base = `[${platform}] ${phone}`;
 
     const customerId = new Types.ObjectId(data.customerId);
     const customer = await this.userModel.findById(customerId);
     if (!customer) {
-      this.logger.error(
-        `[${platform}] ${phone} invalid customer id ${data.customerId}`,
-      );
+      this.logger.error(`${base} invalid customer id ${data.customerId}`);
       throw new BadRequestException('Invalid customer id');
     }
 
     const currencyId = new Types.ObjectId(data.currencyId);
     const currency = await this.currencyModel.findById(currencyId);
     if (!currency) {
-      this.logger.error(
-        `[${platform}] ${phone} invalid currency id ${data.currencyId}`,
-      );
+      this.logger.error(`${base} invalid currency id ${data.currencyId}`);
       throw new BadRequestException('Invalid currency id');
     }
 
     const pickupRequestId = new Types.ObjectId(data.pickupRequestId);
-    const pickupRequest =
-      await this.pickupRequestModel.findById(pickupRequestId);
+    const pickupRequest = await this.pickupRequestModel
+      .findById(pickupRequestId)
+      .populate<{
+        pickupStatusId: PickupStatus;
+      }>({ model: PickupStatus.name, path: 'pickupStatusId' });
     if (!pickupRequest) {
       this.logger.error(
-        `[${platform}] ${phone} invalid pickup request id ${data.pickupRequestId}`,
+        `${base} invalid pickup request id ${data.pickupRequestId}`,
       );
       throw new BadRequestException('Invalid pickup request id');
-    }
-
-    const existingOrder = await this.orderModel.findOne({
-      customerId,
-      pickupRequestId,
-    });
-    if (existingOrder) {
-      this.logger.error(
-        `[${platform}] ${phone} order already exists for customer ${data.customerId} and pickup request ${data.pickupRequestId}`,
-      );
-      throw new BadRequestException(
-        'An order already exists for this customer and pickup request',
-      );
     }
 
     const orderStatusDraft = OrderStatusEnum.DRAFT;
@@ -104,9 +105,34 @@ export class OrderService {
     });
     if (!orderStatus) {
       this.logger.error(
-        `[${platform}] ${phone} order status ${orderStatusDraft} not found in database`,
+        `${base} order status ${orderStatusDraft} not found in database`,
       );
       throw new BadRequestException('Order status not found');
+    }
+
+    if (
+      pickupRequest.pickupStatusId.pickupStatusName !==
+      PickupStatusEnum.ASSIGNED.toString()
+    ) {
+      this.logger.error(
+        `${base} you can only create order for pickup with status ${PickupStatusEnum.ASSIGNED.toString()} `,
+      );
+      throw new BadRequestException(
+        `You can only create order for pick with status ${PickupStatusEnum.ASSIGNED.toString()}`,
+      );
+    }
+    const existingOrder = await this.orderModel.findOne({
+      customerId,
+      pickupRequestId,
+      orderStatusId: orderStatus._id,
+    });
+    if (existingOrder) {
+      this.logger.error(
+        `${base} this customer with id ${data.customerId} can only have one draft order at a time`,
+      );
+      throw new BadRequestException(
+        'A customer can only have one draft order at a time',
+      );
     }
 
     await this.orderModel.findOneAndUpdate(
@@ -127,7 +153,72 @@ export class OrderService {
     );
 
     this.logger.log(
-      `[${platform}] ${phone} has successfully created order for pickup request ${data.pickupRequestId}`,
+      `${base} has successfully created order for pickup request ${data.pickupRequestId}`,
+    );
+    return { message: 'Order created successfully' };
+  }
+
+  async createOrder(data: CreateOrderDto) {
+    this.can('CREATE', 'Order');
+
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+    const base = `[${platform}] ${phone}`;
+
+    const customerId = new Types.ObjectId(data.customerId);
+    const customer = await this.userModel.findById(customerId);
+    if (!customer) {
+      this.logger.error(`${base} invalid customer id ${data.customerId}`);
+      throw new BadRequestException('Invalid customer id');
+    }
+
+    const currencyId = new Types.ObjectId(data.currencyId);
+    const currency = await this.currencyModel.findById(currencyId);
+    if (!currency) {
+      this.logger.error(`${base} invalid currency id ${data.currencyId}`);
+      throw new BadRequestException('Invalid currency id');
+    }
+
+    const orderStatusDraft = OrderStatusEnum.DRAFT;
+    const orderStatus = await this.orderStatusModel.findOne({
+      orderStatusName: orderStatusDraft,
+    });
+    if (!orderStatus) {
+      this.logger.error(
+        `${base} order status ${orderStatusDraft} not found in database`,
+      );
+      throw new BadRequestException('Order status not found');
+    }
+
+    const existingOrder = await this.orderModel.findOne({
+      customerId,
+      orderStatusId: orderStatus._id,
+    });
+    if (existingOrder) {
+      this.logger.error(
+        `${base} this customer with id ${data.customerId} can only have one draft order at a time`,
+      );
+      throw new BadRequestException('A customer can only have one draft order');
+    }
+
+    await this.orderModel.findOneAndUpdate(
+      { customerId, orderStatusId: orderStatus._id },
+      {
+        ...data,
+        customerId,
+        currencyId,
+        orderStatusId: orderStatus._id,
+        orderCode: await this.codeService.generateOrderReference(),
+      },
+      {
+        context: { changedBy: new Types.ObjectId(this.req.user.userId) },
+        upsert: true,
+        new: true,
+      } as never,
+    );
+
+    this.logger.log(
+      `${base} has successfully created order for customer ${data.customerId}`,
     );
     return { message: 'Order created successfully' };
   }
@@ -240,5 +331,72 @@ export class OrderService {
 
     this.logger.log(`${logBase} has successfully retrieve all items`);
     return { total, data, nextPage };
+  }
+
+  async createOrderItem(orderId: string, data: CreateOrderItemDto) {
+    this.can('CREATE', 'OrderItem');
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+    const base = `[${platform}] ${phone}`;
+
+    const order = await this.orderModel.findById(orderId);
+    if (!order) {
+      this.logger.error(`${base} invalid orderId ${orderId}`);
+      throw new BadRequestException('The order Id provided is invalid');
+    }
+
+    const item = await this.itemModel.findById(data.itemId);
+    if (!item) {
+      this.logger.error(`${base} invalid itemId ${data.itemId}`);
+      throw new BadRequestException('The provided item Id is invalid');
+    }
+
+    if (data.unitPrice < item.priceLow) {
+      this.logger.error(
+        `${base} unitPrice ${data.unitPrice} is lower than price low ${item.priceLow}`,
+      );
+      throw new BadRequestException(
+        `Unit price cannot be lower than the min price for ${item.itemName}`,
+      );
+    }
+
+    const orderItemExist = await this.orderItemModel.findOne({
+      itemId: item._id,
+      orderId: order._id,
+    });
+    if (orderItemExist) {
+      this.logger.error(`${base} ${item.itemName} already exist on oder`);
+      throw new BadRequestException(`${item.itemName} already exist on order`);
+    }
+
+    const userId = new Types.ObjectId(this.req.user.userId);
+    await this.orderItemModel.findOneAndUpdate(
+      { itemId: item._id, orderId: order._id },
+      {
+        itemId: item._id,
+        orderId: order._id,
+        quantity: data.quantity,
+        unitPrice: data.unitPrice,
+      },
+      { context: { changedBy: userId }, upsert: true, new: true } as never,
+    );
+
+    const baseAmount = data.unitPrice * data.quantity;
+    const orderAmount = baseAmount + order.orderAmount;
+    const totalAmount = baseAmount + order.fee - order.discountAmount;
+    await this.orderModel.findOneAndUpdate(
+      { _id: order._id },
+      { orderAmount, totalAmount },
+      { context: { changedBy: userId }, upsert: true, new: true } as never,
+    );
+
+    // order.orderAmount += orderAmount;
+    // order.totalAmount += orderAmount;
+    // await order.save();
+
+    this.logger.log(
+      `${base} has successfully created order item for order with code ${order.orderCode}`,
+    );
+    return { message: `${item.itemName} added successfully` };
   }
 }

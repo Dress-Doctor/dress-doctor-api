@@ -14,8 +14,8 @@ export class Order extends Document<Types.ObjectId> {
   @Prop({ required: true, type: Types.ObjectId, ref: Currency.name })
   currencyId: Types.ObjectId;
 
-  @Prop({ required: true, type: Types.ObjectId, ref: PickupRequest.name })
-  pickupRequestId: Types.ObjectId;
+  @Prop({ required: false, type: Types.ObjectId, ref: PickupRequest.name })
+  pickupRequestId?: Types.ObjectId;
 
   @Prop({ required: true, unique: true })
   orderCode: string;
@@ -40,4 +40,12 @@ export class Order extends Document<Types.ObjectId> {
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);
-OrderSchema.index({ pickupRequestId: 1, customerId: 1 }, { unique: true });
+OrderSchema.index(
+  { pickupRequestId: 1, customerId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      pickupRequestId: { $exists: true, $ne: null },
+    },
+  },
+);

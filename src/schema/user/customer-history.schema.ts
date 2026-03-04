@@ -2,6 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { HistoryActionEnum } from '../admin/admin.dto';
 import { Customer } from './customer.schema';
+import { ChangedFieldDto } from './user.dto';
 import { User } from './user.schema';
 
 export const customerHistorySchemaName = 'customer_history';
@@ -13,8 +14,8 @@ export class CustomerHistory extends Document<Types.ObjectId> {
   @Prop({ required: true, type: Types.ObjectId, ref: User.name })
   changedBy: Types.ObjectId;
 
-  @Prop({ required: false, type: Object })
-  changedFields?: Record<string, any>;
+  @Prop({ required: false, type: Object, default: {} })
+  changedFields?: Record<string, ChangedFieldDto>;
 
   @Prop({ required: true, enum: HistoryActionEnum })
   action: HistoryActionEnum;

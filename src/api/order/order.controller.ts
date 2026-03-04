@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  Param,
   Post,
   Query,
   Req,
@@ -20,10 +21,21 @@ import {
 } from '@nestjs/swagger';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { ApiSuccessResponse, xApiKey, xApiSecret } from 'src/dto/swagger.dto';
-import { CreateOrderDto } from './dto/create-order.dto';
+import {
+  CheckAccess,
+  CheckTypeEnum,
+} from 'src/helper/decorator/check-access.decorator';
+import {
+  CreateOrderItemDto,
+  OrderParamsDto,
+} from './dto/create-order-item.dto';
+import {
+  CreateOrderDto,
+  CreateOrderWithPickupDto,
+} from './dto/create-order.dto';
 import { FindOrderDto } from './dto/find-order.dto';
-import { OrderService } from './order.service';
 import { FindAllOrderWithItemsEntity } from './entities/find-all-order-with-items.entity';
+import { OrderService } from './order.service';
 @ApiHeader(xApiKey)
 @Controller('order')
 @ApiHeader(xApiSecret)
@@ -53,11 +65,12 @@ export class OrderController {
 
   @Post('pickup')
   @HttpCode(HttpStatus.CREATED)
-  @ApiBody({ type: CreateOrderDto })
+  @ApiBody({ type: CreateOrderWithPickupDto })
   @ApiOperation({ summary: 'Create order for a pickup request' })
-  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
-  async createOrder(
-    @Body() data: CreateOrderDto,
+  @CheckAccess(CheckTypeEnum.customerPickup, 'customerId', 'body')
+  @ApiResponse({ status: HttpStatus.CREATED, type: ApiSuccessResponse })
+  async createOrderWithPickup(
+    @Body() data: CreateOrderWithPickupDto,
     @Req() req: AppRequestWithUser,
   ) {
     const { platform } = req.data;
@@ -65,6 +78,41 @@ export class OrderController {
     this.logger.log(
       `[${platform}] ${phone} is creating order for pickup ${data.pickupRequestId} with body ${JSON.stringify(data)}`,
     );
+    return await this.orderService.createOrderWithPickup(data);
+  }
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiBody({ type: CreateOrderDto })
+  @ApiOperation({ summary: 'Create order without pickup request' })
+  @ApiResponse({ status: HttpStatus.CREATED, type: ApiSuccessResponse })
+  async createOrder(
+    @Body() data: CreateOrderDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const { platform } = req.data;
+    const phone = req.user.phone;
+    this.logger.log(
+      `[${platform}] ${phone} is creating order for customer ${data.customerId} with body ${JSON.stringify(data)}`,
+    );
     return await this.orderService.createOrder(data);
+  }
+
+  @Post(':orderId/items')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiBody({ type: CreateOrderItemDto })
+  @ApiOperation({ summary: 'Create order items' })
+  @ApiResponse({ status: HttpStatus.CREATED, type: ApiSuccessResponse })
+  async createOrderItem(
+    @Req() req: AppRequestWithUser,
+    @Body() data: CreateOrderItemDto,
+    @Param() { orderId }: OrderParamsDto,
+  ) {
+    const { platform } = req.data;
+    const phone = req.user.phone;
+    const log = `[${platform}] ${phone} is creating order item for order ${orderId} with body ${JSON.stringify(data)}`;
+    this.logger.log(log);
+
+    return await this.orderService.createOrderItem(orderId, data);
   }
 }

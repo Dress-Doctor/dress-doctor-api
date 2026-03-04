@@ -109,8 +109,8 @@ export function attachHistoryHooks<T extends Document>(
       if (!previous) {
         // No previous record means it was a create
         await historyModel.create({
+          changedBy: context?.changedBy,
           action: HistoryActionEnum.CREATE,
-          changedBy: context?.changedBy ?? doc._id,
           [idField]: doc[idField as keyof T] || doc._id,
           snapshot: doc.toObject() as Record<string, any>,
         });
@@ -140,8 +140,8 @@ export function attachHistoryHooks<T extends Document>(
 
       await historyModel.create({
         changedFields,
+        changedBy: context?.changedBy,
         action: HistoryActionEnum.UPDATE,
-        changedBy: context?.changedBy ?? doc._id,
         [idField]: doc[idField as keyof T] || doc._id,
         snapshot: doc.toObject() as Record<string, any>,
       });
