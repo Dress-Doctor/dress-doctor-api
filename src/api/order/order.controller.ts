@@ -7,6 +7,7 @@ import {
   Logger,
   Param,
   Post,
+  Put,
   Query,
   Req,
 } from '@nestjs/common';
@@ -34,6 +35,10 @@ import {
   CreateOrderWithPickupDto,
 } from './dto/create-order.dto';
 import { FindOrderDto } from './dto/find-order.dto';
+import {
+  OrderItemParamsDto,
+  UpdateOrderItemDto,
+} from './dto/update-order-item.dto';
 import { FindAllOrderWithItemsEntity } from './entities/find-all-order-with-items.entity';
 import { OrderService } from './order.service';
 @ApiHeader(xApiKey)
@@ -115,4 +120,22 @@ export class OrderController {
 
     return await this.orderService.createOrderItem(orderId, data);
   }
+
+  @Put(':orderId/items/:itemId')
+  @HttpCode(HttpStatus.OK)
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async updateOrderItem(
+    @Req() req: AppRequestWithUser,
+    @Body() data: UpdateOrderItemDto,
+    @Param() params: OrderItemParamsDto,
+  ) {
+    const { platform } = req.data;
+    const phone = req.user.phone;
+    const log = `[${platform}] ${phone} is updating order item for order ${params.orderId} with body ${JSON.stringify(data)}`;
+    this.logger.log(log);
+
+    return await this.orderService.updateOrderItem(params, data);
+  }
+  // @Get(':orderId/items')
+  // @Delete(':orderId/items/:itemId')
 }

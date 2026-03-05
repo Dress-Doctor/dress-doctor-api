@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
@@ -27,6 +28,10 @@ import {
 import { FindOrderDto } from './dto/find-order.dto';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { PickupStatusEnum } from 'src/schema/pickup/pickup.dto';
+import {
+  OrderItemParamsDto,
+  UpdateOrderItemDto,
+} from './dto/update-order-item.dto';
 
 @Injectable()
 export class OrderService {
@@ -390,13 +395,65 @@ export class OrderService {
       { context: { changedBy: userId }, upsert: true, new: true } as never,
     );
 
-    // order.orderAmount += orderAmount;
-    // order.totalAmount += orderAmount;
-    // await order.save();
-
     this.logger.log(
       `${base} has successfully created order item for order with code ${order.orderCode}`,
     );
     return { message: `${item.itemName} added successfully` };
+  }
+
+  async updateOrderItem(params: OrderItemParamsDto, data: UpdateOrderItemDto) {
+    this.can('UPDATE', 'OrderItem');
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+    const base = `[${platform}] ${phone}`;
+
+    const orderId = new Types.ObjectId(params.orderId);
+    const order = await this.orderModel.findById(orderId);
+    if (!order) {
+      this.logger.error(`${base} invalid orderId ${params.orderId}`);
+      throw new BadRequestException('Invalid orderid');
+    }
+
+    const itemId = new Types.ObjectId(params.itemId);
+    const item = await this.itemModel.findById(itemId);
+    if (!item) {
+      this.logger.error(`${base} invalid itemId ${params.itemId}`);
+      throw new BadRequestException('Invalid itemId');
+    }
+
+    const orderItem = await this.orderItemModel.findOne({ itemId, orderId });
+    if (!orderItem) {
+      this.logger.error(
+        `${base} not record found for orderId ${params.orderId} and itemId ${params.itemId}`,
+      );
+      throw new NotFoundException(
+        `${item.itemName} is part of this order. Please refresh the list`,
+      );
+    }
+
+    const userId = new Types.ObjectId(this.req.user.userId);
+    const updatedItem = (await this.orderItemModel.findOneAndUpdate(
+      { itemId, orderId },
+      data,
+      { context: { changedBy: userId }, new: true } as never,
+    )) as unknown as OrderItem | null;
+
+    if (!updatedItem) {
+      throw new NotFoundException('Order item update failed');
+    }
+
+    const oldPrice = orderItem.unitPrice * orderItem.quantity;
+    const newPrice = updatedItem.unitPrice * updatedItem.quantity;
+
+    const orderAmount = order.orderAmount - oldPrice + newPrice;
+    const totalAmount = orderAmount + order.fee - order.discountAmount;
+    await this.orderModel.findOneAndUpdate(
+      { _id: order._id },
+      { orderAmount, totalAmount },
+      { context: { changedBy: userId }, upsert: true, new: true } as never,
+    );
+
+    this.logger.log(`${base} ${item.itemName} updated successfully`);
+    return { message: `${item.itemName} updated successfully` };
   }
 }
