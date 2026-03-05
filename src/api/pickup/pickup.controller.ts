@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  Param,
   Post,
   Query,
   Req,
@@ -21,9 +22,12 @@ import {
   type AppRequest,
   type AppRequestWithUser,
 } from 'src/dto/request-data.dto';
-import { xApiKey, xApiSecret } from 'src/dto/swagger.dto';
+import { ApiSuccessResponse, xApiKey, xApiSecret } from 'src/dto/swagger.dto';
 import { Public } from 'src/helper/decorator/public.decorator';
-import { AssignPickupDto } from './dto/assign-pickup.dto';
+import {
+  AssignPickupDto,
+  PickupRequestParamsDto,
+} from './dto/assign-pickup.dto';
 import { CreatePickupDto } from './dto/create-pickup.dto';
 import { FindPickupDto } from './dto/find-pickup.dto';
 import { SchedulePickupEntity } from './entities/pickup.entity';
@@ -40,7 +44,7 @@ export class PickupController {
   constructor(private readonly pickupService: PickupService) {}
 
   @Public()
-  @Post('schedule-pickup')
+  @Post('schedule')
   @HttpCode(HttpStatus.CREATED)
   @ApiCreatedResponse({ type: SchedulePickupEntity })
   @ApiOperation({ summary: 'Used to schedule a pickup' })
@@ -50,22 +54,6 @@ export class PickupController {
 
     this.logger.log(log);
     return await this.pickupService.schedulePickup(data);
-  }
-
-  @Post('assign-to-agent')
-  @HttpCode(HttpStatus.CREATED)
-  @ApiResponse({ status: HttpStatus.CREATED })
-  @ApiOperation({ summary: 'Assign pickup to agent to an agent' })
-  async assignPickup(
-    @Req() req: AppRequestWithUser,
-    @Body() data: AssignPickupDto,
-  ) {
-    const phone = req.user.phone;
-    const platform = req.data.platform;
-
-    const log = `[${platform}] ${phone} is trying to assign pickup to an agent with ${JSON.stringify(data)}`;
-    this.logger.log(log);
-    return await this.pickupService.assignPickup(data);
   }
 
   @Get()
@@ -80,5 +68,38 @@ export class PickupController {
     this.logger.log(log);
 
     return await this.pickupService.findAllPickup(query);
+  }
+
+  @Post(':pickupId/assign')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Assign pickup to agent to an agent' })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async assignPickup(
+    @Body() data: AssignPickupDto,
+    @Req() req: AppRequestWithUser,
+    @Param() params: PickupRequestParamsDto,
+  ) {
+    const phone = req.user.phone;
+    const platform = req.data.platform;
+
+    const log = `[${platform}] ${phone} is assigning pickup ${params.pickupId} to agent with ${JSON.stringify(data)}`;
+    this.logger.log(log);
+    return await this.pickupService.assignPickup(params, data);
+  }
+
+  @Post(':pickupId/confirm')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Confirm pickup (set status to confirm)' })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async confirmPickup(
+    @Req() req: AppRequestWithUser,
+    @Param() { pickupId: pickupRequestId }: PickupRequestParamsDto,
+  ) {
+    const { platform } = req.data;
+    const phone = req.user.phone;
+    const log = `[${platform}] ${phone} is confirming order ${pickupRequestId}`;
+    this.logger.log(log);
+
+    return await this.pickupService.confirmPickup(pickupRequestId);
   }
 }

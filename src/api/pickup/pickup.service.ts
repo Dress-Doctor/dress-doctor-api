@@ -21,9 +21,13 @@ import { Customer } from 'src/schema/user/customer.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { UserTypeEum } from 'src/schema/user/user.dto';
 import { User } from 'src/schema/user/user.schema';
-import { AssignPickupDto } from './dto/assign-pickup.dto';
+import {
+  AssignPickupDto,
+  PickupRequestParamsDto,
+} from './dto/assign-pickup.dto';
 import { CreatePickupDto } from './dto/create-pickup.dto';
 import { FindPickupDto } from './dto/find-pickup.dto';
+import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 
 @Injectable()
 export class PickupService {
@@ -47,6 +51,17 @@ export class PickupService {
     @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
     @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
   ) {}
+
+  private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
+    const platform = this.req.data.platform;
+    const { phone, ability } = this.req.user;
+
+    if (!ability.can(action, subject)) {
+      const log = 'not authorized to perform this action';
+      this.logger.error(`[${platform}] ${phone} ${log} is`);
+      throw new BadRequestException(`You are ${log}`);
+    }
+  }
 
   async schedulePickup(data: CreatePickupDto) {
     const { platform, apiClientId, officeId } = this.req.data;
@@ -147,80 +162,10 @@ export class PickupService {
     return { customer: customerInfo, pickupRequest: newPickupRequest };
   }
 
-  async assignPickup(data: AssignPickupDto) {
-    const platform = this.req.data.platform;
-    const { phone, ability } = this.req.user;
-    const userId = new Types.ObjectId(this.req.user.userId);
-
-    if (!ability.can('ASSIGN', 'PickupAssignment')) {
-      const log = 'not authorized to perform this action';
-      this.logger.error(`[${platform}] ${phone} ${log}`);
-      throw new BadRequestException(`You are ${log}`);
-    }
-
-    const userType = await this.userTypeModel.findOne({
-      userTypeName: UserTypeEum.ADMIN,
-    });
-    const userExists = await this.userModel.findOne({
-      _id: data.agentId,
-      userTypeId: userType?._id,
-    });
-
-    if (!userExists) {
-      const log = `You can't assign a pickup request to a Customer or Affiliate Partner`;
-      this.logger.error(`[${platform}] ${phone} ${log}`);
-      throw new BadRequestException(log);
-    }
-
-    const pendingPickupStatus = await this.pickupStatusModel.findOne({
-      pickupStatusName: PickupStatusEnum.PENDING,
-    });
-
-    const pickupRequestExists = await this.pickupRequestModel.findOne({
-      _id: data.pickupRequestId,
-      pickupStatusId: pendingPickupStatus?._id,
-    });
-
-    if (!pickupRequestExists) {
-      const log = `This pickup request is no longer pending and cannot be assigned.`;
-      this.logger.error(`[${platform}] ${phone} ${log}`);
-      throw new BadRequestException(log);
-    }
-
-    await this.pickupAssignmentModel.findOneAndUpdate(
-      { agentId: userExists._id, pickupRequestId: pickupRequestExists._id },
-      {
-        agentId: userExists._id,
-        assignedAt: data.assignedAt ?? new Date(),
-        pickupRequestId: pickupRequestExists._id,
-      },
-      { context: { changedBy: userId }, upsert: true, new: true } as never,
-    );
-
-    const assignedPickupStatus = await this.pickupStatusModel.findOne({
-      pickupStatusName: PickupStatusEnum.ASSIGNED,
-    });
-    await this.pickupRequestModel.findOneAndUpdate(
-      { _id: pickupRequestExists._id },
-      { pickupStatusId: assignedPickupStatus!._id },
-      { context: { changedBy: userId }, upsert: true, new: true } as never,
-    );
-
-    this.logger.log(
-      `[${platform}] ${phone} pickup-request successfully assigned to ${userExists.phone}`,
-    );
-    return 'Pickup request successfully assigned';
-  }
-
   async findAllPickup({ page, size, ...query }: FindPickupDto) {
+    this.can('READ', 'PickupRequest');
     const platform = this.req.data.platform;
-    const { phone, ability } = this.req.user;
-
-    if (!ability.can('READ', 'PickupRequest')) {
-      const log = 'not authorized to perform this action';
-      this.logger.error(`[${platform}] ${phone} ${log}`);
-      throw new BadRequestException(`You are ${log}`);
-    }
+    const { phone } = this.req.user;
 
     const skip = (page - 1) * size;
     const sort = this.appUtilService.parseSortParam(query.sort);
@@ -266,5 +211,121 @@ export class PickupService {
       `[${platform}] ${phone} has successfully retrieve all pickups`,
     );
     return { total: totalPickups, data: pickups, nextPage };
+  }
+
+  async assignPickup(param: PickupRequestParamsDto, data: AssignPickupDto) {
+    this.can('ASSIGN', 'PickupAssignment');
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+    const userId = new Types.ObjectId(this.req.user.userId);
+
+    const userType = await this.userTypeModel.findOne({
+      userTypeName: UserTypeEum.ADMIN,
+    });
+    const userExists = await this.userModel.findOne({
+      _id: data.agentId,
+      userTypeId: userType?._id,
+    });
+
+    if (!userExists) {
+      const log = `You can't assign a pickup request to a Customer or Affiliate Partner`;
+      this.logger.error(`[${platform}] ${phone} ${log}`);
+      throw new BadRequestException(log);
+    }
+
+    const pendingPickupStatus = await this.pickupStatusModel.findOne({
+      pickupStatusName: PickupStatusEnum.PENDING,
+    });
+
+    const pickupRequestId = new Types.ObjectId(param.pickupId);
+    const pickupRequestExists = await this.pickupRequestModel.findOne({
+      _id: pickupRequestId,
+      pickupStatusId: pendingPickupStatus?._id,
+    });
+
+    if (!pickupRequestExists) {
+      const log = `This pickup request is no longer pending and cannot be assigned.`;
+      this.logger.error(`[${platform}] ${phone} ${log}`);
+      throw new BadRequestException(log);
+    }
+
+    await this.pickupAssignmentModel.findOneAndUpdate(
+      { agentId: userExists._id, pickupRequestId: pickupRequestExists._id },
+      {
+        agentId: userExists._id,
+        assignedAt: data.assignedAt ?? new Date(),
+        pickupRequestId: pickupRequestExists._id,
+      },
+      { context: { changedBy: userId }, upsert: true, new: true } as never,
+    );
+
+    const assignedPickupStatus = await this.pickupStatusModel.findOne({
+      pickupStatusName: PickupStatusEnum.ASSIGNED,
+    });
+    await this.pickupRequestModel.findOneAndUpdate(
+      { _id: pickupRequestExists._id },
+      { pickupStatusId: assignedPickupStatus!._id },
+      { context: { changedBy: userId }, upsert: true, new: true } as never,
+    );
+
+    this.logger.log(
+      `[${platform}] ${phone} pickup-request successfully assigned to ${userExists.phone}`,
+    );
+    return 'Pickup request successfully assigned';
+  }
+
+  async confirmPickup(pickupRequestId: string) {
+    this.can('CONFIRM', 'PickupRequest');
+
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+    const base = `[${platform}] ${phone}`;
+
+    const pickupObjectId = new Types.ObjectId(pickupRequestId);
+    const pickupRequest =
+      await this.pickupRequestModel.findById(pickupObjectId);
+    if (!pickupRequest) {
+      this.logger.error(`${base} invalid pickupRequestId ${pickupRequestId}`);
+      throw new NotFoundException('Pickup not found');
+    }
+
+    // lookup pending status
+    const pendingStatus = await this.pickupStatusModel.findOne({
+      pickupStatusName: PickupStatusEnum.PENDING,
+    });
+    if (!pendingStatus) {
+      this.logger.error(`${base} pending pickup status not found`);
+      throw new BadRequestException('Pending pickup status not configured');
+    }
+
+    if (
+      pickupRequest.pickupStatusId.toString() !== pendingStatus._id.toString()
+    ) {
+      this.logger.error(
+        `${base} cannot confirm pickup ${pickupRequest.reference} because it is not in PENDING status`,
+      );
+      throw new BadRequestException(
+        'Can only confirm pickups in pending status',
+      );
+    }
+
+    // lookup pending status
+    const confirmStatus = await this.pickupStatusModel.findOne({
+      pickupStatusName: PickupStatusEnum.CONFIRMED,
+    });
+    if (!confirmStatus) {
+      this.logger.error(`${base} confirmed pickup status not found`);
+      throw new BadRequestException('Confirmed pickup status not configured');
+    }
+
+    const userId = new Types.ObjectId(this.req.user.userId);
+    await this.pickupRequestModel.findOneAndUpdate(
+      { _id: pickupRequest._id },
+      { pickupStatusId: confirmStatus._id, confirmedBy: userId },
+      { context: { changedBy: userId }, new: true } as never,
+    );
+
+    this.logger.log(`${base} pickup ${pickupRequest.reference} confirmed`);
+    return 'Pickup confirmed successfully';
   }
 }

@@ -57,6 +57,9 @@ export class OrderService {
 
     @InjectModel(PickupRequest.name)
     private readonly pickupRequestModel: Model<PickupRequest>,
+
+    @InjectModel(PickupStatus.name)
+    private readonly pickupStatusModel: Model<PickupStatus>,
   ) {}
 
   private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
@@ -160,7 +163,7 @@ export class OrderService {
     this.logger.log(
       `${base} has successfully created order for pickup request ${data.pickupRequestId}`,
     );
-    return { message: 'Order created successfully' };
+    return 'Order created successfully';
   }
 
   async createOrder(data: CreateOrderDto) {
@@ -225,7 +228,7 @@ export class OrderService {
     this.logger.log(
       `${base} has successfully created order for customer ${data.customerId}`,
     );
-    return { message: 'Order created successfully' };
+    return 'Order created successfully';
   }
 
   async findAll({ page, size, ...query }: FindOrderDto) {
@@ -259,6 +262,15 @@ export class OrderService {
       { $skip: skip },
       { $limit: size },
 
+      {
+        $lookup: {
+          as: 'orderStatus',
+          foreignField: '_id',
+          from: 'order_status',
+          localField: 'orderStatusId',
+        },
+      },
+      { $unwind: { path: '$orderStatus', preserveNullAndEmptyArrays: true } },
       {
         $lookup: {
           from: 'order_item',
@@ -350,6 +362,24 @@ export class OrderService {
       throw new BadRequestException('The order Id provided is invalid');
     }
 
+    // lookup draft status
+    const draftStatus = await this.orderStatusModel.findOne({
+      orderStatusName: OrderStatusEnum.DRAFT,
+    });
+    if (!draftStatus) {
+      this.logger.error(`${base} draft order status not found`);
+      throw new BadRequestException('Draft order status not configured');
+    }
+
+    if (order.orderStatusId.toString() !== draftStatus._id.toString()) {
+      this.logger.error(
+        `${base} cannot add item to order ${order.orderCode} because it is not in DRAFT status`,
+      );
+      throw new BadRequestException(
+        'Can only add items to orders in draft status',
+      );
+    }
+
     const item = await this.itemModel.findById(data.itemId);
     if (!item) {
       this.logger.error(`${base} invalid itemId ${data.itemId}`);
@@ -398,7 +428,7 @@ export class OrderService {
     this.logger.log(
       `${base} has successfully created order item for order with code ${order.orderCode}`,
     );
-    return { message: `${item.itemName} added successfully` };
+    return `${item.itemName} added successfully`;
   }
 
   async updateOrderItem(params: OrderItemParamsDto, data: UpdateOrderItemDto) {
@@ -412,6 +442,24 @@ export class OrderService {
     if (!order) {
       this.logger.error(`${base} invalid orderId ${params.orderId}`);
       throw new BadRequestException('Invalid orderid');
+    }
+
+    // lookup draft status
+    const draftStatus = await this.orderStatusModel.findOne({
+      orderStatusName: OrderStatusEnum.DRAFT,
+    });
+    if (!draftStatus) {
+      this.logger.error(`${base} draft order status not found`);
+      throw new BadRequestException('Draft order status not configured');
+    }
+
+    if (order.orderStatusId.toString() !== draftStatus._id.toString()) {
+      this.logger.error(
+        `${base} cannot update item to order ${order.orderCode} because it is not in DRAFT status`,
+      );
+      throw new BadRequestException(
+        'Can only update items to orders in draft status',
+      );
     }
 
     const itemId = new Types.ObjectId(params.itemId);
@@ -454,7 +502,7 @@ export class OrderService {
     );
 
     this.logger.log(`${base} ${item.itemName} updated successfully`);
-    return { message: `${item.itemName} updated successfully` };
+    return `${item.itemName} updated successfully`;
   }
 
   async deleteOrderItem(params: OrderItemParamsDto) {
@@ -487,6 +535,24 @@ export class OrderService {
       );
     }
 
+    // lookup draft status
+    const draftStatus = await this.orderStatusModel.findOne({
+      orderStatusName: OrderStatusEnum.DRAFT,
+    });
+    if (!draftStatus) {
+      this.logger.error(`${base} draft order status not found`);
+      throw new BadRequestException('Draft order status not configured');
+    }
+
+    if (order.orderStatusId.toString() !== draftStatus._id.toString()) {
+      this.logger.error(
+        `${base} cannot delete item to order ${order.orderCode} because it is not in DRAFT status`,
+      );
+      throw new BadRequestException(
+        'Can only delete items to orders in draft status',
+      );
+    }
+
     const userId = new Types.ObjectId(this.req.user.userId);
     await this.orderItemModel.findOneAndDelete({ itemId, orderId }, {
       context: { changedBy: userId },
@@ -506,6 +572,74 @@ export class OrderService {
     this.logger.log(
       `${base} has successfully deleted order item for order with code ${order.orderCode}`,
     );
-    return { message: `${item.itemName} deleted successfully` };
+    return `${item.itemName} deleted successfully`;
+  }
+
+  async confirmOrder(orderId: string) {
+    this.can('CONFIRM', 'Order');
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+    const base = `[${platform}] ${phone}`;
+
+    const orderObjectId = new Types.ObjectId(orderId);
+    const order = await this.orderModel.findById(orderObjectId);
+    if (!order) {
+      this.logger.error(`${base} invalid orderId ${orderId}`);
+      throw new NotFoundException('Order not found');
+    }
+
+    // lookup draft status
+    const draftStatus = await this.orderStatusModel.findOne({
+      orderStatusName: OrderStatusEnum.DRAFT,
+    });
+    if (!draftStatus) {
+      this.logger.error(`${base} draft order status not found`);
+      throw new BadRequestException('Draft order status not configured');
+    }
+
+    if (order.orderStatusId.toString() !== draftStatus._id.toString()) {
+      this.logger.error(
+        `${base} cannot confirm order ${order.orderCode} because it is not in DRAFT status`,
+      );
+      throw new BadRequestException('Can only confirm orders in draft status');
+    }
+
+    // ensure order has at least one item
+    const itemCount = await this.orderItemModel.countDocuments({
+      orderId: order._id,
+    });
+    if (!itemCount) {
+      this.logger.error(`${base} order ${order.orderCode} has no items`);
+      throw new BadRequestException(
+        'Order must contain at least one item before confirmation',
+      );
+    }
+
+    // lookup pending status
+    const pendingStatus = await this.orderStatusModel.findOne({
+      orderStatusName: OrderStatusEnum.PENDING,
+    });
+    if (!pendingStatus) {
+      this.logger.error(`${base} pending order status not found`);
+      throw new BadRequestException('Pending order status not configured');
+    }
+
+    const userId = new Types.ObjectId(this.req.user.userId);
+    await this.orderModel.findOneAndUpdate(
+      { _id: order._id },
+      { orderStatusId: pendingStatus._id },
+      { context: { changedBy: userId }, new: true } as never,
+    );
+
+    if (order.pickupRequestId) {
+      await this.pickupRequestModel.findOneAndUpdate(
+        { _id: order.pickupRequestId },
+        {},
+        { context: { changedBy: userId }, new: true } as never,
+      );
+    }
+
+    this.logger.log(`${base} order ${order.orderCode} confirmed`);
+    return 'Order confirmed successfully';
   }
 }

@@ -2,16 +2,18 @@ import { ApiProperty } from '@nestjs/swagger';
 import { IsDefined, IsMongoId, IsOptional, MinDate } from 'class-validator';
 import { Transform } from 'class-transformer';
 
+export class PickupRequestParamsDto {
+  @ApiProperty({ required: true, description: 'Pickup request id' })
+  @IsDefined({ message: 'PickupId is required' })
+  @IsMongoId({ message: 'Invalid pickupId' })
+  pickupId: string;
+}
+
 export class AssignPickupDto {
   @ApiProperty({ required: true, description: 'Agent id' })
   @IsDefined({ message: 'AgentId is required' })
   @IsMongoId({ message: 'Invalid agentId' })
   agentId: string;
-
-  @ApiProperty({ required: true, description: 'Pickup request id' })
-  @IsDefined({ message: 'PickupRequestId is required' })
-  @IsMongoId({ message: 'Invalid pickupRequestId' })
-  pickupRequestId: string;
 
   @ApiProperty({
     required: false,

@@ -132,7 +132,7 @@ export class OrderController {
 
     return await this.orderService.updateOrderItem(params, data);
   }
-  // @Get(':orderId/items')
+
   @Delete(':orderId/items/:itemId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete order item' })
@@ -147,5 +147,21 @@ export class OrderController {
     this.logger.log(log);
 
     return await this.orderService.deleteOrderItem(params);
+  }
+
+  @Post(':orderId/confirm')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Confirm order (set status to pending)' })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async confirmOrder(
+    @Req() req: AppRequestWithUser,
+    @Param() { orderId }: OrderParamsDto,
+  ) {
+    const { platform } = req.data;
+    const phone = req.user.phone;
+    const log = `[${platform}] ${phone} is confirming order ${orderId}`;
+    this.logger.log(log);
+
+    return await this.orderService.confirmOrder(orderId);
   }
 }
