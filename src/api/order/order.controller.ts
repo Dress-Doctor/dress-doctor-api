@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -132,5 +133,19 @@ export class OrderController {
     return await this.orderService.updateOrderItem(params, data);
   }
   // @Get(':orderId/items')
-  // @Delete(':orderId/items/:itemId')
+  @Delete(':orderId/items/:itemId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete order item' })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async deleteOrderItem(
+    @Req() req: AppRequestWithUser,
+    @Param() params: OrderItemParamsDto,
+  ) {
+    const { platform } = req.data;
+    const phone = req.user.phone;
+    const log = `[${platform}] ${phone} is deleting order item for order ${params.orderId} with itemId ${params.itemId}`;
+    this.logger.log(log);
+
+    return await this.orderService.deleteOrderItem(params);
+  }
 }

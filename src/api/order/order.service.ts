@@ -427,7 +427,7 @@ export class OrderService {
         `${base} not record found for orderId ${params.orderId} and itemId ${params.itemId}`,
       );
       throw new NotFoundException(
-        `${item.itemName} is part of this order. Please refresh the list`,
+        `${item.itemName} is not part of this order. Please refresh the list`,
       );
     }
 
@@ -455,5 +455,57 @@ export class OrderService {
 
     this.logger.log(`${base} ${item.itemName} updated successfully`);
     return { message: `${item.itemName} updated successfully` };
+  }
+
+  async deleteOrderItem(params: OrderItemParamsDto) {
+    this.can('DELETE', 'OrderItem');
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+    const base = `[${platform}] ${phone}`;
+
+    const orderId = new Types.ObjectId(params.orderId);
+    const order = await this.orderModel.findById(orderId);
+    if (!order) {
+      this.logger.error(`${base} invalid orderId ${params.orderId}`);
+      throw new BadRequestException('Invalid orderid');
+    }
+
+    const itemId = new Types.ObjectId(params.itemId);
+    const item = await this.itemModel.findById(itemId);
+    if (!item) {
+      this.logger.error(`${base} invalid itemId ${params.itemId}`);
+      throw new BadRequestException('Invalid itemId');
+    }
+
+    const orderItem = await this.orderItemModel.findOne({ itemId, orderId });
+    if (!orderItem) {
+      this.logger.error(
+        `${base} not record found for orderId ${params.orderId} and itemId ${params.itemId}`,
+      );
+      throw new NotFoundException(
+        `${item.itemName} is not part of this order. Please refresh the list`,
+      );
+    }
+
+    const userId = new Types.ObjectId(this.req.user.userId);
+    await this.orderItemModel.findOneAndDelete({ itemId, orderId }, {
+      context: { changedBy: userId },
+      upsert: true,
+      new: true,
+    } as never);
+
+    const deletedPrice = orderItem.unitPrice * orderItem.quantity;
+    const orderAmount = order.orderAmount - deletedPrice;
+    const totalAmount = orderAmount + order.fee - order.discountAmount;
+    await this.orderModel.findOneAndUpdate(
+      { _id: order._id },
+      { orderAmount, totalAmount },
+      { context: { changedBy: userId }, upsert: true, new: true } as never,
+    );
+
+    this.logger.log(
+      `${base} has successfully deleted order item for order with code ${order.orderCode}`,
+    );
+    return { message: `${item.itemName} deleted successfully` };
   }
 }

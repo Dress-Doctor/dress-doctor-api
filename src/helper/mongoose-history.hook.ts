@@ -155,5 +155,29 @@ export function attachHistoryHooks<T extends Document>(
     next();
   });
 
+  // Post-hook: save history after document is deleted
+  schema.post('findOneAndDelete', async function (doc: T, next) {
+    try {
+      if (!doc) return next();
+
+      const query = this as Query<T, T>;
+      const context = query.getOptions()?.context as QueryContext | undefined;
+
+      await historyModel.create({
+        changedBy: context?.changedBy,
+        action: HistoryActionEnum.DELETE,
+        [idField]: doc[idField as keyof T] || doc._id,
+        snapshot: doc.toObject() as Record<string, any>,
+      });
+
+      logger.log(`History recorded for ${resourceName} DELETE`);
+    } catch (error) {
+      logger.error(
+        `Failed to save history for ${resourceName} DELETE: ${error}`,
+      );
+    }
+    next();
+  });
+
   return schema;
 }
