@@ -13,10 +13,8 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiBody,
   ApiHeader,
   ApiOperation,
-  ApiQuery,
   ApiResponse,
   ApiSecurity,
 } from '@nestjs/swagger';
@@ -53,7 +51,6 @@ export class OrderController {
 
   @Get()
   @HttpCode(HttpStatus.OK)
-  @ApiQuery({ type: FindOrderDto })
   @ApiOperation({ summary: 'Get all orders with items and optional filters' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllOrderWithItemsEntity })
   async getOrders(
@@ -70,7 +67,6 @@ export class OrderController {
 
   @Post('pickup')
   @HttpCode(HttpStatus.CREATED)
-  @ApiBody({ type: CreateOrderWithPickupDto })
   @ApiOperation({ summary: 'Create order for a pickup request' })
   @CheckAccess(CheckTypeEnum.customerPickup, 'customerId', 'body')
   @ApiResponse({ status: HttpStatus.CREATED, type: ApiSuccessResponse })
@@ -88,7 +84,6 @@ export class OrderController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @ApiBody({ type: CreateOrderDto })
   @ApiOperation({ summary: 'Create order without pickup request' })
   @ApiResponse({ status: HttpStatus.CREATED, type: ApiSuccessResponse })
   async createOrder(
@@ -105,7 +100,6 @@ export class OrderController {
 
   @Post(':orderId/items')
   @HttpCode(HttpStatus.CREATED)
-  @ApiBody({ type: CreateOrderItemDto })
   @ApiOperation({ summary: 'Create order items' })
   @ApiResponse({ status: HttpStatus.CREATED, type: ApiSuccessResponse })
   async createOrderItem(
@@ -123,6 +117,7 @@ export class OrderController {
 
   @Put(':orderId/items/:itemId')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update order item' })
   @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
   async updateOrderItem(
     @Req() req: AppRequestWithUser,

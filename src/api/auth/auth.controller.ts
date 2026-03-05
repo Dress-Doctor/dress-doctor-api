@@ -8,7 +8,6 @@ import {
   Req,
 } from '@nestjs/common';
 import {
-  ApiBody,
   ApiHeader,
   ApiOperation,
   ApiResponse,
@@ -36,7 +35,6 @@ export class AuthController {
   @Public()
   @Post('initiate-login')
   @HttpCode(HttpStatus.CREATED)
-  @ApiBody({ type: InitiateLoginDto })
   @ApiOperation({ summary: 'Used to initiate login' })
   @ApiResponse({ type: InitiateLoginEntity, status: HttpStatus.CREATED })
   async initiateLogin(@Body() data: InitiateLoginDto, @Req() req: AppRequest) {

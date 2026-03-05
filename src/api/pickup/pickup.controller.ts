@@ -11,26 +11,23 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiBody,
   ApiCreatedResponse,
   ApiHeader,
   ApiOperation,
-  ApiQuery,
   ApiResponse,
   ApiSecurity,
 } from '@nestjs/swagger';
 import {
-  PaginationDto,
   type AppRequest,
   type AppRequestWithUser,
 } from 'src/dto/request-data.dto';
+import { xApiKey, xApiSecret } from 'src/dto/swagger.dto';
 import { Public } from 'src/helper/decorator/public.decorator';
 import { AssignPickupDto } from './dto/assign-pickup.dto';
 import { CreatePickupDto } from './dto/create-pickup.dto';
+import { FindPickupDto } from './dto/find-pickup.dto';
 import { SchedulePickupEntity } from './entities/pickup.entity';
 import { PickupService } from './pickup.service';
-import { xApiKey, xApiSecret } from 'src/dto/swagger.dto';
-import { FindPickupDto } from './dto/find-pickup.dto';
 
 @ApiHeader(xApiKey)
 @Controller('pickup')
@@ -45,7 +42,6 @@ export class PickupController {
   @Public()
   @Post('schedule-pickup')
   @HttpCode(HttpStatus.CREATED)
-  @ApiBody({ type: CreatePickupDto })
   @ApiCreatedResponse({ type: SchedulePickupEntity })
   @ApiOperation({ summary: 'Used to schedule a pickup' })
   async create(@Req() req: AppRequest, @Body() data: CreatePickupDto) {
@@ -58,7 +54,6 @@ export class PickupController {
 
   @Post('assign-to-agent')
   @HttpCode(HttpStatus.CREATED)
-  @ApiBody({ type: AssignPickupDto })
   @ApiResponse({ status: HttpStatus.CREATED })
   @ApiOperation({ summary: 'Assign pickup to agent to an agent' })
   async assignPickup(
@@ -75,7 +70,6 @@ export class PickupController {
 
   @Get()
   @HttpCode(HttpStatus.OK)
-  @ApiQuery({ type: PaginationDto })
   @ApiResponse({ status: HttpStatus.OK })
   @ApiOperation({ summary: 'Get all pickups' })
   async findAll(@Query() query: FindPickupDto, @Req() req: AppRequestWithUser) {

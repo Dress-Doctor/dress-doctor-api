@@ -11,7 +11,6 @@ import {
   ApiBearerAuth,
   ApiHeader,
   ApiOperation,
-  ApiQuery,
   ApiResponse,
   ApiSecurity,
 } from '@nestjs/swagger';
@@ -20,14 +19,14 @@ import {
   PaginationDto,
 } from 'src/dto/request-data.dto';
 import { xApiKey, xApiSecret } from 'src/dto/swagger.dto';
-import { FindAllUserTypeEntity } from './entities/user-type.entity';
 import { FindAllCategoryEntity } from './entities/category.entity';
-import { FindAllSubCategoryEntity } from './entities/sub-category.entity';
-import { FindAllServiceEntity } from './entities/service.entity';
-import { FindAllItemEntity } from './entities/item.entity';
-import { FindAllServiceTypeEntity } from './entities/service-type.entity';
 import { FindAllCurrencyEntity } from './entities/currency.entity';
+import { FindAllItemEntity } from './entities/item.entity';
 import { FindAllOrderStatusEntity } from './entities/order-status.entity';
+import { FindAllServiceTypeEntity } from './entities/service-type.entity';
+import { FindAllServiceEntity } from './entities/service.entity';
+import { FindAllSubCategoryEntity } from './entities/sub-category.entity';
+import { FindAllUserTypeEntity } from './entities/user-type.entity';
 import { UtilService } from './util.service';
 
 @Controller('util')
@@ -43,7 +42,6 @@ export class UtilController {
 
   @Get('get-all-user-types')
   @HttpCode(HttpStatus.OK)
-  @ApiQuery({ type: PaginationDto })
   @ApiOperation({ summary: 'Get all user types' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllUserTypeEntity })
   async findAllUserType(
@@ -78,7 +76,6 @@ export class UtilController {
 
   @Get('get-all-categories')
   @HttpCode(HttpStatus.OK)
-  @ApiQuery({ type: PaginationDto })
   @ApiOperation({ summary: 'Get all categories' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllCategoryEntity })
   async findAllCategories(
@@ -96,7 +93,6 @@ export class UtilController {
 
   @Get('get-all-sub-categories')
   @HttpCode(HttpStatus.OK)
-  @ApiQuery({ type: PaginationDto })
   @ApiOperation({ summary: 'Get all sub categories' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllSubCategoryEntity })
   async findAllSubCategories(
@@ -114,7 +110,6 @@ export class UtilController {
 
   @Get('get-all-services')
   @HttpCode(HttpStatus.OK)
-  @ApiQuery({ type: PaginationDto })
   @ApiOperation({ summary: 'Get all services' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllServiceEntity })
   async findAllServices(
@@ -132,7 +127,6 @@ export class UtilController {
 
   @Get('get-all-items')
   @HttpCode(HttpStatus.OK)
-  @ApiQuery({ type: PaginationDto })
   @ApiOperation({ summary: 'Get all items' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllItemEntity })
   async findAllItems(
@@ -150,7 +144,6 @@ export class UtilController {
 
   @Get('get-all-service-types')
   @HttpCode(HttpStatus.OK)
-  @ApiQuery({ type: PaginationDto })
   @ApiOperation({ summary: 'Get all service types' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllServiceTypeEntity })
   async findAllServiceTypes(
@@ -168,7 +161,6 @@ export class UtilController {
 
   @Get('get-all-currencies')
   @HttpCode(HttpStatus.OK)
-  @ApiQuery({ type: PaginationDto })
   @ApiOperation({ summary: 'Get all currencies' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllCurrencyEntity })
   async findAllCurrencies(
@@ -186,7 +178,6 @@ export class UtilController {
 
   @Get('get-all-order-statuses')
   @HttpCode(HttpStatus.OK)
-  @ApiQuery({ type: PaginationDto })
   @ApiOperation({ summary: 'Get all order statuses' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllOrderStatusEntity })
   async findAllOrderStatuses(

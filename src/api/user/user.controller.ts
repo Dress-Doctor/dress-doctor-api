@@ -14,7 +14,6 @@ import {
   ApiBody,
   ApiHeader,
   ApiOperation,
-  ApiQuery,
   ApiResponse,
   ApiSecurity,
 } from '@nestjs/swagger';
@@ -26,8 +25,8 @@ import {
   xApiSecret,
 } from 'src/dto/swagger.dto';
 import { CreateUserDto } from './dto/create-user.dto';
-import { UserService } from './user.service';
 import { FindAllUserDto } from './dto/find-all-user.dto';
+import { UserService } from './user.service';
 
 @Controller('user')
 @ApiHeader(xApiKey)
@@ -57,8 +56,6 @@ export class UserController {
 
   @Get()
   @HttpCode(HttpStatus.OK)
-  @ApiBearerAuth('access-token')
-  @ApiQuery({ type: FindAllUserDto })
   @ApiOperation({ summary: 'Get all users' })
   @ApiResponse({
     status: HttpStatus.OK,
