@@ -1,6 +1,6 @@
 export enum OrderStatusEnum {
   DRAFT = 'DRAFT',
-  PENDING = 'PENDING',
+  CONFIRMED = 'CONFIRMED',
   RECEIVED = 'RECEIVED',
   WASHING = 'WASHING',
   READY = 'READY',

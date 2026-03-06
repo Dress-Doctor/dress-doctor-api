@@ -217,6 +217,7 @@ export class PickupService {
     this.can('ASSIGN', 'PickupAssignment');
     const platform = this.req.data.platform;
     const { phone } = this.req.user;
+    const base = `[${platform}] ${phone}`;
     const userId = new Types.ObjectId(this.req.user.userId);
 
     const userType = await this.userTypeModel.findOne({
@@ -233,20 +234,29 @@ export class PickupService {
       throw new BadRequestException(log);
     }
 
-    const pendingPickupStatus = await this.pickupStatusModel.findOne({
-      pickupStatusName: PickupStatusEnum.PENDING,
+    const confirmPickupStatus = await this.pickupStatusModel.findOne({
+      pickupStatusName: PickupStatusEnum.CONFIRMED,
     });
 
     const pickupRequestId = new Types.ObjectId(param.pickupId);
-    const pickupRequestExists = await this.pickupRequestModel.findOne({
-      _id: pickupRequestId,
-      pickupStatusId: pendingPickupStatus?._id,
-    });
+    const pickupRequestExists =
+      await this.pickupRequestModel.findById(pickupRequestId);
 
     if (!pickupRequestExists) {
-      const log = `This pickup request is no longer pending and cannot be assigned.`;
-      this.logger.error(`[${platform}] ${phone} ${log}`);
-      throw new BadRequestException(log);
+      this.logger.error(`${base} invalid pickupId ${param.pickupId}`);
+      throw new NotFoundException('Pickup not found');
+    }
+
+    if (
+      pickupRequestExists.pickupStatusId.toString() !==
+      confirmPickupStatus?._id.toString()
+    ) {
+      this.logger.error(
+        `${base} cannot assign pickup ${pickupRequestExists.reference} because it is not in CONFIRMED status`,
+      );
+      throw new BadRequestException(
+        'Can only assign pickup in confirmed status',
+      );
     }
 
     await this.pickupAssignmentModel.findOneAndUpdate(

@@ -616,25 +616,32 @@ export class OrderService {
     }
 
     // lookup pending status
-    const pendingStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.PENDING,
+    const confirmedStatus = await this.orderStatusModel.findOne({
+      orderStatusName: OrderStatusEnum.CONFIRMED,
     });
-    if (!pendingStatus) {
-      this.logger.error(`${base} pending order status not found`);
-      throw new BadRequestException('Pending order status not configured');
+    if (!confirmedStatus) {
+      this.logger.error(`${base} confirmed order status not found`);
+      throw new BadRequestException('Confirmed order status not configured');
     }
 
     const userId = new Types.ObjectId(this.req.user.userId);
     await this.orderModel.findOneAndUpdate(
       { _id: order._id },
-      { orderStatusId: pendingStatus._id },
+      { orderStatusId: confirmedStatus._id },
       { context: { changedBy: userId }, new: true } as never,
     );
 
     if (order.pickupRequestId) {
+      const pickedUpStatus = await this.pickupStatusModel.findOne({
+        pickupStatusName: PickupStatusEnum.PICKED_UP,
+      });
+
+      const assignStatus = await this.pickupStatusModel.findOne({
+        pickupStatusName: PickupStatusEnum.ASSIGNED,
+      });
       await this.pickupRequestModel.findOneAndUpdate(
-        { _id: order.pickupRequestId },
-        {},
+        { _id: order.pickupRequestId, pickupStatusId: assignStatus?._id },
+        { pickupStatusId: pickedUpStatus?._id },
         { context: { changedBy: userId }, new: true } as never,
       );
     }

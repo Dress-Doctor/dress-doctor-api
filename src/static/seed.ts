@@ -38,37 +38,26 @@ export default {
   pickupStatus: [
     {
       pickupStatusName: 'PENDING',
-      description: 'Client books a pickup via website or mobile app.',
+      description:
+        'Pickup request has been submitted by the customer and is awaiting confirmation.',
     },
     {
       pickupStatusName: 'CONFIRMED',
-      description:
-        'Customer Service contacts the client to confirm order details and pricing.',
+      description: 'Pickup request has been confirmed by customer service.',
     },
     {
       pickupStatusName: 'ASSIGNED',
-      description: 'Pickup request is assigned to a rider.',
+      description:
+        'Pickup request has been assigned to a rider for collection.',
     },
     {
       pickupStatusName: 'PICKED_UP',
-      description: 'Rider picks up clothes and creates the customer order.',
-    },
-    {
-      pickupStatusName: 'IN_PROGRESS',
-      description: 'Clothes are being washed or cleaned at the factory.',
-    },
-    {
-      pickupStatusName: 'READY',
-      description: 'Clothes are cleaned and ready for delivery.',
-    },
-    {
-      pickupStatusName: 'DELIVERED',
       description:
-        'Clothes are delivered to the client and the order is closed.',
+        'Rider has collected the clothes and created the customer order.',
     },
     {
       pickupStatusName: 'CANCELLED',
-      description: 'Pickup request or order is cancelled by the client.',
+      description: 'Pickup request has been cancelled.',
     },
   ],
 
@@ -79,8 +68,9 @@ export default {
         'Order under preparation; not confirmed and not ready for payment.',
     },
     {
-      orderStatusName: 'PENDING',
-      description: 'Order has been created by the rider.',
+      orderStatusName: 'CONFIRMED',
+      description:
+        'Order has been approved by the customer and is awaiting arrival at the factory for processing.',
     },
     {
       orderStatusName: 'RECEIVED',

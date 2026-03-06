@@ -57,7 +57,7 @@ export class AppModule implements NestModule, OnModuleInit {
     try {
       if (this.connection.readyState === ConnectionStates.connected) {
         this.logger.log('✅ MongoDB connected');
-        // await this.seederService.run();
+        await this.seederService.run();
       } else this.logger.log('❌ Failed to connect to MongoDB');
     } catch (error) {
       this.logger.error('❌ Failed to connect to MongoDB', error);
