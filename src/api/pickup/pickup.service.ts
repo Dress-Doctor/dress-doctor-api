@@ -17,6 +17,9 @@ import { PickupAssignment } from 'src/schema/pickup/pickup-assignment.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { PickupStatusEnum } from 'src/schema/pickup/pickup.dto';
+import { Order } from 'src/schema/order/order.schema';
+import { OrderStatus } from 'src/schema/order/order-status.schema';
+import { OrderStatusEnum } from 'src/schema/order/order.dto';
 import { Customer } from 'src/schema/user/customer.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { UserTypeEum } from 'src/schema/user/user.dto';
@@ -44,6 +47,12 @@ export class PickupService {
 
     @InjectModel(PickupAssignment.name)
     private readonly pickupAssignmentModel: Model<PickupAssignment>,
+
+    @InjectModel(Order.name)
+    private readonly orderModel: Model<Order>,
+
+    @InjectModel(OrderStatus.name)
+    private readonly orderStatusModel: Model<OrderStatus>,
 
     private readonly codeService: CodeGeneratorService,
     @Inject(REQUEST) private readonly req: AppRequestWithUser,
@@ -337,5 +346,101 @@ export class PickupService {
 
     this.logger.log(`${base} pickup ${pickupRequest.reference} confirmed`);
     return 'Pickup confirmed successfully';
+  }
+
+  async cancelPickup(pickupRequestId: string) {
+    this.can('UPDATE', 'PickupRequest');
+
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+    const base = `[${platform}] ${phone}`;
+
+    const pickupObjectId = new Types.ObjectId(pickupRequestId);
+    const pickupRequest =
+      await this.pickupRequestModel.findById(pickupObjectId);
+    if (!pickupRequest) {
+      this.logger.error(`${base} invalid pickupRequestId ${pickupRequestId}`);
+      throw new NotFoundException('Pickup not found');
+    }
+
+    const cancelledStatus = await this.pickupStatusModel.findOne({
+      pickupStatusName: PickupStatusEnum.CANCELLED,
+    });
+    if (!cancelledStatus) {
+      this.logger.error(`${base} cancelled pickup status not found`);
+      throw new BadRequestException('Cancelled pickup status not configured');
+    }
+
+    // disallow cancelling already cancelled pickups
+    if (
+      pickupRequest.pickupStatusId.toString() === cancelledStatus._id.toString()
+    ) {
+      this.logger.error(
+        `${base} pickup ${pickupRequest.reference} is already cancelled`,
+      );
+      throw new BadRequestException('Pickup is already cancelled');
+    }
+
+    // disallow cancelling picked up pickups
+    const pickedUpStatus = await this.pickupStatusModel.findOne({
+      pickupStatusName: PickupStatusEnum.PICKED_UP,
+    });
+    if (
+      pickedUpStatus &&
+      pickupRequest.pickupStatusId.toString() === pickedUpStatus._id.toString()
+    ) {
+      this.logger.error(
+        `${base} cannot cancel picked up pickup ${pickupRequest.reference}`,
+      );
+      throw new BadRequestException('Cannot cancel a picked up pickup');
+    }
+
+    const userId = new Types.ObjectId(this.req.user.userId);
+    await this.pickupRequestModel.findOneAndUpdate(
+      { _id: pickupRequest._id },
+      { pickupStatusId: cancelledStatus._id },
+      { context: { changedBy: userId }, new: true } as never,
+    );
+
+    // Cancel any associated orders
+    const cancelledOrderStatus = await this.orderStatusModel.findOne({
+      orderStatusName: OrderStatusEnum.CANCELLED,
+    });
+    if (cancelledOrderStatus) {
+      const associatedOrders = await this.orderModel.find({
+        pickupRequestId: pickupRequest._id,
+      });
+
+      for (const order of associatedOrders) {
+        // Skip if already delivered or cancelled
+        const deliveredStatus = await this.orderStatusModel.findOne({
+          orderStatusName: OrderStatusEnum.DELIVERED,
+        });
+        if (
+          order.orderStatusId.toString() === cancelledOrderStatus._id.toString()
+        ) {
+          continue; // Already cancelled
+        }
+        if (
+          deliveredStatus &&
+          order.orderStatusId.toString() === deliveredStatus._id.toString()
+        ) {
+          continue; // Cannot cancel delivered order
+        }
+
+        // Update order status to cancelled
+        await this.orderModel.findOneAndUpdate(
+          { _id: order._id },
+          { orderStatusId: cancelledOrderStatus._id },
+          { context: { changedBy: userId }, new: true } as never,
+        );
+        this.logger.log(
+          `${base} order ${order.orderCode} cancelled due to pickup cancellation`,
+        );
+      }
+    }
+
+    this.logger.log(`${base} pickup ${pickupRequest.reference} cancelled`);
+    return 'Pickup cancelled successfully';
   }
 }

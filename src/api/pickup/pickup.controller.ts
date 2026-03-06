@@ -102,4 +102,20 @@ export class PickupController {
 
     return await this.pickupService.confirmPickup(pickupRequestId);
   }
+
+  @Post(':pickupId/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cancel a pickup request' })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async cancelPickup(
+    @Req() req: AppRequestWithUser,
+    @Param() { pickupId: pickupRequestId }: PickupRequestParamsDto,
+  ) {
+    const { platform } = req.data;
+    const phone = req.user.phone;
+    const log = `[${platform}] ${phone} is cancelling pickup ${pickupRequestId}`;
+    this.logger.log(log);
+
+    return await this.pickupService.cancelPickup(pickupRequestId);
+  }
 }

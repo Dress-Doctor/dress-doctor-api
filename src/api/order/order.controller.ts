@@ -164,4 +164,84 @@ export class OrderController {
 
     return await this.orderService.confirmOrder(orderId);
   }
+
+  @Post(':orderId/received')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mark order as received at factory' })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async receiveOrder(
+    @Req() req: AppRequestWithUser,
+    @Param() { orderId }: OrderParamsDto,
+  ) {
+    const { platform } = req.data;
+    const phone = req.user.phone;
+    const log = `[${platform}] ${phone} is marking order ${orderId} as received`;
+    this.logger.log(log);
+
+    return await this.orderService.receiveOrder(orderId);
+  }
+
+  @Post(':orderId/washing')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Start washing an order' })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async washOrder(
+    @Req() req: AppRequestWithUser,
+    @Param() { orderId }: OrderParamsDto,
+  ) {
+    const { platform } = req.data;
+    const phone = req.user.phone;
+    const log = `[${platform}] ${phone} is starting washing for order ${orderId}`;
+    this.logger.log(log);
+
+    return await this.orderService.washOrder(orderId);
+  }
+
+  @Post(':orderId/ready')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mark order ready for delivery' })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async readyOrder(
+    @Req() req: AppRequestWithUser,
+    @Param() { orderId }: OrderParamsDto,
+  ) {
+    const { platform } = req.data;
+    const phone = req.user.phone;
+    const log = `[${platform}] ${phone} is marking order ${orderId} ready`;
+    this.logger.log(log);
+
+    return await this.orderService.readyOrder(orderId);
+  }
+
+  @Post(':orderId/delivered')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mark order as delivered to customer' })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async deliverOrder(
+    @Req() req: AppRequestWithUser,
+    @Param() { orderId }: OrderParamsDto,
+  ) {
+    const { platform } = req.data;
+    const phone = req.user.phone;
+    const log = `[${platform}] ${phone} is marking order ${orderId} delivered`;
+    this.logger.log(log);
+
+    return await this.orderService.deliverOrder(orderId);
+  }
+
+  @Post(':orderId/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cancel an order' })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async cancelOrder(
+    @Req() req: AppRequestWithUser,
+    @Param() { orderId }: OrderParamsDto,
+  ) {
+    const { platform } = req.data;
+    const phone = req.user.phone;
+    const log = `[${platform}] ${phone} is cancelling order ${orderId}`;
+    this.logger.log(log);
+
+    return await this.orderService.cancelOrder(orderId);
+  }
 }
