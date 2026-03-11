@@ -22,6 +22,7 @@ import { ApiClientGuard } from './helper/guard/api-client.guard';
 import { UtilModule } from './api/util/util.module';
 import { UserModule } from './api/user/user.module';
 import { OrderModule } from './api/order/order.module';
+import { PaymentModule } from './api/payment/payment.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { OrderModule } from './api/order/order.module';
     UtilModule,
     UserModule,
     OrderModule,
+    PaymentModule,
   ],
   providers: [
     SeederService,
@@ -53,11 +55,11 @@ export class AppModule implements NestModule, OnModuleInit {
     consumer.apply(LogRequestMiddleware).forRoutes('*path');
   }
 
-  async onModuleInit() {
+  onModuleInit() {
     try {
       if (this.connection.readyState === ConnectionStates.connected) {
         this.logger.log('✅ MongoDB connected');
-        await this.seederService.run();
+        this.seederService.run();
       } else this.logger.log('❌ Failed to connect to MongoDB');
     } catch (error) {
       this.logger.error('❌ Failed to connect to MongoDB', error);

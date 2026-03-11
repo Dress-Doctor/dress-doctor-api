@@ -80,9 +80,12 @@ export function attachHistoryHooks<T extends Document>(
   // Post-hook: save history after document is created
   schema.post('save', async function (doc: T, next) {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+      const changedBy = (doc as any).$locals?.changedBy;
+
       await historyModel.create({
-        changedBy: doc._id,
         action: HistoryActionEnum.CREATE,
+        changedBy: changedBy as Types.ObjectId,
         [idField]: doc[idField as keyof T] || doc._id,
         snapshot: doc.toObject() as Record<string, any>,
       });

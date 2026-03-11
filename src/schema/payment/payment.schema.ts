@@ -3,6 +3,8 @@ import { Document, Types } from 'mongoose';
 import { Order } from '../order/order.schema';
 import { PaymentMethod } from './payment-method.schema';
 import { PaymentStatus } from './payment-status.schema';
+import { User } from '../user/user.schema';
+import { Currency } from '../catalog/currency.schema';
 
 export const paymentSchemaName = 'payment';
 @Schema({ timestamps: true, collection: paymentSchemaName })
@@ -19,8 +21,20 @@ export class Payment extends Document<Types.ObjectId> {
   @Prop({ required: true })
   amount: number;
 
+  @Prop({ type: Types.ObjectId, ref: User.name })
+  receivedBy: Types.ObjectId;
+
   @Prop({ required: true })
   paidAt: Date;
+
+  @Prop({ required: false })
+  transactionRef?: string;
+
+  @Prop({ required: true, type: Types.ObjectId, ref: Currency.name })
+  currencyId: Types.ObjectId;
+
+  @Prop({ required: false })
+  note?: string;
 }
 
 export const PaymentSchema = SchemaFactory.createForClass(Payment);

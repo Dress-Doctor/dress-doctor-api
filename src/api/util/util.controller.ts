@@ -29,9 +29,9 @@ import { FindAllSubCategoryEntity } from './entities/sub-category.entity';
 import { FindAllUserTypeEntity } from './entities/user-type.entity';
 import { UtilService } from './util.service';
 
-@Controller('util')
 @ApiHeader(xApiKey)
 @ApiHeader(xApiSecret)
+@Controller('reference')
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
 @ApiBearerAuth('access-token')
@@ -40,7 +40,7 @@ export class UtilController {
 
   constructor(private readonly utilService: UtilService) {}
 
-  @Get('get-all-user-types')
+  @Get('user-types')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all user types' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllUserTypeEntity })
@@ -57,7 +57,7 @@ export class UtilController {
     return await this.utilService.findAllUserType(query);
   }
 
-  @Get('get-all-pickup-statuses')
+  @Get('pickup-statuses')
   @HttpCode(HttpStatus.OK)
   @ApiResponse({ status: HttpStatus.OK })
   @ApiOperation({ summary: 'Get all pickup statuses' })
@@ -74,7 +74,7 @@ export class UtilController {
     return await this.utilService.findAllPickupStatuses(query);
   }
 
-  @Get('get-all-categories')
+  @Get('categories')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all categories' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllCategoryEntity })
@@ -91,7 +91,7 @@ export class UtilController {
     return await this.utilService.findAllCategories(query);
   }
 
-  @Get('get-all-sub-categories')
+  @Get('sub-categories')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all sub categories' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllSubCategoryEntity })
@@ -108,7 +108,7 @@ export class UtilController {
     return await this.utilService.findAllSubCategories(query);
   }
 
-  @Get('get-all-services')
+  @Get('services')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all services' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllServiceEntity })
@@ -125,7 +125,7 @@ export class UtilController {
     return await this.utilService.findAllServices(query);
   }
 
-  @Get('get-all-items')
+  @Get('items')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all items' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllItemEntity })
@@ -142,7 +142,7 @@ export class UtilController {
     return await this.utilService.findAllItems(query);
   }
 
-  @Get('get-all-service-types')
+  @Get('service-types')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all service types' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllServiceTypeEntity })
@@ -159,7 +159,7 @@ export class UtilController {
     return await this.utilService.findAllServiceTypes(query);
   }
 
-  @Get('get-all-currencies')
+  @Get('currencies')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all currencies' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllCurrencyEntity })
@@ -176,7 +176,7 @@ export class UtilController {
     return await this.utilService.findAllCurrencies(query);
   }
 
-  @Get('get-all-order-statuses')
+  @Get('order-statuses')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all order statuses' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllOrderStatusEntity })
@@ -191,5 +191,39 @@ export class UtilController {
     this.logger.log(log);
 
     return await this.utilService.findAllOrderStatuses(query);
+  }
+
+  @Get('payment-methods')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Get all order statuses' })
+  @ApiResponse({ status: HttpStatus.OK, type: FindAllOrderStatusEntity })
+  async findAllPaymentMethod(
+    @Query() query: PaginationDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const platform = req.data.platform;
+    const phone = req.user.phone;
+
+    const log = `[${platform}] ${phone} is getting all payment method with query ${JSON.stringify(query)}`;
+    this.logger.log(log);
+
+    return await this.utilService.findAllPaymentMethod(query);
+  }
+
+  @Get('payment-statuses')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Get all order statuses' })
+  @ApiResponse({ status: HttpStatus.OK, type: FindAllOrderStatusEntity })
+  async findAllPaymentStatues(
+    @Query() query: PaginationDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const platform = req.data.platform;
+    const phone = req.user.phone;
+
+    const log = `[${platform}] ${phone} is getting all payment status with query ${JSON.stringify(query)}`;
+    this.logger.log(log);
+
+    return await this.utilService.findAllPaymentStatuses(query);
   }
 }

@@ -23,6 +23,8 @@ import { Currency } from 'src/schema/catalog/currency.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { User } from 'src/schema/user/user.schema';
+import { PaymentMethod } from 'src/schema/payment/payment-method.schema';
+import { PaymentStatus } from 'src/schema/payment/payment-status.schema';
 
 @Injectable()
 export class UtilService {
@@ -49,6 +51,12 @@ export class UtilService {
 
     @InjectModel(OrderStatus.name)
     private readonly orderStatusModel: Model<OrderStatus>,
+
+    @InjectModel(PaymentMethod.name)
+    private readonly paymentMethodModel: Model<PaymentMethod>,
+
+    @InjectModel(PaymentStatus.name)
+    private readonly paymentStatusModel: Model<PaymentStatus>,
   ) {}
 
   private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
@@ -356,5 +364,57 @@ export class UtilService {
 
     this.logger.log(`${logBase} has successfully retrieve all order statuses`);
     return { total: totalOrderStatuses, data: orderStatuses, nextPage };
+  }
+
+  async findAllPaymentMethod({ page, size, ...query }: PaginationDto) {
+    this.can('READ', 'PaymentMethod');
+
+    const platform = this.req.data.platform;
+    const phone = this.req.user.phone;
+    const logBase = `[${platform}] ${phone}`;
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(query.sort);
+
+    const totalPaymentMethod = await this.paymentMethodModel.countDocuments();
+    const paymentMethods = await this.paymentMethodModel
+      .find()
+      .sort(sort)
+      .skip(skip)
+      .limit(size)
+      .lean();
+
+    const totalPages = Math.ceil(totalPaymentMethod / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(`${logBase} has successfully retrieve all payment methods`);
+    return { total: totalPaymentMethod, data: paymentMethods, nextPage };
+  }
+
+  async findAllPaymentStatuses({ page, size, ...query }: PaginationDto) {
+    this.can('READ', 'PaymentStatus');
+
+    const platform = this.req.data.platform;
+    const phone = this.req.user.phone;
+    const logBase = `[${platform}] ${phone}`;
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(query.sort);
+
+    const totalPaymentStatus = await this.paymentStatusModel.countDocuments();
+    const paymentStatus = await this.paymentStatusModel
+      .find()
+      .sort(sort)
+      .skip(skip)
+      .limit(size)
+      .lean();
+
+    const totalPages = Math.ceil(totalPaymentStatus / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(
+      `${logBase} has successfully retrieve all payment statuses`,
+    );
+    return { total: totalPaymentStatus, data: paymentStatus, nextPage };
   }
 }

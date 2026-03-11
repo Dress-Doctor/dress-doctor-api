@@ -4,6 +4,7 @@ import { PickupRequest } from '../pickup/pickup-request.schema';
 import { OrderStatus } from './order-status.schema';
 import { Currency } from '../catalog/currency.schema';
 import { User } from '../user/user.schema';
+import { OrderPaymentStatusEnum } from './order.dto';
 
 export const orderSchemaName = 'order';
 @Schema({ timestamps: true, collection: orderSchemaName })
@@ -31,6 +32,20 @@ export class Order extends Document<Types.ObjectId> {
 
   @Prop({ required: true, default: 0 })
   totalAmount: number;
+
+  @Prop({ required: true, default: 0 })
+  amountPaid: number;
+
+  @Prop({ required: true, default: 0 })
+  balanceDue: number;
+
+  @Prop({
+    type: String,
+    required: true,
+    default: 'UNPAID',
+    enum: OrderPaymentStatusEnum,
+  })
+  paymentStatus: OrderPaymentStatusEnum;
 
   @Prop({ required: true })
   estimatedDeliveryDate: Date;

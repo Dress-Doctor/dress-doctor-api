@@ -1,12 +1,11 @@
 export enum PaymentStatusEum {
-  PENDING = 'PENDING',
-  PAID = 'PAID',
   FAILED = 'FAILED',
-  PARTIAL = 'PARTIAL',
+  REFUNDED = 'REFUNDED',
+  COMPLETED = 'COMPLETED',
 }
 
 export enum PaymentMethodEnum {
   CASH = 'CASH',
-  MTN_MOBILE_MONEY = 'MTN_MOBILE_MONEY',
-  ORANGE_MOBILE_MONEY = 'ORANGE_MOBILE_MONEY',
+  MTN_MOMO = 'MTN_MOMO',
+  ORANGE_MONEY = 'ORANGE_MONEY',
 }

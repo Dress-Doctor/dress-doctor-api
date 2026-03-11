@@ -96,26 +96,22 @@ export default {
 
   paymentMethod: [
     {
-      paymentMethodName: 'CASH',
+      paymentMethodName: 'Cash',
       description: 'Payment is made in cash at pickup or delivery.',
     },
     {
-      paymentMethodName: 'MTN_MOBILE_MONEY',
+      paymentMethodName: 'MTN Momo',
       description: 'Payment is made using MTN Mobile Money.',
     },
     {
-      paymentMethodName: 'ORANGE_MOBILE_MONEY',
+      paymentMethodName: 'Orange Money',
       description: 'Payment is made using Orange Mobile Money.',
     },
   ],
 
   paymentStatus: [
     {
-      paymentStatusName: 'PENDING',
-      description: 'Payment has been initiated but not yet completed.',
-    },
-    {
-      paymentStatusName: 'PAID',
+      paymentStatusName: 'COMPLETED',
       description: 'Payment has been successfully completed in full.',
     },
     {
@@ -123,8 +119,8 @@ export default {
       description: 'Payment attempt was unsuccessful or declined.',
     },
     {
-      paymentStatusName: 'PARTIAL',
-      description: 'Payment was completed for only part of the total amount.',
+      paymentStatusName: 'REFUNDED',
+      description: 'Payment was successfully refunded.',
     },
   ],
 
