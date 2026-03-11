@@ -5,8 +5,7 @@ import { ChangedFieldDto } from '../user/user.dto';
 import { User } from '../user/user.schema';
 import { Payment } from './payment.schema';
 
-export const paymentHistorySchemaName = 'payment-history';
-@Schema({ timestamps: true, collection: paymentHistorySchemaName })
+@Schema({ timestamps: true, collection: 'payment_history' })
 export class PaymentHistory extends Document<Types.ObjectId> {
   @Prop({
     index: true,

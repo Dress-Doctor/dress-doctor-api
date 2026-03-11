@@ -2,7 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { getModelToken, MongooseModule } from '@nestjs/mongoose';
 import { PaymentHistory, PaymentHistorySchema } from './payment-history.schema';
 import { PaymentMethod, PaymentMethodSchema } from './payment-method.schema';
-import { PaymentStatus, PaymentStatusSchema } from './payment-status.schema';
+import { PaymentType, PaymentTypeSchema } from './payment-type.schema';
 import { Payment, PaymentSchema } from './payment.schema';
 import { Model } from 'mongoose';
 import { attachHistoryHooks } from 'src/helper/mongoose-history.hook';
@@ -26,8 +26,8 @@ import { attachHistoryHooks } from 'src/helper/mongoose-history.hook';
       },
     ]),
     MongooseModule.forFeature([
+      { name: PaymentType.name, schema: PaymentTypeSchema },
       { name: PaymentMethod.name, schema: PaymentMethodSchema },
-      { name: PaymentStatus.name, schema: PaymentStatusSchema },
       { name: PaymentHistory.name, schema: PaymentHistorySchema },
     ]),
   ],

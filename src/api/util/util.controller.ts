@@ -210,20 +210,20 @@ export class UtilController {
     return await this.utilService.findAllPaymentMethod(query);
   }
 
-  @Get('payment-statuses')
+  @Get('payment-types')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all order statuses' })
   @ApiResponse({ status: HttpStatus.OK, type: FindAllOrderStatusEntity })
-  async findAllPaymentStatues(
+  async findAllPaymentTypes(
     @Query() query: PaginationDto,
     @Req() req: AppRequestWithUser,
   ) {
     const platform = req.data.platform;
     const phone = req.user.phone;
 
-    const log = `[${platform}] ${phone} is getting all payment status with query ${JSON.stringify(query)}`;
+    const log = `[${platform}] ${phone} is getting all payment types with query ${JSON.stringify(query)}`;
     this.logger.log(log);
 
-    return await this.utilService.findAllPaymentStatuses(query);
+    return await this.utilService.findAllPaymentTypes(query);
   }
 }

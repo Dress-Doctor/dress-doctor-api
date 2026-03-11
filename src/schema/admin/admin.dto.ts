@@ -67,8 +67,8 @@ export enum SubjectEnum {
 
   // payment
   Payment = 'Payment',
+  PaymentType = 'PaymentType',
   PaymentMethod = 'PaymentMethod',
-  PaymentStatus = 'PaymentStatus',
 
   // promo
   Promo = 'Promo',

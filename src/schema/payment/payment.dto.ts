@@ -1,11 +1,10 @@
-export enum PaymentStatusEum {
-  FAILED = 'FAILED',
-  REFUNDED = 'REFUNDED',
-  COMPLETED = 'COMPLETED',
+export enum PaymentMethodEnum {
+  CASH = 'Cash',
+  MTN_MOMO = 'MTN Momo',
+  ORANGE_MONEY = 'Orange Money',
 }
 
-export enum PaymentMethodEnum {
-  CASH = 'CASH',
-  MTN_MOMO = 'MTN_MOMO',
-  ORANGE_MONEY = 'ORANGE_MONEY',
+export enum PaymentTypeEnum {
+  PAYMENT = 'PAYMENT',
+  REFUND = 'REFUND',
 }

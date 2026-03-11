@@ -109,18 +109,14 @@ export default {
     },
   ],
 
-  paymentStatus: [
+  paymentType: [
     {
-      paymentStatusName: 'COMPLETED',
-      description: 'Payment has been successfully completed in full.',
+      paymentTypeName: 'PAYMENT',
+      description: 'Money received from the customer for an order.',
     },
     {
-      paymentStatusName: 'FAILED',
-      description: 'Payment attempt was unsuccessful or declined.',
-    },
-    {
-      paymentStatusName: 'REFUNDED',
-      description: 'Payment was successfully refunded.',
+      paymentTypeName: 'REFUND',
+      description: 'Money returned to the customer for an order.',
     },
   ],
 

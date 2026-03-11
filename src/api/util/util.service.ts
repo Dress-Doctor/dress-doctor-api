@@ -24,7 +24,7 @@ import { OrderStatus } from 'src/schema/order/order-status.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { User } from 'src/schema/user/user.schema';
 import { PaymentMethod } from 'src/schema/payment/payment-method.schema';
-import { PaymentStatus } from 'src/schema/payment/payment-status.schema';
+import { PaymentType } from 'src/schema/payment/payment-type.schema';
 
 @Injectable()
 export class UtilService {
@@ -55,8 +55,8 @@ export class UtilService {
     @InjectModel(PaymentMethod.name)
     private readonly paymentMethodModel: Model<PaymentMethod>,
 
-    @InjectModel(PaymentStatus.name)
-    private readonly paymentStatusModel: Model<PaymentStatus>,
+    @InjectModel(PaymentType.name)
+    private readonly paymentTypeModel: Model<PaymentType>,
   ) {}
 
   private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
@@ -391,8 +391,8 @@ export class UtilService {
     return { total: totalPaymentMethod, data: paymentMethods, nextPage };
   }
 
-  async findAllPaymentStatuses({ page, size, ...query }: PaginationDto) {
-    this.can('READ', 'PaymentStatus');
+  async findAllPaymentTypes({ page, size, ...query }: PaginationDto) {
+    this.can('READ', 'PaymentType');
 
     const platform = this.req.data.platform;
     const phone = this.req.user.phone;
@@ -401,20 +401,20 @@ export class UtilService {
     const skip = (page - 1) * size;
     const sort = this.appUtilService.parseSortParam(query.sort);
 
-    const totalPaymentStatus = await this.paymentStatusModel.countDocuments();
-    const paymentStatus = await this.paymentStatusModel
+    const total = await this.paymentTypeModel.countDocuments();
+    const data = await this.paymentTypeModel
       .find()
       .sort(sort)
       .skip(skip)
       .limit(size)
       .lean();
 
-    const totalPages = Math.ceil(totalPaymentStatus / size);
+    const totalPages = Math.ceil(total / size);
     const nextPage = page < totalPages ? page + 1 : null;
 
     this.logger.log(
       `${logBase} has successfully retrieve all payment statuses`,
     );
-    return { total: totalPaymentStatus, data: paymentStatus, nextPage };
+    return { total, data, nextPage };
   }
 }

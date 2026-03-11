@@ -75,4 +75,11 @@ export class PaymentEntity {
     example: '2026-01-04T13:09:58.201Z',
   })
   updatedAt: Date;
+
+  @ApiProperty({
+    required: true,
+    example: 'REFUND',
+    description: 'Payment type',
+  })
+  paymentType: string;
 }

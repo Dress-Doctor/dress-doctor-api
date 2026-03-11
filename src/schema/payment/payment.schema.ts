@@ -1,10 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { Order } from '../order/order.schema';
-import { PaymentMethod } from './payment-method.schema';
-import { PaymentStatus } from './payment-status.schema';
-import { User } from '../user/user.schema';
 import { Currency } from '../catalog/currency.schema';
+import { Order } from '../order/order.schema';
+import { User } from '../user/user.schema';
+import { PaymentMethod } from './payment-method.schema';
+import { PaymentType } from './payment-type.schema';
 
 export const paymentSchemaName = 'payment';
 @Schema({ timestamps: true, collection: paymentSchemaName })
@@ -15,8 +15,8 @@ export class Payment extends Document<Types.ObjectId> {
   @Prop({ required: true, type: Types.ObjectId, ref: PaymentMethod.name })
   paymentMethodId: Types.ObjectId;
 
-  @Prop({ required: true, type: Types.ObjectId, ref: PaymentStatus.name })
-  paymentStatusId: Types.ObjectId;
+  @Prop({ required: true, type: Types.ObjectId, ref: PaymentType.name })
+  paymentTypeId: Types.ObjectId;
 
   @Prop({ required: true })
   amount: number;

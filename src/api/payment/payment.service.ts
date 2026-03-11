@@ -1,22 +1,25 @@
 import {
-  Injectable,
+  BadRequestException,
   Inject,
+  Injectable,
   Logger,
   NotFoundException,
-  BadRequestException,
 } from '@nestjs/common';
+import { REQUEST } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { REQUEST } from '@nestjs/core';
-import { CreatePaymentDto } from './dto/create-payment.dto';
-import { RefundPaymentDto } from './dto/refund-payment.dto';
-import { Payment } from 'src/schema/payment/payment.schema';
-import { PaymentStatus } from 'src/schema/payment/payment-status.schema';
-import { Order } from 'src/schema/order/order.schema';
-import { OrderPaymentStatusEnum } from 'src/schema/order/order.dto';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
+import { OrderPaymentStatusEnum } from 'src/schema/order/order.dto';
+import { Order } from 'src/schema/order/order.schema';
+import { PaymentType } from 'src/schema/payment/payment-type.schema';
+import { PaymentTypeEnum } from 'src/schema/payment/payment.dto';
+import { Payment } from 'src/schema/payment/payment.schema';
 import { OrderParamsDto } from '../order/dto/create-order-item.dto';
+import { CreatePaymentDto } from './dto/create-payment.dto';
+import { RefundPaymentDto } from './dto/refund-payment.dto';
+import { Currency } from 'src/schema/catalog/currency.schema';
+import { PaymentMethod } from 'src/schema/payment/payment-method.schema';
 
 @Injectable()
 export class PaymentService {
@@ -24,10 +27,18 @@ export class PaymentService {
 
   constructor(
     @InjectModel(Payment.name) private readonly paymentModel: Model<Payment>,
-    @InjectModel(PaymentStatus.name)
-    private readonly paymentStatusModel: Model<PaymentStatus>,
+
+    @InjectModel(PaymentType.name)
+    private readonly paymentTypeModel: Model<PaymentType>,
+
     @InjectModel(Order.name) private readonly orderModel: Model<Order>,
+
     @Inject(REQUEST) private readonly req: AppRequestWithUser,
+
+    @InjectModel(PaymentMethod.name)
+    private readonly paymentMethodModel: Model<PaymentMethod>,
+
+    @InjectModel(Currency.name) private readonly currencyModel: Model<Currency>,
   ) {}
 
   async createPaymentForOrder(param: OrderParamsDto, data: CreatePaymentDto) {
@@ -60,15 +71,45 @@ export class PaymentService {
       );
     }
 
-    // Validate payment status exists
-    const paymentStatusId = new Types.ObjectId(data.paymentStatusId);
-    const paymentStatus =
-      await this.paymentStatusModel.findById(paymentStatusId);
-    if (!paymentStatus) {
+    // Validate payment method exists
+    const paymentMethodId = new Types.ObjectId(data.paymentMethodId);
+    const paymentMethod =
+      await this.paymentMethodModel.findById(paymentMethodId);
+    if (!paymentMethod) {
       this.logger.error(
-        `${base} invalid payment status id ${data.paymentStatusId}`,
+        `${base} invalid payment method id ${data.paymentMethodId}`,
       );
-      throw new BadRequestException('Invalid payment status id');
+      throw new BadRequestException('Invalid payment method id');
+    }
+
+    // Validate payment type exists
+    const paymentTypeId = new Types.ObjectId(data.paymentTypeId);
+    const paymentType = await this.paymentTypeModel.findById(paymentTypeId);
+    if (!paymentType) {
+      this.logger.error(
+        `${base} invalid payment type id ${data.paymentTypeId}`,
+      );
+      throw new BadRequestException('Invalid payment type id');
+    }
+
+    // Check if this is a refund
+    const isRefund =
+      paymentType.paymentTypeName === PaymentTypeEnum.REFUND.toString();
+
+    // Prevent refunds on orders with no prior payments
+    if (isRefund && order.amountPaid === 0) {
+      this.logger.error(
+        `${base} cannot refund payment on order ${order.orderCode} with no prior payments`,
+      );
+      throw new BadRequestException(
+        'Cannot refund payment on an order with no prior payments. First payment cannot be a refund.',
+      );
+    }
+
+    const currency = await this.currencyModel.findOne({ isoCode: 'XAF' });
+    if (!currency) {
+      this.logger.error(`${base} XAF currency not found`);
+      throw new NotFoundException('XAF currency not found');
     }
 
     // Create payment
@@ -78,17 +119,19 @@ export class PaymentService {
       note: data.note,
       paidAt: new Date(),
       amount: data.amount,
-      paymentStatusId: paymentStatusId,
+      currencyId: currency.id,
+      paymentTypeId: paymentTypeId,
+      paymentMethodId: paymentMethod._id,
       transactionRef: data.transactionRef,
-      currencyId: new Types.ObjectId(data.currencyId),
-      paymentMethodId: new Types.ObjectId(data.paymentMethodId),
     });
 
     payment.$locals.changedBy = userId;
     await payment.save();
 
     // Update order payment tracking fields
-    const newAmountPaid = order.amountPaid + data.amount;
+    const newAmountPaid = isRefund
+      ? order.amountPaid - data.amount
+      : order.amountPaid + data.amount;
     const newBalanceDue = order.totalAmount - newAmountPaid;
 
     // Determine payment status
@@ -177,7 +220,7 @@ export class PaymentService {
     }
 
     // Get refunded payment status
-    const refundedStatus = await this.paymentStatusModel.findOne({
+    const refundedStatus = await this.paymentTypeModel.findOne({
       name: 'refunded',
     });
     if (!refundedStatus) {

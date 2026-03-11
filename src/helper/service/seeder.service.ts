@@ -5,7 +5,7 @@ import { OfficeType } from 'src/schema/office/office-type.schema';
 import { Office } from 'src/schema/office/office.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
 import { PaymentMethod } from 'src/schema/payment/payment-method.schema';
-import { PaymentStatus } from 'src/schema/payment/payment-status.schema';
+import { PaymentType } from 'src/schema/payment/payment-type.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import seed from 'src/static/seed';
@@ -80,8 +80,8 @@ export class SeederService {
 
     @InjectModel(PaymentMethod.name)
     private readonly paymentMethodModel: Model<PaymentMethod>,
-    @InjectModel(PaymentStatus.name)
-    private readonly paymentStatusModel: Model<PaymentStatus>,
+    @InjectModel(PaymentType.name)
+    private readonly paymentTypeModel: Model<PaymentType>,
 
     @InjectModel(Office.name) private readonly officeModel: Model<Office>,
 
@@ -181,18 +181,18 @@ export class SeederService {
     );
   }
 
-  private async seedPaymentStatus() {
-    const operations = seed.paymentStatus.map((paymentStatus) => ({
+  private async seedPaymentType() {
+    const operations = seed.paymentType.map((paymentType) => ({
       updateOne: {
-        filter: { paymentStatusName: paymentStatus.paymentStatusName },
-        update: { $set: paymentStatus },
+        filter: { paymentTypeName: paymentType.paymentTypeName },
+        update: { $set: paymentType },
         upsert: true,
       },
     }));
 
-    await this.paymentStatusModel.bulkWrite(operations);
+    await this.paymentTypeModel.bulkWrite(operations);
     this.logger.log(
-      `🌱 Done seeding ${seed.paymentStatus.length} data for Payment Status`,
+      `🌱 Done seeding ${seed.paymentType.length} data for Payment Types`,
     );
   }
 
@@ -564,7 +564,7 @@ export class SeederService {
     await this.seedPickupStatus();
     await this.seedOrderStatus();
     await this.seedPaymentMethod();
-    await this.seedPaymentStatus();
+    await this.seedPaymentType();
     await this.seedOffice();
 
     // Admin

@@ -1,8 +1,14 @@
-import { Injectable, Logger, NestMiddleware } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NestMiddleware,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { NextFunction, Request } from 'express';
 import { Model } from 'mongoose';
 import { ApiClient } from 'src/schema/admin/api-client.schema';
+import { CodeGeneratorService } from '../service/code-generator.service';
 
 @Injectable()
 export class LogRequestMiddleware implements NestMiddleware {
@@ -11,18 +17,40 @@ export class LogRequestMiddleware implements NestMiddleware {
   constructor(
     @InjectModel(ApiClient.name)
     private readonly apiClientModel: Model<ApiClient>,
+    private readonly codeService: CodeGeneratorService,
   ) {}
 
-  private async getPlatformName(
-    apiKey: string | undefined,
-    apiSecret: string | undefined,
-  ) {
+  private clientCache = new Map<string, string>();
+
+  private async getPlatformName(apiKey?: string, apiSecret?: string) {
     if (!apiKey || !apiSecret) return 'UNKNOWN';
 
-    const apiClient = await this.apiClientModel.findOne({ key: apiKey });
-    if (!apiClient) return 'UNKNOWN';
+    const cacheKey = `${apiKey}:${apiSecret}`;
+    if (this.clientCache.has(cacheKey)) return this.clientCache.get(cacheKey);
 
-    return apiClient.name;
+    const apiClient = await this.apiClientModel
+      .findOne({ key: apiKey })
+      .select('name secretHash')
+      .lean();
+
+    if (!apiClient) {
+      this.logger.error(`Invalid api-key or api-secret`);
+      throw new ForbiddenException('Invalid x-api-key or x-api-secret');
+    }
+    const isValid = await this.codeService.verifyHash(
+      apiSecret,
+      apiClient.secretHash,
+    );
+
+    if (!isValid) {
+      this.logger.error(`Invalid api-key or api-secret`);
+      throw new ForbiddenException('Invalid x-api-key or x-api-secret');
+    }
+
+    const name = apiClient.name;
+    this.clientCache.set(apiKey, name);
+
+    return name;
   }
 
   async use(req: Request, res: Response, next: NextFunction) {
