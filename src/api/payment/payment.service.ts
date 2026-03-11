@@ -9,28 +9,30 @@ import { REQUEST } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
+import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
+import { AppUtilService } from 'src/helper/service/app-util.service';
+import { Currency } from 'src/schema/catalog/currency.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
 import { OrderPaymentStatusEnum } from 'src/schema/order/order.dto';
 import { Order } from 'src/schema/order/order.schema';
+import { PaymentMethod } from 'src/schema/payment/payment-method.schema';
 import { PaymentType } from 'src/schema/payment/payment-type.schema';
 import { PaymentTypeEnum } from 'src/schema/payment/payment.dto';
 import { Payment } from 'src/schema/payment/payment.schema';
 import { OrderParamsDto } from '../order/dto/create-order-item.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
-import { RefundPaymentDto } from './dto/refund-payment.dto';
-import { Currency } from 'src/schema/catalog/currency.schema';
-import { PaymentMethod } from 'src/schema/payment/payment-method.schema';
+import { FindPaymentDto } from './dto/find-payment.dto';
 
 @Injectable()
 export class PaymentService {
   private readonly logger = new Logger(PaymentService.name);
 
   constructor(
+    private readonly appUtilService: AppUtilService,
     @InjectModel(Payment.name) private readonly paymentModel: Model<Payment>,
 
     @InjectModel(PaymentType.name)
     private readonly paymentTypeModel: Model<PaymentType>,
-
     @InjectModel(Order.name) private readonly orderModel: Model<Order>,
 
     @Inject(REQUEST) private readonly req: AppRequestWithUser,
@@ -41,7 +43,61 @@ export class PaymentService {
     @InjectModel(Currency.name) private readonly currencyModel: Model<Currency>,
   ) {}
 
+  private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
+    const platform = this.req.data.platform;
+    const { phone, ability } = this.req.user;
+
+    if (!ability.can(action, subject)) {
+      const log = 'not authorized to perform this action';
+      this.logger.error(`[${platform}] ${phone} ${log} is`);
+      throw new BadRequestException(`You are ${log}`);
+    }
+  }
+
+  async findAll({ page, size, ...query }: FindPaymentDto) {
+    this.can('READ', 'Payment');
+
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+    const logBase = `[${platform}] ${phone}`;
+
+    const whereClause = {};
+    const orderId = query.orderId;
+    if (orderId) whereClause['orderId'] = new Types.ObjectId(query.orderId);
+
+    const paymentMethodId = query.paymentMethodId;
+    if (paymentMethodId)
+      whereClause['paymentMethodId'] = new Types.ObjectId(
+        query.paymentMethodId,
+      );
+
+    const paymentTypeId = query.paymentTypeId;
+    if (paymentTypeId)
+      whereClause['paymentTypeId'] = new Types.ObjectId(query.paymentTypeId);
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(query.sort);
+    const total = await this.paymentModel.countDocuments(whereClause);
+
+    const payments = await this.paymentModel
+      .find(whereClause)
+      .sort(sort)
+      .skip(skip)
+      .limit(size)
+      .populate({ model: Order.name, path: 'orderId' })
+      .populate({ model: PaymentType.name, path: 'paymentTypeId' })
+      .populate({ model: PaymentMethod.name, path: 'paymentMethodId' })
+      .exec();
+
+    const totalPages = Math.ceil(total / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(`${logBase} has successfully retrieve all payments`);
+    return { total, data: payments, nextPage };
+  }
+
   async createPaymentForOrder(param: OrderParamsDto, data: CreatePaymentDto) {
+    this.can('CREATE', 'Payment');
     const platform = this.req.data.platform;
     const { phone } = this.req.user;
     const base = `[${platform}] ${phone}`;
@@ -159,87 +215,5 @@ export class PaymentService {
       `${base} has successfully created payment for order ${order.orderCode}`,
     );
     return 'Payment created successfully';
-  }
-
-  async getPaymentsForOrder(
-    orderId: string,
-    skip = 0,
-    limit = 10,
-  ): Promise<{
-    data: Payment[];
-    total: number;
-    nextPage: number;
-  }> {
-    const id = new Types.ObjectId(orderId);
-
-    // Validate order exists
-    const order = await this.orderModel.findById(id);
-    if (!order) {
-      throw new NotFoundException('Order not found');
-    }
-
-    const payments = await this.paymentModel
-      .find({ orderId: id })
-      .sort({ paidAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .exec();
-
-    const total = await this.paymentModel.countDocuments({ orderId: id });
-
-    return {
-      data: payments,
-      total,
-      nextPage: Math.ceil((skip + limit) / limit),
-    };
-  }
-
-  async refundPayment(
-    orderId: string,
-    paymentId: string,
-    refundDto: RefundPaymentDto,
-  ): Promise<Payment | null> {
-    const platform = this.req.data.platform;
-    const { phone } = this.req.user;
-    const base = `[${platform}] ${phone}`;
-
-    const paymentObjectId = new Types.ObjectId(paymentId);
-    const orderObjectId = new Types.ObjectId(orderId);
-
-    // Validate payment exists and belongs to order
-    const payment = await this.paymentModel.findOne({
-      _id: paymentObjectId,
-      orderId: orderObjectId,
-    });
-
-    if (!payment) {
-      this.logger.error(
-        `${base} payment ${paymentId} not found for order ${orderId}`,
-      );
-      throw new NotFoundException('Payment not found for this order');
-    }
-
-    // Get refunded payment status
-    const refundedStatus = await this.paymentTypeModel.findOne({
-      name: 'refunded',
-    });
-    if (!refundedStatus) {
-      this.logger.error(`${base} refunded payment status not found`);
-      throw new BadRequestException('Refund status not found');
-    }
-
-    // Update payment status to refunded
-    const updatedPayment = await this.paymentModel.findByIdAndUpdate(
-      paymentObjectId,
-      {
-        paymentStatusId: refundedStatus._id,
-        note:
-          refundDto.note ||
-          `Refund: ${refundDto.reason || 'No reason provided'}`,
-      },
-      { new: true },
-    );
-
-    return updatedPayment;
   }
 }

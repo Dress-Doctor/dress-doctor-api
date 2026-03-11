@@ -40,13 +40,6 @@ import {
 } from './dto/update-order-item.dto';
 import { FindAllOrderWithItemsEntity } from './entities/find-all-order-with-items.entity';
 import { OrderService } from './order.service';
-import { PaymentService } from '../payment/payment.service';
-import { CreatePaymentDto } from '../payment/dto/create-payment.dto';
-import { RefundPaymentDto } from '../payment/dto/refund-payment.dto';
-import {
-  PaymentResponseEntity,
-  PaymentListResponseEntity,
-} from '../payment/entities/payment-response.entity';
 
 @ApiHeader(xApiKey)
 @Controller('order')
@@ -56,10 +49,7 @@ import {
 @ApiBearerAuth('access-token')
 export class OrderController {
   private readonly logger = new Logger(OrderController.name);
-  constructor(
-    private readonly orderService: OrderService,
-    private readonly paymentService: PaymentService,
-  ) {}
+  constructor(private readonly orderService: OrderService) {}
 
   @Get()
   @HttpCode(HttpStatus.OK)
@@ -254,58 +244,5 @@ export class OrderController {
     this.logger.log(log);
 
     return await this.orderService.cancelOrder(orderId);
-  }
-
-  @Post(':orderId/payments')
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create a payment for an order' })
-  @ApiResponse({ status: HttpStatus.CREATED, type: PaymentResponseEntity })
-  async createPayment(
-    @Req() req: AppRequestWithUser,
-    @Body() data: CreatePaymentDto,
-    @Param() params: OrderParamsDto,
-  ) {
-    const { platform } = req.data;
-    const phone = req.user.phone;
-    const log = `[${platform}] ${phone} is creating payment for order ${params.orderId} with body ${JSON.stringify(data)}`;
-    this.logger.log(log);
-
-    return await this.paymentService.createPaymentForOrder(params, data);
-  }
-
-  @Post(':orderId/payments/:paymentId/refund')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Refund a payment' })
-  @ApiResponse({ status: HttpStatus.OK, type: PaymentResponseEntity })
-  async refundPayment(
-    @Req() req: AppRequestWithUser,
-    @Param('orderId') orderId: string,
-    @Param('paymentId') paymentId: string,
-    @Body() data: RefundPaymentDto,
-  ) {
-    const { platform } = req.data;
-    const phone = req.user.phone;
-    const log = `[${platform}] ${phone} is refunding payment ${paymentId} for order ${orderId} with body ${JSON.stringify(data)}`;
-    this.logger.log(log);
-
-    return await this.paymentService.refundPayment(orderId, paymentId, data);
-  }
-
-  @Get(':orderId/payments')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get all payments for an order' })
-  @ApiResponse({ status: HttpStatus.OK, type: PaymentListResponseEntity })
-  async getPayments(
-    @Req() req: AppRequestWithUser,
-    @Param() { orderId }: OrderParamsDto,
-    @Query('skip') skip = 0,
-    @Query('limit') limit = 10,
-  ) {
-    const { platform } = req.data;
-    const phone = req.user.phone;
-    const log = `[${platform}] ${phone} is fetching payments for order ${orderId}`;
-    this.logger.log(log);
-
-    return await this.paymentService.getPaymentsForOrder(orderId, skip, limit);
   }
 }
