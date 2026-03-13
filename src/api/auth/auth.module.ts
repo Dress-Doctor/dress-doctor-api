@@ -8,9 +8,13 @@ import { AuthGuard } from './auth.guard';
 import { AuthService } from './auth.service';
 import { CaslAbilityService } from 'src/helper/casl/casl-ability.service';
 import { OtpService } from 'src/helper/service/otp.service';
+import { NotificationService } from 'src/helper/service/notification.service';
+import { AppUtilService } from 'src/helper/service/app-util.service';
+import { QueueProducerModule } from 'src/queue/queue-producer.module';
 
 @Module({
   imports: [
+    QueueProducerModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       imports: [ConfigModule],
@@ -25,7 +29,9 @@ import { OtpService } from 'src/helper/service/otp.service';
   providers: [
     OtpService,
     AuthService,
+    AppUtilService,
     CaslAbilityService,
+    NotificationService,
     CodeGeneratorService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],

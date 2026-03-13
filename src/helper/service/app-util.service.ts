@@ -28,4 +28,37 @@ export class AppUtilService {
       }),
     );
   }
+
+  /**
+   * Replaces placeholders in the given template string with corresponding values from the provided data object.
+   *
+   * Placeholders in the template should be in the format `{key}`. If a key exists in the data object,
+   * its value will replace the placeholder; otherwise, the placeholder will be replaced with an empty string.
+   *
+   * @param content - The template string containing placeholders in the format `{key}`.
+   * @param data - An object mapping keys to their replacement values.
+   * @returns The template string with placeholders replaced by their corresponding values from the data object.
+   */
+  renderTemplate(content: string, data: Record<string, string>) {
+    return content.replace(/{(\w*)}/g, function (m: string, key: string) {
+      return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : '';
+    });
+  }
+
+  /**
+   * Generates a formatted log string with key-value pairs surrounded by asterisks.
+   *
+   * @param data - An object containing string key-value pairs to be logged.
+   * @returns A string with each key-value pair on a new line, wrapped between lines of asterisks.
+   */
+  getLogText(data: Record<string, string>) {
+    const star = `\n*******************`;
+    let logText = star;
+
+    Object.keys(data).forEach((key) => {
+      logText = logText + `\n${key}: ${data[key]}`;
+    });
+
+    return logText + `${star}\n\n`;
+  }
 }

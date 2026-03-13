@@ -207,6 +207,7 @@ export class OtpService {
       code,
       otpRef: newOtpRequest.otpRef,
       expiresAt: newOtpRequest.expiresAt,
+      minutes: this.BASE_COOL_DOWN_MINUTES,
     };
   }
 

@@ -10,6 +10,7 @@ import { PromoSchemaModule } from './promo/promo.module';
 import { UserSchemaModule } from './user/user.module';
 import { OtpSchemaModule } from './otp/otp.module';
 import { CatalogSchemaModule } from './catalog/catalog.module';
+import { NotificationSchemaModule } from './notification/notification.module';
 
 @Global()
 @Module({
@@ -27,6 +28,7 @@ import { CatalogSchemaModule } from './catalog/catalog.module';
     CatalogSchemaModule,
     PaymentSchemaModule,
     AffiliateSchemaModule,
+    NotificationSchemaModule,
   ],
   exports: [MongooseModule],
 })

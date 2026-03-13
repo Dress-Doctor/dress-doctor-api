@@ -43,6 +43,9 @@ import serviceData from 'src/static/service.data';
 import serviceTypeData from 'src/static/service-type.data';
 import { ItemCategory } from 'src/schema/catalog/item-category.schema';
 import { ItemSubCategory } from 'src/schema/catalog/item-sub-category.schema';
+import { Notification } from 'src/schema/notification/notification.schema';
+import { NotificationTemplate } from 'src/schema/notification/notification-template.schema';
+import notificationData from 'src/static/notification.data';
 
 @Injectable()
 export class SeederService {
@@ -52,6 +55,8 @@ export class SeederService {
   constructor(
     private readonly codeService: CodeGeneratorService,
 
+    @InjectModel(NotificationTemplate.name)
+    private readonly notificationTemplateModel: Model<NotificationTemplate>,
     @InjectModel(UserRole.name) private readonly userRoleModel: Model<UserRole>,
 
     @InjectModel(ApiClient.name)
@@ -558,6 +563,21 @@ export class SeederService {
     }
   }
 
+  private async seedNotificationTemplates() {
+    const operations = notificationData.map((notification) => ({
+      updateOne: {
+        filter: { templateName: notification.templateName },
+        update: { $set: notification },
+        upsert: true,
+      },
+    }));
+
+    await this.notificationTemplateModel.bulkWrite(operations);
+    this.logger.log(
+      `🌱 Done seeding ${notificationData.length} data for NotificationTemplate`,
+    );
+  }
+
   async run(): Promise<void> {
     await this.seedUserType();
     await this.seedOfficeType();
@@ -579,7 +599,7 @@ export class SeederService {
     await this.seedSubCategory();
     await this.seedService();
     await this.seedServiceType();
-
-    // if (process.env.SEED_ITEMS === 'YES') await this.seedItems();
+    await this.seedNotificationTemplates();
+    if (process.env.SEED_ITEMS === 'YES') await this.seedItems();
   }
 }

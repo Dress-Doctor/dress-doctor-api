@@ -23,6 +23,8 @@ import { UtilModule } from './api/util/util.module';
 import { UserModule } from './api/user/user.module';
 import { OrderModule } from './api/order/order.module';
 import { PaymentModule } from './api/payment/payment.module';
+import { BullModule } from '@nestjs/bullmq';
+import { QueueProcessorModule } from './queue/queue-processor.module';
 
 @Module({
   imports: [
@@ -32,11 +34,28 @@ import { PaymentModule } from './api/payment/payment.module';
     PickupModule,
     OfficeLinkModule,
     ApiClientModule,
-    ConfigModule.forRoot({ isGlobal: true }),
     UtilModule,
     UserModule,
     OrderModule,
     PaymentModule,
+    QueueProcessorModule,
+    ConfigModule.forRoot({ isGlobal: true }),
+    BullModule.forRoot({
+      connection: {
+        host: process.env.REDIS_HOST,
+        port: Number(process.env.REDIS_PORT),
+      },
+      prefix: `dress-doctor-${process.env.REDIS_NAME}`,
+      defaultJobOptions: {
+        attempts: 3,
+        removeOnFail: true,
+        removeOnComplete: {
+          age: 3600, // keep for 1 hour
+          count: 1000,
+        },
+        backoff: { type: 'exponential', delay: 2000 },
+      },
+    }),
   ],
   providers: [
     SeederService,
@@ -55,11 +74,11 @@ export class AppModule implements NestModule, OnModuleInit {
     consumer.apply(LogRequestMiddleware).forRoutes('*path');
   }
 
-  onModuleInit() {
+  async onModuleInit() {
     try {
       if (this.connection.readyState === ConnectionStates.connected) {
         this.logger.log('✅ MongoDB connected');
-        this.seederService.run();
+        await this.seederService.run();
       } else this.logger.log('❌ Failed to connect to MongoDB');
     } catch (error) {
       this.logger.error('❌ Failed to connect to MongoDB', error);

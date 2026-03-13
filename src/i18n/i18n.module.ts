@@ -17,6 +17,11 @@ import appConfig from 'src/config/app-config';
         path: path.join(appConfig.baseDir, 'i18n'),
         watch: process.env.NODE_ENV !== 'production',
       },
+      typesOutputPath: path.join(
+        appConfig.baseDir,
+        'i18n',
+        'i18n.generated.ts',
+      ),
       resolvers: [
         new QueryResolver(['lang', 'Accept-Language', 'language']),
         new HeaderResolver(['lang', 'Accept-Language', 'language']),

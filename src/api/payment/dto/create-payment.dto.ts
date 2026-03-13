@@ -7,7 +7,6 @@ import {
   IsOptional,
   Min,
 } from 'class-validator';
-import { PaymentTypeEnum } from 'src/schema/payment/payment.dto';
 
 export class CreatePaymentDto {
   @ApiProperty({ required: true, description: 'Payment method id' })
@@ -33,9 +32,9 @@ export class CreatePaymentDto {
   @ApiProperty({
     required: true,
     description: 'Payment type',
-    example: PaymentTypeEnum.REFUND,
+    example: '64b8c9f1e4b0a2d3c4f5g6h',
   })
-  @IsDefined({ message: 'Payment type is required' })
+  @IsDefined({ message: 'Payment type id is required' })
   @IsMongoId({ message: 'Invalid paymentTypeId' })
   paymentTypeId: string;
 }

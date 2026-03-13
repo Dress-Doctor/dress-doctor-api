@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
   IsDefined,
+  IsEnum,
   IsNumberString,
   IsOptional,
   IsString,
@@ -8,6 +9,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { OTPChannelEnum } from 'src/schema/otp/otp.dto';
 
 export class InitiateLoginDto {
   @ApiProperty({
@@ -20,6 +22,17 @@ export class InitiateLoginDto {
   @MaxLength(9, { message: 'Phone must be 9 digit long' })
   @MinLength(9, { message: 'Phone must be 9 digit long' })
   phone: string;
+
+  @ApiProperty({
+    required: true,
+    description: 'OTP channel',
+    example: OTPChannelEnum.WHATSAPP,
+  })
+  @IsDefined({ message: 'OTP channel is required' })
+  @IsEnum(OTPChannelEnum, {
+    message: 'OTP channel must be either (Email WhatsApp)',
+  })
+  otpChannel: OTPChannelEnum;
 
   @ApiProperty({
     required: false,
