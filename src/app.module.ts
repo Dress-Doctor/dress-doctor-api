@@ -74,11 +74,11 @@ export class AppModule implements NestModule, OnModuleInit {
     consumer.apply(LogRequestMiddleware).forRoutes('*path');
   }
 
-  async onModuleInit() {
+  onModuleInit() {
     try {
       if (this.connection.readyState === ConnectionStates.connected) {
         this.logger.log('✅ MongoDB connected');
-        await this.seederService.run();
+        void this.seederService.run();
       } else this.logger.log('❌ Failed to connect to MongoDB');
     } catch (error) {
       this.logger.error('❌ Failed to connect to MongoDB', error);
