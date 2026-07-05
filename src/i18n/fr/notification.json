@@ -1,0 +1,13 @@
+{
+	"email": {
+		"login_verification_code": {
+			"title": "Code de vérification: {code}",
+			"greeting": "Hi {firstName},",
+			"instruction": "To securely complete your login to Dress Doctor, please enter the verification code below in the application.",
+			"codeValidity": "This code is valid for {minutes} minutes. Please do not share it with anyone.",
+			"helpText": "If you ever need help, we’re always here for you:",
+			"ignoreMessage": "If you did not initiate this login attempt, you may safely ignore this email.",
+			"footer": "© {year} Dress Doctor. All rights reserved."
+		}
+	}
+}
