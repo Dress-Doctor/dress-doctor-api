@@ -46,6 +46,7 @@ import { ItemSubCategory } from 'src/schema/catalog/item-sub-category.schema';
 import { Notification } from 'src/schema/notification/notification.schema';
 import { NotificationTemplate } from 'src/schema/notification/notification-template.schema';
 import notificationData from 'src/static/notification.data';
+import itemData from 'src/static/item.data';
 
 @Injectable()
 export class SeederService {
@@ -251,6 +252,36 @@ export class SeederService {
     );
   }
 
+  private async seedRolePermissions() {
+    let count = 0;
+    for (const mapping of seed.rolePermissionMap) {
+      const role = await this.roleModel.findOne({
+        roleName: mapping.roleName,
+      });
+      if (!role) continue;
+
+      for (const permission of mapping.permissions) {
+        const permissionDoc = await this.permissionModel.findOne({
+          action: permission.action,
+          subject: permission.subject,
+        });
+        if (!permissionDoc) continue;
+
+        await this.rolePermissionModel.findOneAndUpdate(
+          { roleId: role._id, permissionId: permissionDoc._id },
+          {
+            roleId: role._id,
+            permissionId: permissionDoc._id,
+            scope: mapping.scope,
+          },
+          { upsert: true },
+        );
+        count++;
+      }
+    }
+    this.logger.log(`🌱 Done seeding ${count} data for RolePermission`);
+  }
+
   private async seedAdmin() {
     const phone = this.phone;
     const email = 'fedjio.raymond@dressdoctor.io';
@@ -402,6 +433,57 @@ export class SeederService {
     this.logger.log(
       `🌱 Done seeding ${serviceTypeData.length} data for ServiceType`,
     );
+  }
+
+  private async seedItemCatalog() {
+    const currency = await this.currencyModel.findOne({ isoCode: 'XAF' });
+    const adminUser = await this.userModel.findOne({ phone: this.phone });
+
+    for (const item of itemData) {
+      const [service, serviceType, category, subCategory] = await Promise.all([
+        this.serviceModel.findOne({ serviceName: item.service }),
+        this.serviceTypeModel.findOne({ serviceTypeName: item.serviceType }),
+        this.categoryModel.findOne({ categoryName: item.category }),
+        this.subCategoryModel.findOne({
+          subCategoryName: item.subCategory,
+        }),
+      ]);
+      if (!service || !serviceType || !category || !subCategory) {
+        this.logger.warn(`Skipping seed item ${item.itemName}: lookup missing`);
+        continue;
+      }
+
+      const itemDoc = await this.itemModel.findOneAndUpdate(
+        { itemName: item.itemName },
+        {
+          itemName: item.itemName,
+          serviceId: service._id,
+          serviceTypeId: serviceType._id,
+          currencyId: currency?._id,
+          priceLow: item.priceLow,
+          priceHigh: item.priceHigh,
+        },
+        {
+          context: { changedBy: adminUser?._id },
+          upsert: true,
+          new: true,
+        } as never,
+      );
+
+      const itemId = (itemDoc as unknown as Item)._id;
+      await this.itemCategoryModel.findOneAndUpdate(
+        { itemId, categoryId: category._id },
+        { itemId, categoryId: category._id },
+        { upsert: true },
+      );
+      await this.itemSubCategoryModel.findOneAndUpdate(
+        { itemId, subCategoryId: subCategory._id },
+        { itemId, subCategoryId: subCategory._id },
+        { upsert: true },
+      );
+    }
+
+    this.logger.log(`🌱 Done seeding ${itemData.length} data for Item`);
   }
 
   private async seedItems() {
@@ -590,6 +672,7 @@ export class SeederService {
     // Admin
     await this.seedRoles();
     await this.seedPermission();
+    await this.seedRolePermissions();
     await this.seedAdmin();
     await this.seedSystemApiClient();
 
@@ -599,6 +682,7 @@ export class SeederService {
     await this.seedSubCategory();
     await this.seedService();
     await this.seedServiceType();
+    await this.seedItemCatalog();
     await this.seedNotificationTemplates();
     if (process.env.SEED_ITEMS === 'YES') await this.seedItems();
   }

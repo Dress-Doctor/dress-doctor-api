@@ -88,4 +88,17 @@ export enum RoleEnum {
   CO_FOUNDER = 'Co-Founder',
   OFFICE_MANAGER = 'Office Manager',
   FACTORY_MANAGER = 'Factory Manager',
+
+  // operational
+  CASHIER = 'Cashier',
+  DRIVER = 'Driver',
+  LAUNDRY_STAFF = 'Laundry Staff',
+  CUSTOMER_SERVICE = 'Customer Service',
+  TREASURER = 'Treasurer',
+  SECRETARY = 'Secretary',
+
+  // external/self-service
+  CUSTOMER = 'Customer',
+  REFERRER = 'Referrer',
+  AFFILIATE = 'Affiliate',
 }
