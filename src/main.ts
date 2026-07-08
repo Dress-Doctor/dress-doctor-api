@@ -26,7 +26,11 @@ async function bootstrap() {
 
   // API Versioning
   app.setGlobalPrefix('api', {
-    exclude: [{ path: 'o/*path', method: RequestMethod.GET }],
+    exclude: [
+      { path: 'o/*path', method: RequestMethod.GET },
+      { path: 'health', method: RequestMethod.GET },
+      { path: 'ready', method: RequestMethod.GET },
+    ],
   });
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
 

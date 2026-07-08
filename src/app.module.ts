@@ -8,6 +8,7 @@ import {
 import { ConfigModule } from '@nestjs/config';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, ConnectionStates } from 'mongoose';
+import { HealthModule } from './api/health/health.module';
 import { OfficeLinkModule } from './api/office-link/office-link.module';
 import { PickupModule } from './api/pickup/pickup.module';
 import { CorrelationIdMiddleware } from './helper/middleware/correlation-id.middleware';
@@ -36,6 +37,7 @@ import { envValidationSchema } from './config/env.validation';
     SchemaModule,
     PickupModule,
     OfficeLinkModule,
+    HealthModule,
     ApiClientModule,
     UtilModule,
     UserModule,
