@@ -10,6 +10,7 @@ import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, ConnectionStates } from 'mongoose';
 import { OfficeLinkModule } from './api/office-link/office-link.module';
 import { PickupModule } from './api/pickup/pickup.module';
+import { CorrelationIdMiddleware } from './helper/middleware/correlation-id.middleware';
 import { LogRequestMiddleware } from './helper/middleware/log-request.middleware';
 import { ApiClientLookupService } from './helper/service/api-client-lookup.service';
 import { CodeGeneratorService } from './helper/service/code-generator.service';
@@ -78,7 +79,9 @@ export class AppModule implements NestModule, OnModuleInit {
   ) {}
 
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(LogRequestMiddleware).forRoutes('*path');
+    consumer
+      .apply(CorrelationIdMiddleware, LogRequestMiddleware)
+      .forRoutes('*path');
   }
 
   onModuleInit() {

@@ -14,7 +14,7 @@ import { AppValidationPipe } from './helper/pipe/app-validation.pipe';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
-    logger: new ConsoleLogger({ prefix: 'Dress Doctor' }),
+    logger: new ConsoleLogger({ prefix: 'Dress Doctor', json: true }),
   });
 
   // Cors

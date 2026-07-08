@@ -28,7 +28,9 @@ export class LogRequestMiddleware implements NestMiddleware {
       }
     }
 
-    this.logger.log(`${req.method} ${req.originalUrl} [${platform}]`);
+    this.logger.log(
+      `${req.method} ${req.originalUrl} [${platform}] [${req.id}]`,
+    );
     next();
   }
 }
