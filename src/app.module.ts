@@ -25,6 +25,7 @@ import { OrderModule } from './api/order/order.module';
 import { PaymentModule } from './api/payment/payment.module';
 import { BullModule } from '@nestjs/bullmq';
 import { QueueProcessorModule } from './queue/queue-processor.module';
+import { envValidationSchema } from './config/env.validation';
 
 @Module({
   imports: [
@@ -39,7 +40,11 @@ import { QueueProcessorModule } from './queue/queue-processor.module';
     OrderModule,
     PaymentModule,
     QueueProcessorModule,
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      validationSchema: envValidationSchema,
+      validationOptions: { abortEarly: false },
+    }),
     BullModule.forRoot({
       connection: {
         host: process.env.REDIS_HOST,
