@@ -10,7 +10,7 @@ import * as acceptLanguageParser from 'accept-language-parser';
 import { Request } from 'express';
 import { Model, Types } from 'mongoose';
 import appConfig from 'src/config/app-config';
-import { RequestDataDto } from 'src/dto/request-data.dto';
+import { AppRequest, RequestDataDto } from 'src/dto/request-data.dto';
 import { OfficeType } from 'src/schema/office/office-type.schema';
 import { OfficeTypeEnum } from 'src/schema/office/office.dto';
 import { Office } from 'src/schema/office/office.schema';
@@ -90,7 +90,11 @@ export class ApiClientGuard implements CanActivate {
     const officeId = await this.getOfficeId(request.headers.cookie);
     const language = this.getLanguage(request.headers['accept-language']);
 
-    request['data'] = { language, officeId, ...apiClient } as RequestDataDto;
+    (request as AppRequest).data = {
+      language,
+      officeId,
+      ...apiClient,
+    } as RequestDataDto;
     return true;
   }
 }

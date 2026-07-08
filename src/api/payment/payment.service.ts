@@ -61,7 +61,7 @@ export class PaymentService {
     const { phone } = this.req.user;
     const logBase = `[${platform}] ${phone}`;
 
-    const whereClause = {};
+    const whereClause: Record<string, unknown> = {};
     const orderId = query.orderId;
     if (orderId) whereClause['orderId'] = new Types.ObjectId(query.orderId);
 

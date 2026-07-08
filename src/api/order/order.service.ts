@@ -238,7 +238,7 @@ export class OrderService {
     const { phone } = this.req.user;
     const logBase = `[${platform}] ${phone}`;
 
-    const whereClause = {};
+    const whereClause: Record<string, unknown> = {};
     const customerId = query.customerId;
     if (customerId) whereClause['customerId'] = new Types.ObjectId(customerId);
 
