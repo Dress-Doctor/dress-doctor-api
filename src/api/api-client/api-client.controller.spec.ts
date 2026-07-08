@@ -8,7 +8,9 @@ describe('ApiClientController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ApiClientController],
-      providers: [ApiClientService],
+      providers: [
+        { provide: ApiClientService, useValue: { create: jest.fn() } },
+      ],
     }).compile();
 
     controller = module.get<ApiClientController>(ApiClientController);

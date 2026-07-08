@@ -9,7 +9,7 @@ export class AffiliatePartner extends Document<Types.ObjectId> {
   @Prop({ required: true, type: Types.ObjectId, ref: User.name })
   userId: Types.ObjectId;
 
-  @Prop({ required: true, enum: RewardTypeEnum })
+  @Prop({ required: true, type: String, enum: RewardTypeEnum })
   rewardType: RewardTypeEnum;
 
   @Prop({ required: true, default: 0 })

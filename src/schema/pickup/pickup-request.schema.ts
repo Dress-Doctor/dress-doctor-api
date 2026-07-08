@@ -24,7 +24,7 @@ export class PickupRequest extends Document<Types.ObjectId> {
   @Prop({ required: true })
   pickupDate: Date;
 
-  @Prop({ required: true, enum: PickupTimeEnum })
+  @Prop({ required: true, type: String, enum: PickupTimeEnum })
   pickupTime: PickupTimeEnum;
 
   @Prop({ required: false })

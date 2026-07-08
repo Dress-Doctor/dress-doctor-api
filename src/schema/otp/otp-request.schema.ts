@@ -11,10 +11,10 @@ export class OtpRequest extends Document<Types.ObjectId> {
   @Prop({ required: true })
   identifier: string;
 
-  @Prop({ required: true, enum: OTPChannelEnum })
+  @Prop({ required: true, type: String, enum: OTPChannelEnum })
   channel: OTPChannelEnum;
 
-  @Prop({ required: true, enum: OTPPurposeEnum })
+  @Prop({ required: true, type: String, enum: OTPPurposeEnum })
   purpose: OTPPurposeEnum;
 
   @Prop({ required: true })
