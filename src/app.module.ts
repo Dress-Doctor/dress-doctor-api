@@ -11,6 +11,7 @@ import { Connection, ConnectionStates } from 'mongoose';
 import { OfficeLinkModule } from './api/office-link/office-link.module';
 import { PickupModule } from './api/pickup/pickup.module';
 import { LogRequestMiddleware } from './helper/middleware/log-request.middleware';
+import { ApiClientLookupService } from './helper/service/api-client-lookup.service';
 import { CodeGeneratorService } from './helper/service/code-generator.service';
 import { SeederService } from './helper/service/seeder.service';
 import { i18nModule } from './i18n/i18n.module';
@@ -65,6 +66,7 @@ import { envValidationSchema } from './config/env.validation';
   providers: [
     SeederService,
     CodeGeneratorService,
+    ApiClientLookupService,
     { provide: APP_GUARD, useClass: ApiClientGuard },
   ],
 })
