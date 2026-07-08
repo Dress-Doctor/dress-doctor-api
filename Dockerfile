@@ -17,9 +17,11 @@ RUN npm ci --omit=dev
 
 COPY --from=build /app/dist ./dist
 # NotificationService resolves .hbs templates from `${cwd}/src/static`,
-# not dist, at runtime — ship src/static alongside dist rather than
-# changing that resolution (out of scope for Phase 0).
+# and I18nModule loads translations from `${cwd}/src/i18n`, not dist,
+# at runtime — ship both alongside dist rather than changing that
+# resolution (out of scope for Phase 0).
 COPY --from=build /app/src/static ./src/static
+COPY --from=build /app/src/i18n ./src/i18n
 
 EXPOSE 3000
 

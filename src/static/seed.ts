@@ -137,7 +137,6 @@ export default {
   offices: [
     {
       signedLink: '',
-      qrCodeUrl: '',
       city: 'Douala',
       region: 'Litoral',
       officeCode: 'DD-105',
@@ -148,7 +147,6 @@ export default {
     },
     {
       signedLink: '',
-      qrCodeUrl: '',
       city: 'Douala',
       slug: 'bonabo',
       region: 'Litoral',
