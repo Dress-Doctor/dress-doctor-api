@@ -32,6 +32,7 @@ services:
     env_file:
       - .env
     environment:
+      PORT: '3000'
       DATABASE_URL: mongodb://mongo:27017/dress-doctor
       REDIS_HOST: redis
       REDIS_PORT: '6379'
