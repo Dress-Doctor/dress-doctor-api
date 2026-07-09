@@ -208,7 +208,11 @@ export class PaymentService {
         paymentStatus: paymentStatusEnum,
         balanceDue: Math.max(0, newBalanceDue),
       },
-      { context: { changedBy: userId }, upsert: true, new: true } as never,
+      {
+        context: { changedBy: userId },
+        upsert: true,
+        returnDocument: 'after',
+      } as never,
     );
 
     this.logger.log(

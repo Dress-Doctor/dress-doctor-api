@@ -317,7 +317,12 @@ export class SeederService {
     const password = process.env.ADMIN_PASSWORD!;
     const hashedPassword = await this.codeService.hashPlainText(password);
 
-    const adminUser = await this.userModel.create({
+    // Self-attributed: this is the very first User ever created, so
+    // there's no existing admin to credit as changedBy. Pre-generate
+    // the _id so the bootstrap admin can be its own creator.
+    const adminUserId = new Types.ObjectId();
+    const adminUserDoc = new this.userModel({
+      _id: adminUserId,
       phone,
       email,
       lastName: 'Raymond',
@@ -328,6 +333,8 @@ export class SeederService {
       whatsappPhone: '237670678660',
       preferredLanguage: PreferredLanguageEnum.ENGLISH,
     });
+    adminUserDoc.$locals.changedBy = adminUserId;
+    const adminUser = await adminUserDoc.save();
 
     const userRoleExists = await this.userRoleModel.exists({
       roleId: role!._id,
@@ -466,7 +473,7 @@ export class SeederService {
         {
           context: { changedBy: adminUser?._id },
           upsert: true,
-          new: true,
+          returnDocument: 'after',
         } as never,
       );
 
@@ -611,7 +618,7 @@ export class SeederService {
           {
             context: { changedBy: adminUser?._id },
             upsert: true,
-            new: true,
+            returnDocument: 'after',
           } as never,
         );
 

@@ -156,7 +156,7 @@ export class OrderService {
       {
         context: { changedBy: new Types.ObjectId(this.req.user.userId) },
         upsert: true,
-        new: true,
+        returnDocument: 'after',
       } as never,
     );
 
@@ -221,7 +221,7 @@ export class OrderService {
       {
         context: { changedBy: new Types.ObjectId(this.req.user.userId) },
         upsert: true,
-        new: true,
+        returnDocument: 'after',
       } as never,
     );
 
@@ -413,7 +413,11 @@ export class OrderService {
         quantity: data.quantity,
         unitPrice: data.unitPrice,
       },
-      { context: { changedBy: userId }, upsert: true, new: true } as never,
+      {
+        context: { changedBy: userId },
+        upsert: true,
+        returnDocument: 'after',
+      } as never,
     );
 
     const baseAmount = data.unitPrice * data.quantity;
@@ -422,7 +426,11 @@ export class OrderService {
     await this.orderModel.findOneAndUpdate(
       { _id: order._id },
       { orderAmount, totalAmount },
-      { context: { changedBy: userId }, upsert: true, new: true } as never,
+      {
+        context: { changedBy: userId },
+        upsert: true,
+        returnDocument: 'after',
+      } as never,
     );
 
     this.logger.log(
@@ -483,7 +491,7 @@ export class OrderService {
     const updatedItem = (await this.orderItemModel.findOneAndUpdate(
       { itemId, orderId },
       data,
-      { context: { changedBy: userId }, new: true } as never,
+      { context: { changedBy: userId }, returnDocument: 'after' } as never,
     )) as unknown as OrderItem | null;
 
     if (!updatedItem) {
@@ -498,7 +506,11 @@ export class OrderService {
     await this.orderModel.findOneAndUpdate(
       { _id: order._id },
       { orderAmount, totalAmount },
-      { context: { changedBy: userId }, upsert: true, new: true } as never,
+      {
+        context: { changedBy: userId },
+        upsert: true,
+        returnDocument: 'after',
+      } as never,
     );
 
     this.logger.log(`${base} ${item.itemName} updated successfully`);
@@ -557,7 +569,7 @@ export class OrderService {
     await this.orderItemModel.findOneAndDelete({ itemId, orderId }, {
       context: { changedBy: userId },
       upsert: true,
-      new: true,
+      returnDocument: 'after',
     } as never);
 
     const deletedPrice = orderItem.unitPrice * orderItem.quantity;
@@ -566,7 +578,11 @@ export class OrderService {
     await this.orderModel.findOneAndUpdate(
       { _id: order._id },
       { orderAmount, totalAmount },
-      { context: { changedBy: userId }, upsert: true, new: true } as never,
+      {
+        context: { changedBy: userId },
+        upsert: true,
+        returnDocument: 'after',
+      } as never,
     );
 
     this.logger.log(
@@ -628,7 +644,7 @@ export class OrderService {
     await this.orderModel.findOneAndUpdate(
       { _id: order._id },
       { orderStatusId: confirmedStatus._id },
-      { context: { changedBy: userId }, new: true } as never,
+      { context: { changedBy: userId }, returnDocument: 'after' } as never,
     );
 
     if (order.pickupRequestId) {
@@ -642,7 +658,7 @@ export class OrderService {
       await this.pickupRequestModel.findOneAndUpdate(
         { _id: order.pickupRequestId, pickupStatusId: assignStatus?._id },
         { pickupStatusId: pickedUpStatus?._id },
-        { context: { changedBy: userId }, new: true } as never,
+        { context: { changedBy: userId }, returnDocument: 'after' } as never,
       );
     }
 
@@ -693,7 +709,7 @@ export class OrderService {
     await this.orderModel.findOneAndUpdate(
       { _id: order._id },
       { orderStatusId: receivedStatus._id },
-      { context: { changedBy: userId }, new: true } as never,
+      { context: { changedBy: userId }, returnDocument: 'after' } as never,
     );
 
     this.logger.log(`${base} order ${order.orderCode} marked received`);
@@ -743,7 +759,7 @@ export class OrderService {
     await this.orderModel.findOneAndUpdate(
       { _id: order._id },
       { orderStatusId: washingStatus._id },
-      { context: { changedBy: userId }, new: true } as never,
+      { context: { changedBy: userId }, returnDocument: 'after' } as never,
     );
 
     this.logger.log(`${base} order ${order.orderCode} marked washing`);
@@ -793,7 +809,7 @@ export class OrderService {
     await this.orderModel.findOneAndUpdate(
       { _id: order._id },
       { orderStatusId: readyStatus._id },
-      { context: { changedBy: userId }, new: true } as never,
+      { context: { changedBy: userId }, returnDocument: 'after' } as never,
     );
 
     this.logger.log(`${base} order ${order.orderCode} marked ready`);
@@ -841,7 +857,7 @@ export class OrderService {
     await this.orderModel.findOneAndUpdate(
       { _id: order._id },
       { orderStatusId: deliveredStatus._id },
-      { context: { changedBy: userId }, new: true } as never,
+      { context: { changedBy: userId }, returnDocument: 'after' } as never,
     );
 
     this.logger.log(`${base} order ${order.orderCode} marked delivered`);
@@ -894,7 +910,7 @@ export class OrderService {
     await this.orderModel.findOneAndUpdate(
       { _id: order._id },
       { orderStatusId: cancelledStatus._id },
-      { context: { changedBy: userId }, new: true } as never,
+      { context: { changedBy: userId }, returnDocument: 'after' } as never,
     );
 
     if (order.pickupRequestId) {
@@ -906,7 +922,7 @@ export class OrderService {
         await this.pickupRequestModel.findOneAndUpdate(
           { _id: order.pickupRequestId },
           { pickupStatusId: cancelledPickup._id },
-          { context: { changedBy: userId }, new: true } as never,
+          { context: { changedBy: userId }, returnDocument: 'after' } as never,
         );
       }
     }
