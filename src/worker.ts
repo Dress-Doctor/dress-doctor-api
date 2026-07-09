@@ -6,9 +6,8 @@ import { WorkerModule } from './worker.module';
 async function bootstrap() {
   const app = await NestFactory.createApplicationContext(WorkerModule, {
     logger: new FileLoggerService({
-      prefix: 'Dress Doctor Worker',
-      json: true,
       filePrefix: 'worker-',
+      prefix: 'Dress Doctor Worker',
     }),
   });
 

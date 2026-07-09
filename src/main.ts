@@ -11,8 +11,8 @@ import { FileLoggerService } from './helper/service/file-logger.service';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: new FileLoggerService({
-      prefix: 'Dress Doctor',
       filePrefix: 'api-',
+      prefix: 'Dress Doctor',
     }),
   });
 
