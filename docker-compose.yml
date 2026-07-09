@@ -2,9 +2,11 @@
 # DATABASE_URL in .env.prod. Attaches to a shared external network so
 # stage and prod can coexist on the same host; create it once:
 #   docker network create dress-doctor-net
-# Logs are bind-mounted to ./logs/prod on the host (survives `down`,
-# not `down -v` — there's no volume here, just a bind mount) and also
-# capped via the json-file driver (10m x 5 files) as a second copy.
+# Logs: the app itself writes api-error.log/api-combined.log and
+# worker-error.log/worker-combined.log (see FileLoggerService) into
+# LOG_DIR, which is bind-mounted to ./logs/prod on the host — survives
+# `down` (not `down -v`, there's no named volume here). Docker's own
+# json-file driver is also capped (10m x 5 files) as a second copy.
 services:
   redis-prod:
     image: redis:7-alpine
@@ -22,16 +24,14 @@ services:
   api-prod:
     build: .
     restart: unless-stopped
-    command:
-      - sh
-      - -c
-      - 'node dist/main 2>&1 | tee -a /var/log/dress-doctor/api.log'
+    command: ['node', 'dist/main']
     env_file:
       - .env.prod
     environment:
       PORT: '3000'
       REDIS_HOST: redis-prod
       REDIS_PORT: '6379'
+      LOG_DIR: /var/log/dress-doctor
     ports:
       - '3000:3000'
     volumes:
@@ -50,15 +50,13 @@ services:
   worker-prod:
     build: .
     restart: unless-stopped
-    command:
-      - sh
-      - -c
-      - 'node dist/worker 2>&1 | tee -a /var/log/dress-doctor/worker.log'
+    command: ['node', 'dist/worker']
     env_file:
       - .env.prod
     environment:
       REDIS_HOST: redis-prod
       REDIS_PORT: '6379'
+      LOG_DIR: /var/log/dress-doctor
     volumes:
       - ./logs/prod:/var/log/dress-doctor
     logging:

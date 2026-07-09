@@ -1,9 +1,4 @@
-import {
-  ConsoleLogger,
-  Logger,
-  RequestMethod,
-  VersioningType,
-} from '@nestjs/common';
+import { Logger, RequestMethod, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
@@ -11,10 +6,14 @@ import swaggerConfig from './config/swagger.config';
 import { HTTPExceptionFilter } from './helper/exception-filters/http.exception-filter';
 import { HTTPResponseInterceptor } from './helper/interceptor/http.interceptor';
 import { AppValidationPipe } from './helper/pipe/app-validation.pipe';
+import { FileLoggerService } from './helper/service/file-logger.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
-    logger: new ConsoleLogger({ prefix: 'Dress Doctor', json: true }),
+    logger: new FileLoggerService({
+      prefix: 'Dress Doctor',
+      filePrefix: 'api-',
+    }),
   });
 
   // Cors
