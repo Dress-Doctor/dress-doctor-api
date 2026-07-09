@@ -1,13 +1,15 @@
-# Production stack. Mongo is external (managed cluster) — configure
-# DATABASE_URL in .env.prod. Attaches to a shared external network so
-# stage and prod can coexist on the same host; create it once:
+# Staging stack. Mirrors docker-compose.yml (prod) with -stage naming,
+# its own Redis container/volume, and a different host port so it can
+# run alongside prod on the same host. Mongo is external — configure
+# DATABASE_URL in .env.stage. Shares the same network as prod; create
+# it once:
 #   docker network create dress-doctor-net
 services:
-  redis-prod:
+  redis-stage:
     image: redis:7-alpine
     restart: unless-stopped
     volumes:
-      - redis_prod_data:/data
+      - redis_stage_data:/data
     networks:
       - dress-doctor
     healthcheck:
@@ -16,37 +18,37 @@ services:
       timeout: 5s
       retries: 10
 
-  api-prod:
+  api-stage:
     build: .
     restart: unless-stopped
     command: ['node', 'dist/main']
     env_file:
-      - .env.prod
+      - .env.stage
     environment:
       PORT: '3000'
-      REDIS_HOST: redis-prod
+      REDIS_HOST: redis-stage
       REDIS_PORT: '6379'
     ports:
-      - '3000:3000'
+      - '3001:3000'
     networks:
       - dress-doctor
     depends_on:
-      redis-prod:
+      redis-stage:
         condition: service_healthy
 
-  worker-prod:
+  worker-stage:
     build: .
     restart: unless-stopped
     command: ['node', 'dist/worker']
     env_file:
-      - .env.prod
+      - .env.stage
     environment:
-      REDIS_HOST: redis-prod
+      REDIS_HOST: redis-stage
       REDIS_PORT: '6379'
     networks:
       - dress-doctor
     depends_on:
-      redis-prod:
+      redis-stage:
         condition: service_healthy
 
 networks:
@@ -55,4 +57,4 @@ networks:
     name: dress-doctor-net
 
 volumes:
-  redis_prod_data:
+  redis_stage_data:
