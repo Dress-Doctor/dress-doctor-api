@@ -1,0 +1,71 @@
+# Production stack. Mongo is external (managed cluster) — configure
+# DATABASE_URL in .env.prod. No explicit network block — compose gives
+# this project its own isolated default network, keyed off -p (see
+# Makefile: `-p dress-doctor-prod`). Deliberately NOT shared with
+# stage: sharing one network would mean both stacks' `redis` service
+# registers the same DNS alias, so whichever one resolved second would
+# connect to a nondeterministic target.
+# Logs: the app itself writes api-error.log/api-combined.log and
+# worker-error.log/worker-combined.log (see FileLoggerService) into
+# LOG_DIR, which is bind-mounted to ./logs/prod on the host — survives
+# `down` (not `down -v`, there's no named volume here). Docker's own
+# json-file driver is also capped (10m x 5 files) as a second copy.
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: redis-cli ping
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    restart: unless-stopped
+    command: ['node', 'dist/main']
+    env_file:
+      - .env.prod
+    environment:
+      PORT: '3000'
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      LOG_DIR: /var/log/dress-doctor
+    ports:
+      - '3000:3000'
+    volumes:
+      - ./logs/prod:/var/log/dress-doctor
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ['node', 'dist/worker']
+    env_file:
+      - .env.prod
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      LOG_DIR: /var/log/dress-doctor
+    volumes:
+      - ./logs/prod:/var/log/dress-doctor
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis_data:

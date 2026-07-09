@@ -5,10 +5,10 @@ import { PermissionActionEnum, SubjectEnum } from './admin.dto';
 export const permissionSchemaName = 'permission';
 @Schema({ timestamps: true, collection: permissionSchemaName })
 export class Permission extends Document<Types.ObjectId> {
-  @Prop({ required: true, enum: PermissionActionEnum })
+  @Prop({ required: true, type: String, enum: PermissionActionEnum })
   action: PermissionActionEnum;
 
-  @Prop({ required: true, enum: SubjectEnum })
+  @Prop({ required: true, type: String, enum: SubjectEnum })
   subject: SubjectEnum;
 
   @Prop({ required: false })

@@ -32,7 +32,7 @@ export class AffiliatePartnerHistory extends Document<Types.ObjectId> {
   })
   changedFields?: ChangedFieldDto[];
 
-  @Prop({ required: true, enum: HistoryActionEnum })
+  @Prop({ required: true, type: String, enum: HistoryActionEnum })
   action: HistoryActionEnum;
 
   @Prop({ required: false, type: Object, default: {} })

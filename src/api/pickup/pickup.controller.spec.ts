@@ -8,7 +8,18 @@ describe('PickupController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [PickupController],
-      providers: [PickupService],
+      providers: [
+        {
+          provide: PickupService,
+          useValue: {
+            schedulePickup: jest.fn(),
+            findAllPickup: jest.fn(),
+            assignPickup: jest.fn(),
+            confirmPickup: jest.fn(),
+            cancelPickup: jest.fn(),
+          },
+        },
+      ],
     }).compile();
 
     controller = module.get<PickupController>(PickupController);

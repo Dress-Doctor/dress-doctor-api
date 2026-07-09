@@ -82,7 +82,7 @@ export class PickupService {
     const foundedUser = await this.userModel.findOneAndUpdate(
       { phone: data.phone },
       { ...data, userTypeId: userType!._id },
-      { upsert: true, new: true },
+      { upsert: true, returnDocument: 'after' },
     );
 
     // Check if customer document exist
@@ -99,7 +99,7 @@ export class PickupService {
         {
           context: { changedBy: foundedUser._id },
           upsert: true,
-          new: true,
+          returnDocument: 'after',
         } as never,
       );
       customerExists = { _id: (newCustomer as unknown as Customer)._id };
@@ -143,7 +143,7 @@ export class PickupService {
         {
           context: { changedBy: foundedUser._id },
           upsert: true,
-          new: true,
+          returnDocument: 'after',
         } as never,
       )
       .populate({ path: 'pickupStatusId' });
@@ -275,7 +275,11 @@ export class PickupService {
         assignedAt: data.assignedAt ?? new Date(),
         pickupRequestId: pickupRequestExists._id,
       },
-      { context: { changedBy: userId }, upsert: true, new: true } as never,
+      {
+        context: { changedBy: userId },
+        upsert: true,
+        returnDocument: 'after',
+      } as never,
     );
 
     const assignedPickupStatus = await this.pickupStatusModel.findOne({
@@ -284,7 +288,11 @@ export class PickupService {
     await this.pickupRequestModel.findOneAndUpdate(
       { _id: pickupRequestExists._id },
       { pickupStatusId: assignedPickupStatus!._id },
-      { context: { changedBy: userId }, upsert: true, new: true } as never,
+      {
+        context: { changedBy: userId },
+        upsert: true,
+        returnDocument: 'after',
+      } as never,
     );
 
     this.logger.log(
@@ -341,7 +349,7 @@ export class PickupService {
     await this.pickupRequestModel.findOneAndUpdate(
       { _id: pickupRequest._id },
       { pickupStatusId: confirmStatus._id, confirmedBy: userId },
-      { context: { changedBy: userId }, new: true } as never,
+      { context: { changedBy: userId }, returnDocument: 'after' } as never,
     );
 
     this.logger.log(`${base} pickup ${pickupRequest.reference} confirmed`);
@@ -399,7 +407,7 @@ export class PickupService {
     await this.pickupRequestModel.findOneAndUpdate(
       { _id: pickupRequest._id },
       { pickupStatusId: cancelledStatus._id },
-      { context: { changedBy: userId }, new: true } as never,
+      { context: { changedBy: userId }, returnDocument: 'after' } as never,
     );
 
     // Cancel any associated orders
@@ -432,7 +440,7 @@ export class PickupService {
         await this.orderModel.findOneAndUpdate(
           { _id: order._id },
           { orderStatusId: cancelledOrderStatus._id },
-          { context: { changedBy: userId }, new: true } as never,
+          { context: { changedBy: userId }, returnDocument: 'after' } as never,
         );
         this.logger.log(
           `${base} order ${order.orderCode} cancelled due to pickup cancellation`,

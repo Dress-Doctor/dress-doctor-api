@@ -22,6 +22,7 @@ export class User extends Document<Types.ObjectId> {
 
   @Prop({
     required: true,
+    type: String,
     enum: PreferredLanguageEnum,
     default: PreferredLanguageEnum.FRENCH,
   })
@@ -35,7 +36,7 @@ export class User extends Document<Types.ObjectId> {
   })
   userTypeId: Types.ObjectId;
 
-  @Prop({ required: false, enum: GenderEnum })
+  @Prop({ required: false, type: String, enum: GenderEnum })
   gender: GenderEnum;
 
   @Prop({ required: false })

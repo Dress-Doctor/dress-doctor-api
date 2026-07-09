@@ -55,7 +55,7 @@ export class OtpService {
     return this.otpSecurityStateModel.findOneAndUpdate(
       data,
       { $setOnInsert: data },
-      { new: true, upsert: true },
+      { returnDocument: 'after', upsert: true },
     );
   }
 

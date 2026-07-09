@@ -1,13 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import {
-  IsDefined,
-  IsInt,
-  IsOptional,
-  IsString,
-  Max,
-  Min,
-} from 'class-validator';
+import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { type Request } from 'express';
 import { Types } from 'mongoose';
 import { UserRequestDto } from 'src/api/auth/dto/jwt.dto';
@@ -25,26 +18,28 @@ export type AppRequestWithUser = AppRequest & { user: UserRequestDto };
 export class PaginationDto {
   @ApiProperty({
     example: 1,
-    required: true,
+    default: 1,
+    required: false,
     description: 'Specifies the page number of the results to retrieve',
   })
-  @IsDefined({ message: 'page is required' })
+  @IsOptional()
   @Type(() => Number)
   @IsInt({ message: 'page must be a number' })
   @Min(1, { message: 'page must be at least 1' })
-  page: number;
+  page: number = 1;
 
   @ApiProperty({
-    required: true,
-    example: 10,
+    default: 20,
+    required: false,
+    example: 20,
     description: 'Defines the number of items per page',
   })
-  @IsDefined({ message: 'size is required' })
+  @IsOptional()
   @Type(() => Number)
   @IsInt({ message: 'size must be a number' })
   @Min(1, { message: 'size must be at least 1' })
-  @Max(20, { message: 'size cannot be greater than 20' })
-  size: number;
+  @Max(100, { message: 'size cannot be greater than 100' })
+  size: number = 20;
 
   @ApiProperty({
     required: false,

@@ -19,7 +19,7 @@ export class RolePermission extends Document<Types.ObjectId> {
   })
   permissionId: Types.ObjectId;
 
-  @Prop({ required: true, enum: ScopeEnum })
+  @Prop({ required: true, type: String, enum: ScopeEnum })
   scope: ScopeEnum;
 
   @Prop({ type: Object })

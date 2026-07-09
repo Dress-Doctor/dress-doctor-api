@@ -22,7 +22,7 @@ export class PickupRequestHistory extends Document<Types.ObjectId> {
   @Prop({ required: false, type: Object, default: {} })
   changedFields?: Record<string, ChangedFieldDto>;
 
-  @Prop({ required: true, enum: HistoryActionEnum })
+  @Prop({ required: true, type: String, enum: HistoryActionEnum })
   action: HistoryActionEnum;
 
   @Prop({ required: false, type: Object, default: {} })

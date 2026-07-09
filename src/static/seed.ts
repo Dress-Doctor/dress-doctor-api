@@ -1,9 +1,23 @@
 import {
   PermissionActionEnum,
   PlatformEnum,
+  RoleEnum,
+  ScopeEnum,
   SubjectEnum,
 } from 'src/schema/admin/admin.dto';
 import { OfficeTypeEnum } from 'src/schema/office/office.dto';
+
+const crud = (subject: SubjectEnum) => [
+  { subject, action: PermissionActionEnum.CREATE },
+  { subject, action: PermissionActionEnum.READ },
+  { subject, action: PermissionActionEnum.UPDATE },
+  { subject, action: PermissionActionEnum.DELETE },
+];
+
+const readUpdate = (subject: SubjectEnum) => [
+  { subject, action: PermissionActionEnum.READ },
+  { subject, action: PermissionActionEnum.UPDATE },
+];
 
 export default {
   userType: [
@@ -123,7 +137,6 @@ export default {
   offices: [
     {
       signedLink: '',
-      qrCodeUrl: '',
       city: 'Douala',
       region: 'Litoral',
       officeCode: 'DD-105',
@@ -134,7 +147,6 @@ export default {
     },
     {
       signedLink: '',
-      qrCodeUrl: '',
       city: 'Douala',
       slug: 'bonabo',
       region: 'Litoral',
@@ -147,24 +159,61 @@ export default {
 
   roles: [
     {
-      roleName: 'Co-Founder',
+      roleName: RoleEnum.CO_FOUNDER,
       description:
         'Provides strategic direction, oversees company growth, and supports key decision-making across the business.',
     },
     {
-      roleName: 'Manager',
+      roleName: RoleEnum.MANAGER,
       description:
         'Manages daily operations, coordinates teams, and ensures business goals are met efficiently.',
     },
     {
-      roleName: 'Office Manager',
+      roleName: RoleEnum.OFFICE_MANAGER,
       description:
         'Oversees office administration, staff coordination, and ensures smooth day-to-day office operations.',
     },
     {
-      roleName: 'Factory Manager',
+      roleName: RoleEnum.FACTORY_MANAGER,
       description:
         'Supervises factory operations, manages production workflows, and ensures quality and efficiency standards are maintained.',
+    },
+    {
+      roleName: RoleEnum.CASHIER,
+      description: 'Records payments and reconciles till at an office.',
+    },
+    {
+      roleName: RoleEnum.DRIVER,
+      description: 'Handles pickup and delivery assignments.',
+    },
+    {
+      roleName: RoleEnum.LAUNDRY_STAFF,
+      description: 'Processes orders through washing/drying/ironing stages.',
+    },
+    {
+      roleName: RoleEnum.CUSTOMER_SERVICE,
+      description:
+        'Handles customer inquiries, order intake, and pickup scheduling.',
+    },
+    {
+      roleName: RoleEnum.TREASURER,
+      description: 'Oversees payments, reconciliation, and financial reports.',
+    },
+    {
+      roleName: RoleEnum.SECRETARY,
+      description: 'Handles office administration and record-keeping.',
+    },
+    {
+      roleName: RoleEnum.CUSTOMER,
+      description: 'External customer placing and tracking their own orders.',
+    },
+    {
+      roleName: RoleEnum.REFERRER,
+      description: 'External user who refers new customers.',
+    },
+    {
+      roleName: RoleEnum.AFFILIATE,
+      description: 'External partner earning commission on referred orders.',
     },
   ],
 
@@ -173,6 +222,103 @@ export default {
       subject: SubjectEnum.All,
       description: 'Full system access',
       action: PermissionActionEnum.MANAGE,
+    },
+    ...crud(SubjectEnum.Order),
+    ...crud(SubjectEnum.OrderItem),
+    ...crud(SubjectEnum.Payment),
+    ...crud(SubjectEnum.PickupRequest),
+    ...crud(SubjectEnum.PickupAssignment),
+    ...crud(SubjectEnum.Customer),
+    ...crud(SubjectEnum.User),
+    ...crud(SubjectEnum.Office),
+    ...crud(SubjectEnum.Item),
+    ...crud(SubjectEnum.Promo),
+    ...crud(SubjectEnum.AffiliatePartner),
+    ...crud(SubjectEnum.AffiliateTransaction),
+    ...readUpdate(SubjectEnum.OrderStatus),
+    ...readUpdate(SubjectEnum.PickupStatus),
+    ...readUpdate(SubjectEnum.PaymentType),
+    ...readUpdate(SubjectEnum.PaymentMethod),
+    ...readUpdate(SubjectEnum.Category),
+    ...readUpdate(SubjectEnum.SubCategory),
+    ...readUpdate(SubjectEnum.Service),
+    ...readUpdate(SubjectEnum.ServiceType),
+    ...readUpdate(SubjectEnum.Currency),
+  ],
+
+  // RolePermission mappings for the internal/staff roles — external
+  // self-service roles (Customer/Referrer/Affiliate) are seeded as Role
+  // rows only; their permission model is self-scoped conditions that
+  // belong to the Phase 1 auth-flow work, not this foundational seed.
+  rolePermissionMap: [
+    {
+      roleName: RoleEnum.MANAGER,
+      scope: ScopeEnum.GLOBAL,
+      permissions: [
+        { subject: SubjectEnum.All, action: PermissionActionEnum.MANAGE },
+      ],
+    },
+    {
+      roleName: RoleEnum.OFFICE_MANAGER,
+      scope: ScopeEnum.OFFICE,
+      permissions: [
+        ...crud(SubjectEnum.Order),
+        ...crud(SubjectEnum.Payment),
+        ...crud(SubjectEnum.PickupRequest),
+        ...crud(SubjectEnum.Customer),
+      ],
+    },
+    {
+      roleName: RoleEnum.FACTORY_MANAGER,
+      scope: ScopeEnum.OFFICE,
+      permissions: [...crud(SubjectEnum.Order), ...crud(SubjectEnum.OrderItem)],
+    },
+    {
+      roleName: RoleEnum.CASHIER,
+      scope: ScopeEnum.OFFICE,
+      permissions: [...crud(SubjectEnum.Payment)],
+    },
+    {
+      roleName: RoleEnum.DRIVER,
+      scope: ScopeEnum.OFFICE,
+      permissions: [
+        ...readUpdate(SubjectEnum.PickupRequest),
+        ...readUpdate(SubjectEnum.PickupAssignment),
+      ],
+    },
+    {
+      roleName: RoleEnum.LAUNDRY_STAFF,
+      scope: ScopeEnum.OFFICE,
+      permissions: [
+        ...readUpdate(SubjectEnum.Order),
+        ...readUpdate(SubjectEnum.OrderItem),
+      ],
+    },
+    {
+      roleName: RoleEnum.CUSTOMER_SERVICE,
+      scope: ScopeEnum.OFFICE,
+      permissions: [
+        ...crud(SubjectEnum.Customer),
+        ...crud(SubjectEnum.Order),
+        ...crud(SubjectEnum.PickupRequest),
+      ],
+    },
+    {
+      roleName: RoleEnum.TREASURER,
+      scope: ScopeEnum.OFFICE,
+      permissions: [
+        ...crud(SubjectEnum.Payment),
+        ...readUpdate(SubjectEnum.PaymentType),
+        ...readUpdate(SubjectEnum.PaymentMethod),
+      ],
+    },
+    {
+      roleName: RoleEnum.SECRETARY,
+      scope: ScopeEnum.OFFICE,
+      permissions: [
+        ...readUpdate(SubjectEnum.Office),
+        ...readUpdate(SubjectEnum.User),
+      ],
     },
   ],
 

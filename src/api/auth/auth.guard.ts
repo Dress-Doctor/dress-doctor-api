@@ -10,6 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { Request } from 'express';
 import { Model } from 'mongoose';
+import { AppRequest, AppRequestWithUser } from 'src/dto/request-data.dto';
 import constant from 'src/helper/constant';
 import { IS_PUBLIC_KEY } from 'src/helper/decorator/public.decorator';
 import { User } from 'src/schema/user/user.schema';
@@ -40,7 +41,7 @@ export class AuthGuard implements CanActivate {
 
     if (isPublic) return true;
 
-    const request = context.switchToHttp().getRequest<Request & JWTUserDto>();
+    const request = context.switchToHttp().getRequest<AppRequest>();
     const token = this.extractTokenFromHeader(request);
     if (!token) {
       this.logger.error('No JWT token');
@@ -66,7 +67,7 @@ export class AuthGuard implements CanActivate {
         userId: payload.sub,
         phone: payload.phone,
       };
-      request['user'] = userPayload;
+      (request as AppRequestWithUser).user = userPayload;
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : constant.UNAUTHORIZED;

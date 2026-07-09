@@ -8,9 +8,12 @@ import {
 import { ConfigModule } from '@nestjs/config';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, ConnectionStates } from 'mongoose';
+import { HealthModule } from './api/health/health.module';
 import { OfficeLinkModule } from './api/office-link/office-link.module';
 import { PickupModule } from './api/pickup/pickup.module';
+import { CorrelationIdMiddleware } from './helper/middleware/correlation-id.middleware';
 import { LogRequestMiddleware } from './helper/middleware/log-request.middleware';
+import { ApiClientLookupService } from './helper/service/api-client-lookup.service';
 import { CodeGeneratorService } from './helper/service/code-generator.service';
 import { SeederService } from './helper/service/seeder.service';
 import { i18nModule } from './i18n/i18n.module';
@@ -25,6 +28,7 @@ import { OrderModule } from './api/order/order.module';
 import { PaymentModule } from './api/payment/payment.module';
 import { BullModule } from '@nestjs/bullmq';
 import { QueueProcessorModule } from './queue/queue-processor.module';
+import { envValidationSchema } from './config/env.validation';
 
 @Module({
   imports: [
@@ -33,13 +37,18 @@ import { QueueProcessorModule } from './queue/queue-processor.module';
     SchemaModule,
     PickupModule,
     OfficeLinkModule,
+    HealthModule,
     ApiClientModule,
     UtilModule,
     UserModule,
     OrderModule,
     PaymentModule,
     QueueProcessorModule,
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      validationSchema: envValidationSchema,
+      validationOptions: { abortEarly: false },
+    }),
     BullModule.forRoot({
       connection: {
         host: process.env.REDIS_HOST,
@@ -60,6 +69,7 @@ import { QueueProcessorModule } from './queue/queue-processor.module';
   providers: [
     SeederService,
     CodeGeneratorService,
+    ApiClientLookupService,
     { provide: APP_GUARD, useClass: ApiClientGuard },
   ],
 })
@@ -71,7 +81,9 @@ export class AppModule implements NestModule, OnModuleInit {
   ) {}
 
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(LogRequestMiddleware).forRoutes('*path');
+    consumer
+      .apply(CorrelationIdMiddleware, LogRequestMiddleware)
+      .forRoutes('*path');
   }
 
   onModuleInit() {

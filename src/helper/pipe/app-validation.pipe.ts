@@ -11,6 +11,7 @@ const logger = new Logger('AppValidationPipe');
 export const AppValidationPipe = new ValidationPipe({
   whitelist: true,
   transform: true,
+  forbidNonWhitelisted: true,
   exceptionFactory: (errors) => {
     const error = findFirstError(errors);
     if (!error?.constraints) {
