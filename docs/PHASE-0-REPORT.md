@@ -38,11 +38,11 @@ Evolve-in-place pass over `dress-doctor-api` per `phases/BUILD-PHASE-0.md`. Scop
 
 Per the ground rules, where the repo already had a working pattern that differs from the architecture docs, the existing pattern was kept and the deviation is called out here rather than silently "fixed":
 
-- **Base path stays `/api/v1`**, not the blueprint's `/v1`. Both frontend repos are already built against `/api/v1` in prod.
-- **`CheckAccessGuard`/`@CheckAccess`** stay as named, not renamed to the blueprint's `PoliciesGuard`/`@CheckPolicies`. Same job, existing name.
-- **Error envelope stays flat** (`{ success, statusCode, errorCode, error: string, timestamp }`), not the blueprint's nested `{ error: { code, details[] } }`.
+- **Base path stays `/api/v1`**, not the blueprint's `/v1`. Kept to avoid needless churn to working code (`setGlobalPrefix('api')` + URI versioning). The API never shipped to prod and has no clients, so this protects working code, not any live consumer. The blueprint has been reconciled to `/api/v1`.
+- **`CheckAccessGuard`/`@CheckAccess`** stay as named. Same job as the blueprint's originally-proposed `PoliciesGuard`/`@CheckPolicies`; the blueprint has been reconciled to these existing names.
+- **Error envelope is flat for Phase 0 only** (`{ success, statusCode, errorCode, error: string, timestamp }`).
 
-**This last one needs a cross-repo decision before Phase 1 frontend work starts.** Both frontend blueprints are specced to read `error.code` for i18n-mapped error messages and `error.details[]` to place validation errors on individual form fields. The current flat shape can't feed that. Two ways to resolve it: evolve the envelope additively (keep `errorCode`/`error` for existing prod clients, add `error.details[]` + a real `code` alongside), or change the frontend spec to match the flat shape. Not a Phase 0 blocker — the flat shape satisfies every Phase 0 acceptance criterion (envelope applied globally, 500s masked, validation errors return field-level detail via `errorCode`) — but it will block Phase 1 frontend integration if left unresolved.
+**Decision (settled):** migrate to the blueprint's nested `{ error: { code, details[] } }` shape as the **first task of Phase 1 — cleanly, with no `errorCode`/`error` back-compat shim**, since the API never shipped to prod and has no clients. This is no longer an open cross-repo decision. The flat shape satisfied every Phase 0 acceptance criterion (envelope applied globally, 500s masked, validation errors return field-level detail); the nested shape is required for the frontends to read `error.code` for i18n messages and `error.details[]` for per-field validation. See `BUILD-PHASE-1.md` §1.
 
 - **`BaseSchema` was not retrofitted** onto the 51 existing schema files. ~19 of them are lookup/history collections where `createdBy`/`updatedBy` don't apply (e.g. `*-history` audit collections, taxonomy lookups) — a blanket retrofit would have been wrong, not just risky. It's introduced as the pattern for new/touched schemas going forward.
 

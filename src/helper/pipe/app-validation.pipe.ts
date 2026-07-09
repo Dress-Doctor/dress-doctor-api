@@ -5,6 +5,7 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import constant from '../constant';
+import { ErrorDetail } from '../types/error.type';
 
 const logger = new Logger('AppValidationPipe');
 
@@ -12,32 +13,52 @@ export const AppValidationPipe = new ValidationPipe({
   whitelist: true,
   transform: true,
   forbidNonWhitelisted: true,
-  exceptionFactory: (errors) => {
-    const error = findFirstError(errors);
-    if (!error?.constraints) {
+  exceptionFactory: (errors: ValidationError[]) => {
+    const details = flattenValidationErrors(errors);
+
+    if (details.length === 0) {
       logger.error(constant.SERVER_ERROR);
-      new BadRequestException(constant.SERVER_ERROR);
-      return;
+      return new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: constant.SERVER_ERROR,
+      });
     }
 
-    const message = Object.values(error.constraints)[0];
-    logger.error(message, JSON.stringify(error));
-    return new BadRequestException(message);
+    logger.error('Validation failed', JSON.stringify(details));
+    return new BadRequestException({
+      code: 'VALIDATION_ERROR',
+      message: 'Validation failed',
+      details,
+    });
   },
 });
 
-function findFirstError(errors: ValidationError[]): ValidationError | null {
-  if (!errors || errors.length === 0) return null;
+/**
+ * Flattens class-validator errors (including nested children) into a flat list of
+ * `{ field, message }`, one entry per failing constraint. Field paths are dotted
+ * (e.g. `items.0.qty`) so the frontend can map each message onto its input.
+ */
+function flattenValidationErrors(
+  errors: ValidationError[],
+  parentPath = '',
+): ErrorDetail[] {
+  const details: ErrorDetail[] = [];
 
-  let current = errors[0];
-  while (current) {
-    const constraints = current.constraints;
-    if (constraints && Object.keys(constraints).length > 0) return current;
+  for (const error of errors) {
+    const field = parentPath
+      ? `${parentPath}.${error.property}`
+      : error.property;
 
-    const children = current.children;
-    if (children && children.length > 0) current = children[0];
-    else break;
+    if (error.constraints) {
+      for (const message of Object.values(error.constraints)) {
+        details.push({ field, message });
+      }
+    }
+
+    if (error.children && error.children.length > 0) {
+      details.push(...flattenValidationErrors(error.children, field));
+    }
   }
 
-  return null;
+  return details;
 }
