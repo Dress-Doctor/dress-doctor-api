@@ -1,9 +1,9 @@
 # Staging stack. Mirrors docker-compose.yml (prod) with -stage naming,
 # its own Redis container/volume, and a different host port so it can
 # run alongside prod on the same host. Mongo is external — configure
-# DATABASE_URL in .env.stage. Shares the same network as prod; create
-# it once:
-#   docker network create dress-doctor-net
+# DATABASE_URL in .env.stage. Shares the same network as prod (fixed
+# name, not `external: true`) — whichever stack starts first creates
+# it, the other reuses it. No manual setup step.
 # Logs: same FileLoggerService split as prod (LOG_DIR ->
 # api-error.log/api-combined.log, worker-error.log/worker-combined.log),
 # bind-mounted to ./logs/stage on the host. See docker-compose.yml.
@@ -72,7 +72,6 @@ services:
 
 networks:
   dress-doctor:
-    external: true
     name: dress-doctor-net
 
 volumes:

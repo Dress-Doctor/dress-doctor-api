@@ -1,7 +1,8 @@
 # Production stack. Mongo is external (managed cluster) — configure
-# DATABASE_URL in .env.prod. Attaches to a shared external network so
-# stage and prod can coexist on the same host; create it once:
-#   docker network create dress-doctor-net
+# DATABASE_URL in .env.prod. Attaches to a shared network (fixed name,
+# not `external: true`) so stage and prod can coexist on the same
+# host — whichever stack starts first creates it, the other reuses it.
+# No manual setup step.
 # Logs: the app itself writes api-error.log/api-combined.log and
 # worker-error.log/worker-combined.log (see FileLoggerService) into
 # LOG_DIR, which is bind-mounted to ./logs/prod on the host — survives
@@ -72,7 +73,6 @@ services:
 
 networks:
   dress-doctor:
-    external: true
     name: dress-doctor-net
 
 volumes:
