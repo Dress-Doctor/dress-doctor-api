@@ -1,4 +1,5 @@
 export class CatalogDto {
+  [key: string]: string;
   category: string;
   subcategory: string;
   item: string;

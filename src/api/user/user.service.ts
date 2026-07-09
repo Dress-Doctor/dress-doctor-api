@@ -80,7 +80,11 @@ export class UserService {
       const newUser = await this.userModel.findOneAndUpdate(
         { phone: data.phone },
         { ...data, userTypeId },
-        { context: { changedBy: userId }, upsert: true, new: true } as never,
+        {
+          context: { changedBy: userId },
+          upsert: true,
+          returnDocument: 'after',
+        } as never,
       );
 
       // Create new customer document
@@ -88,7 +92,11 @@ export class UserService {
       await this.customerModel.findOneAndUpdate(
         { userId: (newUser as unknown as User)._id },
         { referralCode, userId: (newUser as unknown as User)._id },
-        { context: { changedBy: userId }, upsert: true, new: true } as never,
+        {
+          context: { changedBy: userId },
+          upsert: true,
+          returnDocument: 'after',
+        } as never,
       );
     }
 
@@ -103,7 +111,11 @@ export class UserService {
       await this.userModel.findOneAndUpdate(
         { phone: data.phone },
         { ...data, userTypeId, passwordHash: hashedPassword },
-        { context: { changedBy: userId }, upsert: true, new: true } as never,
+        {
+          context: { changedBy: userId },
+          upsert: true,
+          returnDocument: 'after',
+        } as never,
       );
     }
 

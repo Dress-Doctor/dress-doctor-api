@@ -22,7 +22,7 @@ export class Office extends Document<Types.ObjectId> {
   @Prop({ required: true, unique: true, lowercase: true })
   slug: string;
 
-  @Prop({ required: false, unique: true })
+  @Prop({ required: false, unique: true, sparse: true })
   qrCodeUrl: string;
 
   @Prop({ required: true })

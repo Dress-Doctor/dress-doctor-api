@@ -92,7 +92,7 @@ export function attachHistoryHooks<T extends Document>(
       logger.log(`History recorded for ${resourceName} CREATE`);
     } catch (error) {
       logger.error(
-        `Failed to save history for ${resourceName} CREATE: ${error}`,
+        `Failed to save history for ${resourceName} CREATE: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
     next();
@@ -152,7 +152,7 @@ export function attachHistoryHooks<T extends Document>(
       logger.log(`History recorded for ${resourceName} UPDATE`);
     } catch (error) {
       logger.error(
-        `Failed to save history for ${resourceName} UPDATE: ${error}`,
+        `Failed to save history for ${resourceName} UPDATE: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
     next();
@@ -176,7 +176,7 @@ export function attachHistoryHooks<T extends Document>(
       logger.log(`History recorded for ${resourceName} DELETE`);
     } catch (error) {
       logger.error(
-        `Failed to save history for ${resourceName} DELETE: ${error}`,
+        `Failed to save history for ${resourceName} DELETE: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
     next();

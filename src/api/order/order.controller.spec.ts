@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { CheckAccessGuard } from 'src/helper/guard/check-access.guard';
 import { OrderController } from './order.controller';
 import { OrderService } from './order.service';
 
@@ -29,7 +30,10 @@ describe('OrderController', () => {
           useValue: service,
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(CheckAccessGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<OrderController>(OrderController);
   });

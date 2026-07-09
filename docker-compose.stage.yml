@@ -1,0 +1,68 @@
+# Staging stack. Mirrors docker-compose.yml (prod) with its own
+# isolated network (via -p dress-doctor-stage in the Makefile — see
+# docker-compose.yml for why prod/stage don't share one), its own
+# Redis container/volume, and a different host port so it can run
+# alongside prod on the same host. Mongo is external — configure
+# DATABASE_URL in .env.stage.
+# Logs: same FileLoggerService split as prod (LOG_DIR ->
+# api-error.log/api-combined.log, worker-error.log/worker-combined.log),
+# bind-mounted to ./logs/stage on the host. See docker-compose.yml.
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: redis-cli ping
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    restart: unless-stopped
+    command: ['node', 'dist/main']
+    env_file:
+      - .env.stage
+    environment:
+      PORT: '3000'
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      LOG_DIR: /var/log/dress-doctor
+    ports:
+      - '3001:3000'
+    volumes:
+      - ./logs/stage:/var/log/dress-doctor
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ['node', 'dist/worker']
+    env_file:
+      - .env.stage
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      LOG_DIR: /var/log/dress-doctor
+    volumes:
+      - ./logs/stage:/var/log/dress-doctor
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis_data:

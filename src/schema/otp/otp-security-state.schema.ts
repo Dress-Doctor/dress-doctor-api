@@ -7,10 +7,15 @@ export class OtpSecurityState extends Document<Types.ObjectId> {
   @Prop({ required: true })
   identifier: string; // normalized phone/email
 
-  @Prop({ required: true, enum: OTPChannelEnum, default: OTPChannelEnum.EMAIL })
+  @Prop({
+    required: true,
+    type: String,
+    enum: OTPChannelEnum,
+    default: OTPChannelEnum.EMAIL,
+  })
   channel: OTPChannelEnum;
 
-  @Prop({ required: true, enum: OTPPurposeEnum })
+  @Prop({ required: true, type: String, enum: OTPPurposeEnum })
   purpose: OTPPurposeEnum;
 
   @Prop({ default: 0 })

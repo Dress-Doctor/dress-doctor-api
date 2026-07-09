@@ -1,64 +1,36 @@
-import {
-  ForbiddenException,
-  Injectable,
-  Logger,
-  NestMiddleware,
-} from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
+import { Injectable, Logger, NestMiddleware } from '@nestjs/common';
 import { NextFunction, Request } from 'express';
-import { Model } from 'mongoose';
-import { ApiClient } from 'src/schema/admin/api-client.schema';
-import { CodeGeneratorService } from '../service/code-generator.service';
+import { ApiClientLookupService } from '../service/api-client-lookup.service';
 
 @Injectable()
 export class LogRequestMiddleware implements NestMiddleware {
   private readonly logger = new Logger('Dress Doctor');
 
   constructor(
-    @InjectModel(ApiClient.name)
-    private readonly apiClientModel: Model<ApiClient>,
-    private readonly codeService: CodeGeneratorService,
+    private readonly apiClientLookupService: ApiClientLookupService,
   ) {}
-
-  private clientCache = new Map<string, string>();
-
-  private async getPlatformName(apiKey?: string, apiSecret?: string) {
-    if (!apiKey || !apiSecret) return 'UNKNOWN';
-
-    const cacheKey = `${apiKey}:${apiSecret}`;
-    if (this.clientCache.has(cacheKey)) return this.clientCache.get(cacheKey);
-
-    const apiClient = await this.apiClientModel
-      .findOne({ key: apiKey })
-      .select('name secretHash')
-      .lean();
-
-    if (!apiClient) {
-      this.logger.error(`Invalid api-key or api-secret`);
-      throw new ForbiddenException('Invalid x-api-key or x-api-secret');
-    }
-    const isValid = await this.codeService.verifyHash(
-      apiSecret,
-      apiClient.secretHash,
-    );
-
-    if (!isValid) {
-      this.logger.error(`Invalid api-key or api-secret`);
-      throw new ForbiddenException('Invalid x-api-key or x-api-secret');
-    }
-
-    const name = apiClient.name;
-    this.clientCache.set(apiKey, name);
-
-    return name;
-  }
 
   async use(req: Request, res: Response, next: NextFunction) {
     const apiKey = req.headers['x-api-key'] as string | undefined;
     const apiSecret = req.headers['x-api-secret'] as string | undefined;
 
-    const platform = await this.getPlatformName(apiKey, apiSecret);
-    this.logger.log(`${req.method} ${req.originalUrl} [${platform}]`);
+    let platform = 'UNKNOWN';
+    if (apiKey && apiSecret) {
+      try {
+        const apiClient = await this.apiClientLookupService.verify(
+          apiKey,
+          apiSecret,
+        );
+        platform = apiClient.name;
+      } catch {
+        // invalid credentials are rejected downstream by ApiClientGuard;
+        // logging still proceeds so the attempt is visible.
+      }
+    }
+
+    this.logger.log(
+      `${req.method} ${req.originalUrl} [${platform}] [${req.id}]`,
+    );
     next();
   }
 }
