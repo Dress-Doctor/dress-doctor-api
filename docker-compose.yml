@@ -13,6 +13,7 @@
 services:
   redis:
     image: redis:7-alpine
+    container_name: dress-doctor-prod-redis
     restart: unless-stopped
     volumes:
       - redis_data:/data
@@ -24,6 +25,7 @@ services:
 
   api:
     build: .
+    container_name: dress-doctor-prod-api
     restart: unless-stopped
     command: ['node', 'dist/main']
     env_file:
@@ -48,6 +50,7 @@ services:
 
   worker:
     build: .
+    container_name: dress-doctor-prod-worker
     restart: unless-stopped
     command: ['node', 'dist/worker']
     env_file:
