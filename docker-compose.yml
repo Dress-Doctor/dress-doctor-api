@@ -1,28 +1,28 @@
 # Production stack. Mongo is external (managed cluster) — configure
-# DATABASE_URL in .env.prod. Attaches to a shared network (fixed name,
-# not `external: true`) so stage and prod can coexist on the same
-# host — whichever stack starts first creates it, the other reuses it.
-# No manual setup step.
+# DATABASE_URL in .env.prod. No explicit network block — compose gives
+# this project its own isolated default network, keyed off -p (see
+# Makefile: `-p dress-doctor-prod`). Deliberately NOT shared with
+# stage: sharing one network would mean both stacks' `redis` service
+# registers the same DNS alias, so whichever one resolved second would
+# connect to a nondeterministic target.
 # Logs: the app itself writes api-error.log/api-combined.log and
 # worker-error.log/worker-combined.log (see FileLoggerService) into
 # LOG_DIR, which is bind-mounted to ./logs/prod on the host — survives
 # `down` (not `down -v`, there's no named volume here). Docker's own
 # json-file driver is also capped (10m x 5 files) as a second copy.
 services:
-  redis-prod:
+  redis:
     image: redis:7-alpine
     restart: unless-stopped
     volumes:
-      - redis_prod_data:/data
-    networks:
-      - dress-doctor
+      - redis_data:/data
     healthcheck:
       test: redis-cli ping
       interval: 5s
       timeout: 5s
       retries: 10
 
-  api-prod:
+  api:
     build: .
     restart: unless-stopped
     command: ['node', 'dist/main']
@@ -30,7 +30,7 @@ services:
       - .env.prod
     environment:
       PORT: '3000'
-      REDIS_HOST: redis-prod
+      REDIS_HOST: redis
       REDIS_PORT: '6379'
       LOG_DIR: /var/log/dress-doctor
     ports:
@@ -42,20 +42,18 @@ services:
       options:
         max-size: '10m'
         max-file: '5'
-    networks:
-      - dress-doctor
     depends_on:
-      redis-prod:
+      redis:
         condition: service_healthy
 
-  worker-prod:
+  worker:
     build: .
     restart: unless-stopped
     command: ['node', 'dist/worker']
     env_file:
       - .env.prod
     environment:
-      REDIS_HOST: redis-prod
+      REDIS_HOST: redis
       REDIS_PORT: '6379'
       LOG_DIR: /var/log/dress-doctor
     volumes:
@@ -65,15 +63,9 @@ services:
       options:
         max-size: '10m'
         max-file: '5'
-    networks:
-      - dress-doctor
     depends_on:
-      redis-prod:
+      redis:
         condition: service_healthy
 
-networks:
-  dress-doctor:
-    name: dress-doctor-net
-
 volumes:
-  redis_prod_data:
+  redis_data:
