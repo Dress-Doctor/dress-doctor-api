@@ -49,7 +49,7 @@ Per the ground rules, where the repo already had a working pattern that differs 
 ## 4. Known gaps / unverified
 
 - **Docker is verified.** No `docker` binary was available in the pass's original sandbox, so this was initially shipped unverified; the user then ran it for real on their own machine. Two crash-looping bugs surfaced and were fixed (i18n path, `qrCodeUrl` unique-index collision — §2 item 13), plus one port-mapping mismatch (§2 item 14). `docker compose up` now brings up mongo/redis/api/worker cleanly and `GET /health` returns 200.
-- **CI has not run on GitHub** — the workflow is written and every step (`typecheck`, `lint:ci`, `test:cov`, `build`) was run locally in the same sequence CI will use, all green. The workflow itself hasn't executed in Actions yet (no PR opened as part of this pass).
+- **CI is verified.** Runs green in GitHub Actions on PR #3 (→ `prod`) and #4 (→ `stage`).
 - **RolePermission conditions are not seeded.** `RolePermission.conditions` (the Mongo-query-shaped office/self-scoping) stays `undefined` for every seeded row — scope is set (`OFFICE`/`GLOBAL`) but per-record conditions are Phase 1 CASL work.
 - **Customer/Referrer/Affiliate roles have no permissions wired.** They're seeded as `Role` rows only; their self-scoped permission model belongs with the Phase 1 auth-flow work.
 
@@ -67,5 +67,5 @@ WhatsApp send path + OTP-recipient bug, `OrderItem.condition`/`colour`, `PromoCo
 - [x] Swagger UI serves the spec with both security schemes (pre-existing, unchanged)
 - [x] Seed runner idempotent — verified via two consecutive runs, identical collection counts
 - [x] `docker compose up` — verified on the user's machine after fixing 3 real bugs (i18n path, qrCodeUrl unique index, PORT mapping)
-- [ ] CI passes on a PR — workflow written, local dry-run green, **not yet run in Actions**
+- [x] CI passes on a PR — verified running in GitHub Actions (PR #3, #4)
 - [x] This report
