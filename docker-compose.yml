@@ -2,6 +2,9 @@
 # DATABASE_URL in .env.prod. Attaches to a shared external network so
 # stage and prod can coexist on the same host; create it once:
 #   docker network create dress-doctor-net
+# Logs are bind-mounted to ./logs/prod on the host (survives `down`,
+# not `down -v` — there's no volume here, just a bind mount) and also
+# capped via the json-file driver (10m x 5 files) as a second copy.
 services:
   redis-prod:
     image: redis:7-alpine
@@ -19,7 +22,10 @@ services:
   api-prod:
     build: .
     restart: unless-stopped
-    command: ['node', 'dist/main']
+    command:
+      - sh
+      - -c
+      - 'node dist/main 2>&1 | tee -a /var/log/dress-doctor/api.log'
     env_file:
       - .env.prod
     environment:
@@ -28,6 +34,13 @@ services:
       REDIS_PORT: '6379'
     ports:
       - '3000:3000'
+    volumes:
+      - ./logs/prod:/var/log/dress-doctor
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
     networks:
       - dress-doctor
     depends_on:
@@ -37,12 +50,22 @@ services:
   worker-prod:
     build: .
     restart: unless-stopped
-    command: ['node', 'dist/worker']
+    command:
+      - sh
+      - -c
+      - 'node dist/worker 2>&1 | tee -a /var/log/dress-doctor/worker.log'
     env_file:
       - .env.prod
     environment:
       REDIS_HOST: redis-prod
       REDIS_PORT: '6379'
+    volumes:
+      - ./logs/prod:/var/log/dress-doctor
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
     networks:
       - dress-doctor
     depends_on:

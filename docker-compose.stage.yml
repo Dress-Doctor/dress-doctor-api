@@ -4,6 +4,8 @@
 # DATABASE_URL in .env.stage. Shares the same network as prod; create
 # it once:
 #   docker network create dress-doctor-net
+# Logs are bind-mounted to ./logs/stage on the host — same setup as
+# prod, see docker-compose.yml for details.
 services:
   redis-stage:
     image: redis:7-alpine
@@ -21,7 +23,10 @@ services:
   api-stage:
     build: .
     restart: unless-stopped
-    command: ['node', 'dist/main']
+    command:
+      - sh
+      - -c
+      - 'node dist/main 2>&1 | tee -a /var/log/dress-doctor/api.log'
     env_file:
       - .env.stage
     environment:
@@ -30,6 +35,13 @@ services:
       REDIS_PORT: '6379'
     ports:
       - '3001:3000'
+    volumes:
+      - ./logs/stage:/var/log/dress-doctor
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
     networks:
       - dress-doctor
     depends_on:
@@ -39,12 +51,22 @@ services:
   worker-stage:
     build: .
     restart: unless-stopped
-    command: ['node', 'dist/worker']
+    command:
+      - sh
+      - -c
+      - 'node dist/worker 2>&1 | tee -a /var/log/dress-doctor/worker.log'
     env_file:
       - .env.stage
     environment:
       REDIS_HOST: redis-stage
       REDIS_PORT: '6379'
+    volumes:
+      - ./logs/stage:/var/log/dress-doctor
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
     networks:
       - dress-doctor
     depends_on:
