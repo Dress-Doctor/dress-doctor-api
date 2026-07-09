@@ -54,13 +54,22 @@ export class FileLoggerService extends ConsoleLogger {
         : this.combinedStream;
 
     for (const message of messages) {
+      // Base getJsonLogObject stamps `timestamp: Date.now()` — a raw
+      // epoch-ms number, unreadable at a glance. Overwrite it with
+      // ISO 8601 here rather than overriding the protected method
+      // itself, which would break its declared return type.
       const logObject = this.getJsonLogObject(message, {
         context,
         logLevel,
         writeStreamType,
         errorStack,
       });
-      stream.write(JSON.stringify(logObject) + '\n');
+      stream.write(
+        JSON.stringify({
+          ...logObject,
+          timestamp: new Date().toISOString(),
+        }) + '\n',
+      );
     }
   }
 }
