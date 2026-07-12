@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
+import type { SignOptions } from 'jsonwebtoken';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
@@ -20,7 +21,13 @@ import { QueueProducerModule } from 'src/queue/queue-producer.module';
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => ({
         global: true,
-        signOptions: { expiresIn: '5d' },
+        // Short-lived by design; the rotated refresh token carries longevity.
+        signOptions: {
+          expiresIn: config.get<string>(
+            'JWT_ACCESS_TTL',
+            '15m',
+          ) as SignOptions['expiresIn'],
+        },
         secret: config.get<string>('JWT_SECRET'),
       }),
     }),

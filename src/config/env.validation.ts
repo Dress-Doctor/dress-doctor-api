@@ -17,6 +17,11 @@ export const envValidationSchema = Joi.object({
 
   // Auth
   JWT_SECRET: Joi.string().min(16).required(),
+  // Access token stays short-lived (stolen access tokens aren't revocable);
+  // longevity comes from the rotated 30-day refresh token. Any `ms`/jwt
+  // duration string, e.g. '15m', '1h'.
+  JWT_ACCESS_TTL: Joi.string().default('15m'),
+  JWT_REFRESH_TTL_DAYS: Joi.number().positive().default(30),
   SALT: Joi.string().required(),
   ADMIN_PASSWORD: Joi.string().required(),
 

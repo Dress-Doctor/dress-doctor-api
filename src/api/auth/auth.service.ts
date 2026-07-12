@@ -34,9 +34,6 @@ type OtpTarget = Pick<User, 'phone' | 'firstName' | 'email' | 'whatsappPhone'>;
 /** Minimal user shape needed to mint tokens (populated or raw doc). */
 type TokenUser = Pick<User, '_id' | 'phone'>;
 
-// Refresh tokens outlive the short access token; rotated on every use.
-const REFRESH_TOKEN_TTL_DAYS = 30;
-
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -74,9 +71,9 @@ export class AuthService {
     const accessToken = await this.signToken(user, userType);
 
     const refreshToken = crypto.randomBytes(48).toString('hex');
-    const expiresAt = new Date(
-      Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000,
-    );
+    // Refresh tokens outlive the short access token; rotated on every use.
+    const ttlDays = Number(process.env.JWT_REFRESH_TTL_DAYS) || 30;
+    const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000);
     await this.refreshTokenModel.create({
       userId: user._id,
       tokenHash: this.hashRefreshToken(refreshToken),
