@@ -4,6 +4,7 @@ import * as bcrypt from 'bcrypt';
 import { Chance } from 'chance';
 import * as crypto from 'crypto';
 import { Model } from 'mongoose';
+import { Office } from 'src/schema/office/office.schema';
 import { Order } from 'src/schema/order/order.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { Customer } from 'src/schema/user/customer.schema';
@@ -15,6 +16,7 @@ export class CodeGeneratorService {
   constructor(
     @InjectModel(Order.name) private readonly orderModel: Model<Order>,
     @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
+    @InjectModel(Office.name) private readonly officeModel: Model<Office>,
 
     @InjectModel(PickupRequest.name)
     private readonly pickupRequestModel: Model<PickupRequest>,
@@ -47,6 +49,32 @@ export class CodeGeneratorService {
     do {
       code = this.generateCode(6);
       const doc = await this.customerModel.exists({ referralCode: code });
+      exists = doc ? true : false;
+    } while (exists);
+
+    return code;
+  }
+
+  async generateOfficeCode() {
+    let code: string;
+    let exists: boolean;
+
+    do {
+      code = this.generateCode(4, 'OF');
+      const doc = await this.officeModel.exists({ officeCode: code });
+      exists = doc ? true : false;
+    } while (exists);
+
+    return code;
+  }
+
+  async generateCustomerCode() {
+    let code: string;
+    let exists: boolean;
+
+    do {
+      code = this.generateCode(6, 'CU');
+      const doc = await this.customerModel.exists({ customerCode: code });
       exists = doc ? true : false;
     } while (exists);
 

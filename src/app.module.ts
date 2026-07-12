@@ -25,6 +25,7 @@ import { ApiClientGuard } from './helper/guard/api-client.guard';
 import { UtilModule } from './api/util/util.module';
 import { UserModule } from './api/user/user.module';
 import { CustomerModule } from './api/customer/customer.module';
+import { OfficeModule } from './api/office/office.module';
 import { OrderModule } from './api/order/order.module';
 import { PaymentModule } from './api/payment/payment.module';
 import { BullModule } from '@nestjs/bullmq';
@@ -43,6 +44,7 @@ import { envValidationSchema } from './config/env.validation';
     UtilModule,
     UserModule,
     CustomerModule,
+    OfficeModule,
     OrderModule,
     PaymentModule,
     QueueProcessorModule,
