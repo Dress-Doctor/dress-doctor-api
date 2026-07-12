@@ -203,11 +203,13 @@ export class SeederService {
   }
 
   private async seedOffice() {
-    const url = process.env.DD_API_URL;
+    const url = process.env.DD_API_URL ?? '';
+    const ttlDays = Number(process.env.OFFICE_LINK_TTL_DAYS) || 365;
     for (const office of seed.offices) {
       const { officeType, ...data } = office;
-      const sig = this.codeService.signOfficeLink(office.slug);
-      const signedLink = `${url}/o/${office.slug}?sig=${sig}`;
+      const exp = Date.now() + ttlDays * 24 * 60 * 60 * 1000;
+      const sig = this.codeService.signOfficeLink(office.slug, exp);
+      const signedLink = `${url}/o/${office.slug}?sig=${sig}&exp=${exp}`;
 
       const officeTypeDoc = await this.officeTypeModel.findOne({
         officeTypeName: officeType,

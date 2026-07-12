@@ -29,6 +29,11 @@ export const envValidationSchema = Joi.object({
   DD_API_URL: Joi.string().uri().required(),
   DD_WEB_URL: Joi.string().uri().required(),
   DD_OFFICE_LINK_SECRET: Joi.string().required(),
+  // How long a signed office link stays valid (days). Printed on QR codes, so
+  // long by default; the expiry is inside the HMAC payload.
+  OFFICE_LINK_TTL_DAYS: Joi.number().positive().default(365),
+  // Attribution cookie domain (e.g. .dressdoctor.io). Empty → request host.
+  COOKIE_DOMAIN: Joi.string().allow('').optional(),
 
   // Mail
   SMTP_HOST: Joi.string().required(),

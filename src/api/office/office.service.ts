@@ -52,8 +52,11 @@ export class OfficeService {
   }
 
   private buildSignedLink(slug: string): string {
-    const sig = this.codeService.signOfficeLink(slug);
-    return `${process.env.DD_API_URL}/o/${slug}?sig=${sig}`;
+    const ttlDays = Number(process.env.OFFICE_LINK_TTL_DAYS) || 365;
+    const exp = Date.now() + ttlDays * 24 * 60 * 60 * 1000;
+    const sig = this.codeService.signOfficeLink(slug, exp);
+    const baseUrl = process.env.DD_API_URL ?? '';
+    return `${baseUrl}/o/${slug}?sig=${sig}&exp=${exp}`;
   }
 
   async create(data: CreateOfficeDto) {
