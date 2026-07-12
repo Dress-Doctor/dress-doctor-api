@@ -52,8 +52,9 @@ export class AuthController {
   async completeLogin(@Body() data: CompleteLoginDto, @Req() req: AppRequest) {
     const platform = req.data.platform;
 
+    // Do not log `data` — it carries the OTP code (CLAUDE.md §12).
     this.logger.log(
-      `[${platform}] ${data.identifier} is trying to verify their otp with ${JSON.stringify(data)}`,
+      `[${platform}] ${data.identifier} is trying to verify their otp`,
     );
 
     return await this.authService.completeLogin(data);
