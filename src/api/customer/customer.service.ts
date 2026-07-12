@@ -21,6 +21,9 @@ import { User } from 'src/schema/user/user.schema';
 import { FindCustomerDto } from './dto/find-customer.dto';
 import { RegisterCustomerDto } from './dto/register-customer.dto';
 
+// Canonical "inactive" threshold until the settings collection lands (§19).
+export const DEFAULT_INACTIVE_DAYS = 14;
+
 @Injectable()
 export class CustomerService {
   private readonly logger = new Logger(CustomerService.name);
@@ -214,7 +217,7 @@ export class CustomerService {
    * for now. Follow-up status is Phase 2 (WhatsApp job + follow-ups log).
    */
   async findInactive(query: FindCustomerDto) {
-    const inactiveDays = query.inactiveDays ?? 14;
+    const inactiveDays = query.inactiveDays ?? DEFAULT_INACTIVE_DAYS;
     return this.findAll({ ...query, inactiveDays });
   }
 

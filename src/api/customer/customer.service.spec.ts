@@ -9,7 +9,7 @@ import { Customer } from 'src/schema/user/customer.schema';
 import { Referral } from 'src/schema/user/referral.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { User } from 'src/schema/user/user.schema';
-import { CustomerService } from './customer.service';
+import { CustomerService, DEFAULT_INACTIVE_DAYS } from './customer.service';
 import { FindCustomerDto } from './dto/find-customer.dto';
 
 // A constructor mock that also carries Mongoose statics (exists/findOne/...).
@@ -141,7 +141,7 @@ describe('CustomerService', () => {
     expect(customerModel).not.toHaveBeenCalled();
   });
 
-  it('findInactive defaults the threshold to 14 days', async () => {
+  it('findInactive defaults the threshold to DEFAULT_INACTIVE_DAYS', async () => {
     const spy = jest
       .spyOn(service, 'findAll')
       .mockResolvedValue({ total: 0, data: [], nextPage: null });
@@ -149,7 +149,7 @@ describe('CustomerService', () => {
     await service.findInactive({ page: 1, size: 20 } as FindCustomerDto);
 
     expect(spy).toHaveBeenCalledWith(
-      expect.objectContaining({ inactiveDays: 14 }),
+      expect.objectContaining({ inactiveDays: DEFAULT_INACTIVE_DAYS }),
     );
   });
 
