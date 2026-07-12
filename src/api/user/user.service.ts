@@ -1,8 +1,10 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
@@ -17,6 +19,12 @@ import { User } from 'src/schema/user/user.schema';
 import { FindAllUserDto } from './dto/find-all-user.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
+import { Role } from 'src/schema/admin/role.schema';
+import { UserRole } from 'src/schema/admin/user-role.schema';
+import { Office } from 'src/schema/office/office.schema';
+import { OfficeUser } from 'src/schema/office/office-user.schema';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { AssignRoleDto } from './dto/assign-role.dto';
 
 @Injectable()
 export class UserService {
@@ -29,6 +37,11 @@ export class UserService {
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
     @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
+    @InjectModel(Role.name) private readonly roleModel: Model<Role>,
+    @InjectModel(UserRole.name) private readonly userRoleModel: Model<UserRole>,
+    @InjectModel(Office.name) private readonly officeModel: Model<Office>,
+    @InjectModel(OfficeUser.name)
+    private readonly officeUserModel: Model<OfficeUser>,
   ) {}
 
   private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
@@ -154,5 +167,141 @@ export class UserService {
       `[${platform}] ${phone} has successfully retrieved all users`,
     );
     return { total: totalUsers, data: users, nextPage };
+  }
+
+  async findOne(id: string) {
+    this.can('READ', 'User');
+    const user = await this.userModel
+      .findById(new Types.ObjectId(id))
+      .select('-passwordHash')
+      .populate({ model: UserType.name, path: 'userTypeId' });
+
+    if (!user) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'User not found',
+      });
+    }
+    return user;
+  }
+
+  async update(id: string, data: UpdateUserDto) {
+    this.can('UPDATE', 'User');
+    const userId = new Types.ObjectId(id);
+    const actorId = new Types.ObjectId(this.req.user.userId);
+
+    const user = await this.userModel.findById(userId);
+    if (!user) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'User not found',
+      });
+    }
+
+    if (data.email) {
+      const emailTaken = await this.userModel.exists({
+        email: data.email,
+        _id: { $ne: userId },
+      });
+      if (emailTaken) {
+        throw new ConflictException({
+          code: 'CONFLICT',
+          message: 'The provided email has been taken',
+        });
+      }
+    }
+
+    const updated = await this.userModel.findOneAndUpdate(
+      { _id: userId },
+      data,
+      {
+        context: { changedBy: actorId },
+        returnDocument: 'after',
+      } as never,
+    );
+
+    return updated;
+  }
+
+  async assignRole(id: string, data: AssignRoleDto) {
+    this.can('manage', 'User');
+    const userId = new Types.ObjectId(id);
+    const actorId = new Types.ObjectId(this.req.user.userId);
+
+    const user = await this.userModel.findById(userId);
+    if (!user) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'User not found',
+      });
+    }
+
+    const roleId = new Types.ObjectId(data.roleId);
+    const role = await this.roleModel.findById(roleId);
+    if (!role) {
+      throw new BadRequestException({
+        code: 'INVALID_ROLE',
+        message: 'Invalid role id',
+      });
+    }
+
+    // With an office → a per-office OfficeUser assignment; without → a global
+    // UserRole. Upserts keep the operation idempotent.
+    if (data.officeId) {
+      const officeId = new Types.ObjectId(data.officeId);
+      const office = await this.officeModel.findById(officeId);
+      if (!office) {
+        throw new BadRequestException({
+          code: 'INVALID_OFFICE',
+          message: 'Invalid office id',
+        });
+      }
+      await this.officeUserModel.findOneAndUpdate(
+        { userId, roleId, officeId },
+        { userId, roleId, officeId, isActive: true },
+        { upsert: true, context: { changedBy: actorId } } as never,
+      );
+      return 'Office role assigned successfully';
+    }
+
+    await this.userRoleModel.findOneAndUpdate(
+      { userId, roleId },
+      { userId, roleId },
+      { upsert: true } as never,
+    );
+    return 'Role assigned successfully';
+  }
+
+  async revokeRole(id: string, roleId: string) {
+    this.can('manage', 'User');
+    const userId = new Types.ObjectId(id);
+    const role = new Types.ObjectId(roleId);
+
+    await Promise.all([
+      this.userRoleModel.deleteOne({ userId, roleId: role }),
+      this.officeUserModel.deleteMany({ userId, roleId: role }),
+    ]);
+    return 'Role revoked successfully';
+  }
+
+  async deactivate(id: string) {
+    this.can('manage', 'User');
+    const userId = new Types.ObjectId(id);
+    const actorId = new Types.ObjectId(this.req.user.userId);
+
+    const user = await this.userModel.findById(userId);
+    if (!user) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'User not found',
+      });
+    }
+
+    await this.userModel.findOneAndUpdate(
+      { _id: userId },
+      { isActive: false },
+      { context: { changedBy: actorId }, returnDocument: 'after' } as never,
+    );
+    return 'User deactivated successfully';
   }
 }
