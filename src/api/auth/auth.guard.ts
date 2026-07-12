@@ -66,6 +66,8 @@ export class AuthGuard implements CanActivate {
         ability,
         userId: payload.sub,
         phone: payload.phone,
+        userType: payload.userType,
+        office: payload.office,
       };
       (request as AppRequestWithUser).user = userPayload;
     } catch (err) {

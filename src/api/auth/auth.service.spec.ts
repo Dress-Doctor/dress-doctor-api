@@ -7,6 +7,7 @@ import { CodeGeneratorService } from 'src/helper/service/code-generator.service'
 import { NotificationService } from 'src/helper/service/notification.service';
 import { OtpService } from 'src/helper/service/otp.service';
 import { OTPChannelEnum } from 'src/schema/otp/otp.dto';
+import { RefreshToken } from 'src/schema/user/refresh-token.schema';
 import { UserTypeEum } from 'src/schema/user/user.dto';
 import { User } from 'src/schema/user/user.schema';
 import { AuthService } from './auth.service';
@@ -26,10 +27,15 @@ const STAFF = UserTypeEum.ADMIN.toString();
 
 describe('AuthService', () => {
   let service: AuthService;
-  let userModel: { findOne: jest.Mock };
+  let userModel: { findOne: jest.Mock; findById: jest.Mock };
   let otpService: { requestOtp: jest.Mock; verifyOtp: jest.Mock };
   let codeService: { verifyHash: jest.Mock };
   let notificationService: { addToQueue: jest.Mock };
+  let refreshTokenModel: {
+    create: jest.Mock;
+    findOne: jest.Mock;
+    updateOne: jest.Mock;
+  };
 
   const buildUser = (over: Partial<MockUser> = {}): MockUser => ({
     phone: '698765294',
@@ -49,7 +55,12 @@ describe('AuthService', () => {
     });
 
   beforeEach(async () => {
-    userModel = { findOne: jest.fn() };
+    userModel = { findOne: jest.fn(), findById: jest.fn() };
+    refreshTokenModel = {
+      create: jest.fn().mockResolvedValue(undefined),
+      findOne: jest.fn(),
+      updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
+    };
     otpService = {
       requestOtp: jest.fn().mockResolvedValue({
         code: '123456',
@@ -67,12 +78,19 @@ describe('AuthService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
-        { provide: JwtService, useValue: { signAsync: jest.fn() } },
+        {
+          provide: JwtService,
+          useValue: { signAsync: jest.fn().mockResolvedValue('access.jwt') },
+        },
         { provide: OtpService, useValue: otpService },
         { provide: CodeGeneratorService, useValue: codeService },
         { provide: NotificationService, useValue: notificationService },
         { provide: REQUEST, useValue: { data: { platform: 'WEB' } } },
         { provide: getModelToken(User.name), useValue: userModel },
+        {
+          provide: getModelToken(RefreshToken.name),
+          useValue: refreshTokenModel,
+        },
       ],
     }).compile();
 
@@ -221,6 +239,102 @@ describe('AuthService', () => {
           otpChannel: OTPChannelEnum.WHATSAPP,
         }),
       ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('completeLogin', () => {
+    it('verifies the OTP then issues an access + refresh pair', async () => {
+      mockFindOne(buildUser());
+
+      const res = await service.completeLogin({
+        code: '123456',
+        otpRef: 'otp-ref',
+        identifier: '698765294',
+      });
+
+      expect(otpService.verifyOtp).toHaveBeenCalled();
+      expect(res.accessToken).toBe('access.jwt');
+      expect(typeof res.refreshToken).toBe('string');
+      expect(res.refreshToken.length).toBeGreaterThan(0);
+      expect(refreshTokenModel.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('refresh', () => {
+    const validStored = () => ({
+      userId: { toString: () => 'uid' },
+      revokedAt: undefined as Date | undefined,
+      replacedByTokenHash: undefined as string | undefined,
+      expiresAt: new Date(Date.now() + 1_000_000),
+      save: jest.fn().mockResolvedValue(undefined),
+    });
+
+    const mockUserById = () => {
+      const doc = {
+        _id: 'uid',
+        phone: '698765294',
+        isActive: true,
+        populate: jest.fn().mockResolvedValue({
+          userTypeId: { userTypeName: CUSTOMER },
+        }),
+      };
+      userModel.findById.mockReturnValue(doc);
+    };
+
+    it('rotates: issues a new pair and revokes the presented token', async () => {
+      const stored = validStored();
+      refreshTokenModel.findOne.mockResolvedValue(stored);
+      mockUserById();
+
+      const res = await service.refresh({ refreshToken: 'raw-token' });
+
+      expect(res.accessToken).toBe('access.jwt');
+      expect(typeof res.refreshToken).toBe('string');
+      expect(stored.revokedAt).toBeInstanceOf(Date);
+      expect(stored.replacedByTokenHash).toEqual(expect.any(String));
+      expect(stored.save).toHaveBeenCalled();
+    });
+
+    it('rejects a revoked token', async () => {
+      const stored = validStored();
+      stored.revokedAt = new Date();
+      refreshTokenModel.findOne.mockResolvedValue(stored);
+
+      await expect(
+        service.refresh({ refreshToken: 'raw-token' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('rejects an expired token', async () => {
+      const stored = validStored();
+      stored.expiresAt = new Date(Date.now() - 1000);
+      refreshTokenModel.findOne.mockResolvedValue(stored);
+
+      await expect(
+        service.refresh({ refreshToken: 'raw-token' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('rejects an unknown token', async () => {
+      refreshTokenModel.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.refresh({ refreshToken: 'raw-token' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('logout', () => {
+    it('revokes the presented refresh token', async () => {
+      await service.logout({ refreshToken: 'raw-token' });
+      expect(refreshTokenModel.updateOne).toHaveBeenCalledTimes(1);
+      const [filter, update] = refreshTokenModel.updateOne.mock.calls[0] as [
+        { tokenHash: string; revokedAt: { $exists: boolean } },
+        { revokedAt: Date },
+      ];
+      expect(filter.revokedAt).toEqual({ $exists: false });
+      expect(typeof filter.tokenHash).toBe('string');
+      expect(update.revokedAt).toBeInstanceOf(Date);
     });
   });
 });

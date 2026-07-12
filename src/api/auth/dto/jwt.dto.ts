@@ -7,6 +7,8 @@ export class JWTUserDto {
   exp: number;
   sub: string; // userId
   phone: string;
+  userType: string; // UserType.userTypeName (e.g. CUSTOMER, ADMIN)
+  office?: string; // caller's office context (ObjectId as string), if any
 }
 
 export type RequestDto = {
@@ -16,5 +18,7 @@ export type RequestDto = {
 export type UserRequestDto = {
   phone: string;
   userId: string;
+  userType?: string;
+  office?: string;
   ability: MongoAbility<AppAbilityDto, ConditionsDto>;
 };

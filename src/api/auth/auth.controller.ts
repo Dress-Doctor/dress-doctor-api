@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Logger,
@@ -8,6 +9,7 @@ import {
   Req,
 } from '@nestjs/common';
 import {
+  ApiBearerAuth,
   ApiHeader,
   ApiOperation,
   ApiResponse,
@@ -18,6 +20,7 @@ import { xApiKey, xApiSecret } from 'src/dto/swagger.dto';
 import { Public } from 'src/helper/decorator/public.decorator';
 import { AuthService } from './auth.service';
 import { CompleteLoginDto, InitiateLoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/refresh.dto';
 import {
   CompleteLoginEntity,
   InitiateLoginEntity,
@@ -58,5 +61,29 @@ export class AuthController {
     );
 
     return await this.authService.completeLogin(data);
+  }
+
+  @Public()
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Rotate a refresh token for a new token pair' })
+  async refresh(@Body() data: RefreshTokenDto) {
+    return await this.authService.refresh(data);
+  }
+
+  @Public()
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Revoke a refresh token' })
+  async logout(@Body() data: RefreshTokenDto) {
+    return await this.authService.logout(data);
+  }
+
+  @Get('me')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Current authenticated user + abilities' })
+  async me() {
+    return await this.authService.me();
   }
 }
