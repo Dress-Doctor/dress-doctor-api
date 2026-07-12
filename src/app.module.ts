@@ -26,6 +26,7 @@ import { UtilModule } from './api/util/util.module';
 import { UserModule } from './api/user/user.module';
 import { CustomerModule } from './api/customer/customer.module';
 import { OfficeModule } from './api/office/office.module';
+import { PricingModule } from './api/pricing/pricing.module';
 import { OrderModule } from './api/order/order.module';
 import { PaymentModule } from './api/payment/payment.module';
 import { BullModule } from '@nestjs/bullmq';
@@ -45,6 +46,7 @@ import { envValidationSchema } from './config/env.validation';
     UserModule,
     CustomerModule,
     OfficeModule,
+    PricingModule,
     OrderModule,
     PaymentModule,
     QueueProcessorModule,
