@@ -78,7 +78,16 @@ can't be re-confirmed).
   payment.service (~73%), pricing.service (~66%), and order.service. order.service
   is at ~29% because its create/list/reprice paths are exercised end-to-end, not
   by unit tests — see §6; the gate is a regression floor, to be raised once the
-  e2e suite runs in CI.
+  full HTTP e2e suite runs in CI.
+- **Integration e2e** (`test/casl-scope.e2e-spec.ts`, `npm run test:e2e`) runs
+  against a real single-node **replica-set** Mongo (mongodb-memory-server, self
+  contained — no Redis): proves office-A staff can't fetch office B's order by id,
+  CAN fetch their own, a global user is unrestricted, and multi-document
+  transactions work on the replica set. This caught a real bug unit mocks
+  couldn't: scope conditions carried string ids, which Mongoose won't cast inside
+  `$or` (and aggregate `$match` never casts) — so scoped users were matching
+  nothing (locked out of their own office). `scopeFilter` now deep-casts 24-hex
+  id strings to ObjectId.
 
 ## 5. Deviations (adapt, don't replace)
 
@@ -100,15 +109,17 @@ can't be re-confirmed).
 ## 6. Known gaps / must-do before this phase is production-ready
 
 - **Mongo must run as a single-node replica set** (`--replSet rs0` +
-  `rs.initiate()`) in dev/test/compose/prod. Multi-doc transactions
-  (payment record, order confirm finalize) **throw on a standalone mongod** —
-  so those paths are broken in any standalone environment. Unit tests miss this
-  (they mock the session). The e2e suite must run against a replica-set Mongo.
-- **E2E suite** (Supertest against a replica-set Mongo): customer OTP login;
-  staff 2FA; order→payment→flag; payment idempotency; guard ordering; envelope +
-  pagination; and the security assertions that prove §3.7 end-to-end — customer
-  can't GET another customer, scoped staff can't GET/PATCH another office's order,
-  can't pay an out-of-scope order.
+  `rs.initiate()`) in dev/compose/prod. Multi-doc transactions (payment record,
+  order confirm finalize) **throw on a standalone mongod**. Proven necessary and
+  proven working by the integration e2e (§4), which runs its own in-memory
+  replica set; the dev/compose Mongo (`DATABASE_URL`) must likewise be a replica
+  set. Prod uses an external managed cluster (already a replica set).
+- **Full HTTP e2e suite** (Supertest against the booted app — needs Redis +
+  replica-set Mongo): customer OTP login; staff 2FA; order→payment→flag; payment
+  idempotency; guard ordering; envelope + pagination; plus the by-id security
+  assertions over HTTP (the query-level enforcement is already covered by the
+  integration e2e in §4). This is the remaining §8 item; it runs in an
+  environment with Redis + a replica-set Mongo.
 
 ## 7. Deferred (tracked, not blockers)
 
