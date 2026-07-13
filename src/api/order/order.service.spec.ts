@@ -39,15 +39,21 @@ describe('OrderService', () => {
     findById: jest.Mock;
     findOne: jest.Mock;
     findOneAndUpdate: jest.Mock;
+    updateOne: jest.Mock;
     countDocuments: jest.Mock;
     find: jest.Mock;
   };
-  let orderItemModel: { countDocuments: jest.Mock };
+  let orderItemModel: {
+    countDocuments: jest.Mock;
+    find: jest.Mock;
+    updateOne: jest.Mock;
+  };
   let orderStatusModel: { findOne: jest.Mock };
   let eventEmitter: { emit: jest.Mock };
   let subscriptionModel: { updateOne: jest.Mock };
   let promoUsageModel: { create: jest.Mock };
   let promoCodeModel: { updateOne: jest.Mock };
+  let pricingService: { priceOrder: jest.Mock };
 
   const orderWithStatus = (
     status: OrderStatusEnum,
@@ -77,10 +83,15 @@ describe('OrderService', () => {
       findById: jest.fn(),
       findOne: jest.fn(),
       findOneAndUpdate: jest.fn().mockResolvedValue({}),
+      updateOne: jest.fn().mockResolvedValue({}),
       countDocuments: jest.fn().mockResolvedValue(2),
       find: jest.fn(),
     };
-    orderItemModel = { countDocuments: jest.fn().mockResolvedValue(1) };
+    orderItemModel = {
+      countDocuments: jest.fn().mockResolvedValue(1),
+      find: jest.fn().mockResolvedValue([]),
+      updateOne: jest.fn().mockResolvedValue({}),
+    };
     orderStatusModel = {
       findOne: jest.fn().mockResolvedValue({ _id: new Types.ObjectId() }),
     };
@@ -92,13 +103,14 @@ describe('OrderService', () => {
     promoCodeModel = {
       updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
     };
+    pricingService = { priceOrder: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrderService,
         { provide: CodeGeneratorService, useValue: {} },
         { provide: AppUtilService, useValue: {} },
-        { provide: PricingService, useValue: { priceOrder: jest.fn() } },
+        { provide: PricingService, useValue: pricingService },
         {
           provide: REQUEST,
           useValue: {
@@ -241,6 +253,81 @@ describe('OrderService', () => {
 
       await service.washOrder('507f1f77bcf86cd799439011');
 
+      expect(subscriptionModel.updateOne).not.toHaveBeenCalled();
+      expect(promoUsageModel.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reprice (pure snapshot via updateOrderDraft)', () => {
+    const pricing = {
+      pricingModel: 'PER_PIECE',
+      lines: [],
+      subtotal: 4000,
+      manualDiscount: 1000,
+      promoDiscount: 500,
+      total: 2500,
+      currencyId: new Types.ObjectId(),
+      promoCodeId: null,
+      subscriptionId: null,
+      quotaConsumedKg: 0,
+    };
+
+    beforeEach(() => {
+      // updateOrderDraft fetches a DRAFT order (findOne+populate), then reprice
+      // re-fetches it (findById) and runs the engine.
+      setOrder(OrderStatusEnum.DRAFT);
+      orderModel.findById.mockResolvedValue({
+        _id: new Types.ObjectId(),
+        pricingModel: 'PER_PIECE',
+        customerId: new Types.ObjectId(),
+        totalWeightKg: 0,
+        manualDiscount: 1000,
+        promoCode: 'SAVE',
+        amountPaid: 0,
+      });
+      pricingService.priceOrder.mockResolvedValue(pricing);
+    });
+
+    it('snapshots the engine result onto the order', async () => {
+      await service.updateOrderDraft('507f1f77bcf86cd799439011', {
+        manualDiscount: 1000,
+      });
+
+      expect(pricingService.priceOrder).toHaveBeenCalled();
+      const update = orderModel.findOneAndUpdate.mock.calls.at(-1)?.[1] as {
+        orderAmount: number;
+        promoDiscount: number;
+        totalAmount: number;
+        discountAmount: number;
+      };
+      expect(update.orderAmount).toBe(4000);
+      expect(update.promoDiscount).toBe(500);
+      expect(update.totalAmount).toBe(2500);
+      expect(update.discountAmount).toBe(1500); // manual + promo
+    });
+
+    it('has NO side effects — never decrements quota or writes promo usage', async () => {
+      await service.updateOrderDraft('507f1f77bcf86cd799439011', {
+        manualDiscount: 1000,
+      });
+
+      expect(subscriptionModel.updateOne).not.toHaveBeenCalled();
+      expect(promoUsageModel.create).not.toHaveBeenCalled();
+      expect(promoCodeModel.updateOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('confirm is not repeatable', () => {
+    it('rejects re-confirming an already CONFIRMED order (no double finalize)', async () => {
+      setOrder(OrderStatusEnum.CONFIRMED, {
+        subscriptionId: new Types.ObjectId(),
+        quotaConsumedKg: 5,
+      });
+
+      await expect(
+        service.confirmOrder('507f1f77bcf86cd799439011'),
+      ).rejects.toThrow(ConflictException);
+      // Guard blocks it before any finalize side effect.
       expect(subscriptionModel.updateOne).not.toHaveBeenCalled();
       expect(promoUsageModel.create).not.toHaveBeenCalled();
     });

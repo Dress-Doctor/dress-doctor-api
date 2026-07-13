@@ -116,10 +116,10 @@
         "lines": 60
       },
       "src/api/order/order.service.ts": {
-        "statements": 28,
-        "branches": 34,
-        "functions": 42,
-        "lines": 28
+        "statements": 35,
+        "branches": 42,
+        "functions": 50,
+        "lines": 35
       }
     }
   }
