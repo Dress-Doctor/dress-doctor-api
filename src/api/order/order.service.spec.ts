@@ -15,7 +15,11 @@ import { Order } from 'src/schema/order/order.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { Customer } from 'src/schema/user/customer.schema';
+import { PromoCode } from 'src/schema/promo/promo-code.schema';
+import { PromoCodeUsage } from 'src/schema/promo/promo-code-usage.schema';
+import { Subscription } from 'src/schema/subscription/subscription.schema';
 import { User } from 'src/schema/user/user.schema';
+import { PricingService } from '../pricing/pricing.service';
 import { OrderEvents } from './order.events';
 import { OrderService } from './order.service';
 
@@ -30,17 +34,30 @@ describe('OrderService', () => {
   let orderItemModel: { countDocuments: jest.Mock };
   let orderStatusModel: { findOne: jest.Mock };
   let eventEmitter: { emit: jest.Mock };
+  let subscriptionModel: { updateOne: jest.Mock };
+  let promoUsageModel: { create: jest.Mock };
+  let promoCodeModel: { updateOne: jest.Mock };
 
-  const orderWithStatus = (status: OrderStatusEnum) => ({
+  const orderWithStatus = (
+    status: OrderStatusEnum,
+    extra: Record<string, unknown> = {},
+  ) => ({
     _id: new Types.ObjectId(),
     orderCode: 'OR-TEST',
     pickupRequestId: undefined,
+    customerId: new Types.ObjectId(),
+    quotaConsumedKg: 0,
+    promoDiscount: 0,
     orderStatusId: { orderStatusName: status },
+    ...extra,
   });
 
-  const setOrder = (status: OrderStatusEnum) =>
+  const setOrder = (
+    status: OrderStatusEnum,
+    extra: Record<string, unknown> = {},
+  ) =>
     orderModel.findById.mockReturnValue({
-      populate: jest.fn().mockResolvedValue(orderWithStatus(status)),
+      populate: jest.fn().mockResolvedValue(orderWithStatus(status, extra)),
     });
 
   beforeEach(async () => {
@@ -55,12 +72,20 @@ describe('OrderService', () => {
       findOne: jest.fn().mockResolvedValue({ _id: new Types.ObjectId() }),
     };
     eventEmitter = { emit: jest.fn() };
+    subscriptionModel = {
+      updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
+    };
+    promoUsageModel = { create: jest.fn().mockResolvedValue({}) };
+    promoCodeModel = {
+      updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrderService,
         { provide: CodeGeneratorService, useValue: {} },
         { provide: AppUtilService, useValue: {} },
+        { provide: PricingService, useValue: { priceOrder: jest.fn() } },
         {
           provide: REQUEST,
           useValue: {
@@ -84,6 +109,15 @@ describe('OrderService', () => {
         { provide: getModelToken(PickupRequest.name), useValue: {} },
         { provide: getModelToken(PickupStatus.name), useValue: {} },
         { provide: getModelToken(Customer.name), useValue: {} },
+        {
+          provide: getModelToken(Subscription.name),
+          useValue: subscriptionModel,
+        },
+        {
+          provide: getModelToken(PromoCodeUsage.name),
+          useValue: promoUsageModel,
+        },
+        { provide: getModelToken(PromoCode.name), useValue: promoCodeModel },
         { provide: EventEmitter2, useValue: eventEmitter },
       ],
     }).compile();
@@ -152,6 +186,45 @@ describe('OrderService', () => {
 
       const msg = await service.washOrder('507f1f77bcf86cd799439011');
       expect(msg).toBe('Order is now being washed');
+    });
+  });
+
+  describe('confirm finalize (one-time side effects)', () => {
+    it('decrements subscription quota and records promo usage on confirm', async () => {
+      const subscriptionId = new Types.ObjectId();
+      const promoCodeId = new Types.ObjectId();
+      setOrder(OrderStatusEnum.DRAFT, {
+        subscriptionId,
+        quotaConsumedKg: 5,
+        promoCodeId,
+        promoDiscount: 500,
+      });
+
+      await service.confirmOrder('507f1f77bcf86cd799439011');
+
+      expect(subscriptionModel.updateOne).toHaveBeenCalledWith(
+        { _id: subscriptionId },
+        { $inc: { remainingQuota: -5 } },
+      );
+      expect(promoUsageModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({ promoCodeId, discountApplied: 500 }),
+      );
+      expect(promoCodeModel.updateOne).toHaveBeenCalledWith(
+        { _id: promoCodeId },
+        { $inc: { usedCount: 1 } },
+      );
+    });
+
+    it('does not touch quota/usage on a non-confirm transition', async () => {
+      setOrder(OrderStatusEnum.RECEIVED, {
+        subscriptionId: new Types.ObjectId(),
+        quotaConsumedKg: 5,
+      });
+
+      await service.washOrder('507f1f77bcf86cd799439011');
+
+      expect(subscriptionModel.updateOne).not.toHaveBeenCalled();
+      expect(promoUsageModel.create).not.toHaveBeenCalled();
     });
   });
 

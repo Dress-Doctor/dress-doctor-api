@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Logger,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -34,6 +35,7 @@ import {
   CreateOrderWithPickupDto,
 } from './dto/create-order.dto';
 import { FindOrderDto } from './dto/find-order.dto';
+import { UpdateOrderDraftDto } from './dto/update-order-draft.dto';
 import {
   OrderItemParamsDto,
   UpdateOrderItemDto,
@@ -108,6 +110,19 @@ export class OrderController {
       `[${platform}] ${phone} is creating order for customer ${data.customerId} with body ${JSON.stringify(data)}`,
     );
     return await this.orderService.createOrder(data);
+  }
+
+  @Patch(':orderId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Update draft inputs (weight/manualDiscount/promo)',
+  })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async updateOrderDraft(
+    @Param() { orderId }: OrderParamsDto,
+    @Body() data: UpdateOrderDraftDto,
+  ) {
+    return await this.orderService.updateOrderDraft(orderId, data);
   }
 
   @Post(':orderId/items')

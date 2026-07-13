@@ -186,6 +186,14 @@ export class PricingService {
       }
 
       case PricingModelEnum.PER_KG: {
+        // Guard: without this a forgotten weight silently prices to 0 (free
+        // wash). Subscription with weight 0 is fine (fully covered, 0 overage).
+        if (weight <= 0) {
+          throw new BadRequestException({
+            code: 'WEIGHT_REQUIRED',
+            message: 'A total weight (kg) is required for Per KG pricing',
+          });
+        }
         const perKgRate = await this.getRate(SettingKeys.perKgRate);
         subtotal = weight * perKgRate;
         lines = this.qcLines(data.items);

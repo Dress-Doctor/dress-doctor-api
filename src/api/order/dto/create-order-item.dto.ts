@@ -6,10 +6,10 @@ import {
   IsMongoId,
   IsNumber,
   IsOptional,
+  IsPositive,
   IsString,
   MaxLength,
 } from 'class-validator';
-import { IsPositive } from 'class-validator';
 import { OrderItemConditionEnum } from 'src/schema/order/order.dto';
 
 export class CreateOrderItemDto {
@@ -18,6 +18,11 @@ export class CreateOrderItemDto {
   @IsMongoId({ message: 'Invalid itemId' })
   itemId: string;
 
+  @ApiProperty({ required: true, description: 'Wash service type id' })
+  @IsDefined({ message: 'serviceTypeId is required' })
+  @IsMongoId({ message: 'Invalid serviceTypeId' })
+  serviceTypeId: string;
+
   @ApiProperty({ required: true, description: 'Quantity', example: 1 })
   @IsDefined({ message: 'quantity is required' })
   @Transform(({ value }) => Number(value))
@@ -25,12 +30,8 @@ export class CreateOrderItemDto {
   @IsPositive({ message: 'Quantity cannot be negative or zero' })
   quantity: number;
 
-  @ApiProperty({ required: true, description: 'Unit price', example: 500 })
-  @IsDefined({ message: 'unitPrice is required' })
-  @Transform(({ value }) => Number(value))
-  @IsPositive({ message: 'Unit price cannot be negative or zero' })
-  @IsNumber({}, { message: 'Unit price must be a number' })
-  unitPrice: number;
+  // unitPrice is NOT accepted from the client — it is resolved server-side by
+  // the pricing engine and snapshotted onto the line (§6-8).
 
   @ApiProperty({
     required: false,

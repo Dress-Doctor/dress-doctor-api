@@ -21,17 +21,23 @@ import { OrderStatus } from 'src/schema/order/order-status.schema';
 import {
   OrderItemConditionEnum,
   OrderStatusEnum,
+  PricingModelEnum,
 } from 'src/schema/order/order.dto';
 import { Order } from 'src/schema/order/order.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { User } from 'src/schema/user/user.schema';
 import { Customer } from 'src/schema/user/customer.schema';
+import { PromoCode } from 'src/schema/promo/promo-code.schema';
+import { PromoCodeUsage } from 'src/schema/promo/promo-code-usage.schema';
+import { Subscription } from 'src/schema/subscription/subscription.schema';
 import { type PaginationDto } from 'src/dto/request-data.dto';
+import { PricingService } from '../pricing/pricing.service';
 import { CreateOrderItemDto } from './dto/create-order-item.dto';
 import {
   CreateOrderDto,
   CreateOrderWithPickupDto,
 } from './dto/create-order.dto';
+import { UpdateOrderDraftDto } from './dto/update-order-draft.dto';
 import { FindOrderDto } from './dto/find-order.dto';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { PickupStatusEnum } from 'src/schema/pickup/pickup.dto';
@@ -102,8 +108,147 @@ export class OrderService {
     @InjectModel(Customer.name)
     private readonly customerModel: Model<Customer>,
 
+    @InjectModel(PromoCode.name)
+    private readonly promoCodeModel: Model<PromoCode>,
+
+    @InjectModel(PromoCodeUsage.name)
+    private readonly promoUsageModel: Model<PromoCodeUsage>,
+
+    @InjectModel(Subscription.name)
+    private readonly subscriptionModel: Model<Subscription>,
+
+    private readonly pricingService: PricingService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * Recompute the order's price snapshot from its current inputs (items, weight,
+   * manual discount, promo) via the pricing engine and write it onto the order +
+   * its lines. PURE snapshot — NO side effects: it must never touch subscription
+   * remainingQuota or write PromoCodeUsage (those happen once, at confirm),
+   * otherwise repeated draft edits would over-decrement quota and burn promo
+   * uses. Called after every draft mutation so the snapshot never drifts.
+   */
+  private async reprice(orderId: Types.ObjectId, changedBy: Types.ObjectId) {
+    const order = await this.orderModel.findById(orderId);
+    if (!order) return;
+
+    const items = await this.orderItemModel.find({ orderId });
+    const pricing = await this.pricingService.priceOrder({
+      pricingModel: order.pricingModel,
+      officeId: this.req.data.officeId?.toString(),
+      customerId: order.customerId.toString(),
+      totalWeightKg: order.totalWeightKg,
+      promoCode: order.promoCode,
+      manualDiscount: order.manualDiscount,
+      items: items.map((i) => ({
+        itemId: i.itemId.toString(),
+        serviceTypeId: i.serviceTypeId.toString(),
+        quantity: i.quantity,
+      })),
+    });
+
+    // Snapshot resolved unitPrice/lineTotal onto each line (Per Piece prices;
+    // other models keep them at 0). Order of pricing.lines matches items.
+    await Promise.all(
+      items.map((item, idx) =>
+        this.orderItemModel.updateOne(
+          { _id: item._id },
+          {
+            unitPrice: pricing.lines[idx]?.unitPrice ?? 0,
+            lineTotal: pricing.lines[idx]?.lineTotal ?? 0,
+          },
+        ),
+      ),
+    );
+
+    const combinedDiscount = pricing.manualDiscount + pricing.promoDiscount;
+    await this.orderModel.findOneAndUpdate(
+      { _id: orderId },
+      {
+        orderAmount: pricing.subtotal,
+        manualDiscount: pricing.manualDiscount,
+        promoDiscount: pricing.promoDiscount,
+        discountAmount: combinedDiscount,
+        totalAmount: pricing.total,
+        promoCodeId: pricing.promoCodeId ?? null,
+        subscriptionId: pricing.subscriptionId ?? null,
+        quotaConsumedKg: pricing.quotaConsumedKg,
+        balanceDue: Math.max(0, pricing.total - order.amountPaid),
+      },
+      { context: { changedBy }, returnDocument: 'after' } as never,
+    );
+  }
+
+  /**
+   * Apply the one-time side effects of confirming an order: decrement the
+   * subscription's remainingQuota by the snapshotted quotaConsumedKg and record
+   * the promo redemption. Runs exactly once because the transition guard only
+   * permits DRAFT→CONFIRMED (a confirmed order can't be re-confirmed).
+   */
+  private async finalizeOnConfirm(order: Order) {
+    if (order.subscriptionId && order.quotaConsumedKg > 0) {
+      await this.subscriptionModel.updateOne(
+        { _id: order.subscriptionId },
+        { $inc: { remainingQuota: -order.quotaConsumedKg } },
+      );
+    }
+
+    if (order.promoCodeId) {
+      await this.promoUsageModel.create({
+        promoCodeId: order.promoCodeId,
+        userId: order.customerId,
+        orderId: order._id,
+        discountApplied: order.promoDiscount,
+        useAt: new Date(),
+      });
+      await this.promoCodeModel.updateOne(
+        { _id: order.promoCodeId },
+        { $inc: { usedCount: 1 } },
+      );
+    }
+  }
+
+  /** Update draft-only inputs (weight/manualDiscount/promo) and reprice. */
+  async updateOrderDraft(orderId: string, data: UpdateOrderDraftDto) {
+    this.can('UPDATE', 'Order');
+    const id = new Types.ObjectId(orderId);
+    const changedBy = new Types.ObjectId(this.req.user.userId);
+
+    const order = await this.orderModel
+      .findById(id)
+      .populate<{ orderStatusId: OrderStatus }>({
+        model: OrderStatus.name,
+        path: 'orderStatusId',
+      });
+    if (!order) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Order not found',
+      });
+    }
+    const current = order.orderStatusId.orderStatusName as OrderStatusEnum;
+    if (current !== OrderStatusEnum.DRAFT) {
+      throw new BadRequestException({
+        code: 'ORDER_NOT_DRAFT',
+        message: 'Only draft orders can be edited',
+      });
+    }
+
+    // manualDiscount is permissioned separately from ordinary edits.
+    if (data.manualDiscount !== undefined) this.can('UPDATE', 'Payment');
+
+    const update: Record<string, unknown> = {};
+    if (data.totalWeightKg !== undefined)
+      update.totalWeightKg = data.totalWeightKg;
+    if (data.manualDiscount !== undefined)
+      update.manualDiscount = data.manualDiscount;
+    if (data.promoCode !== undefined) update.promoCode = data.promoCode;
+
+    await this.orderModel.updateOne({ _id: id }, update);
+    await this.reprice(id, changedBy);
+    return 'Order updated successfully';
+  }
 
   /**
    * On order creation: bump the customer's lastOrderAt rollup and emit
@@ -188,6 +333,8 @@ export class OrderService {
       throw new BadRequestException('Invalid pickup request id');
     }
 
+    this.assertWeightForModel(data.pricingModel, data.totalWeightKg);
+
     const orderStatusDraft = OrderStatusEnum.DRAFT;
     const orderStatus = await this.orderStatusModel.findOne({
       orderStatusName: orderStatusDraft,
@@ -242,6 +389,7 @@ export class OrderService {
       } as never,
     )) as unknown as Order;
 
+    await this.reprice(created._id, userId);
     await this.onOrderCreated(created._id, customerId, userId);
 
     this.logger.log(
@@ -270,6 +418,8 @@ export class OrderService {
       this.logger.error(`${base} invalid currency id ${data.currencyId}`);
       throw new BadRequestException('Invalid currency id');
     }
+
+    this.assertWeightForModel(data.pricingModel, data.totalWeightKg);
 
     const orderStatusDraft = OrderStatusEnum.DRAFT;
     const orderStatus = await this.orderStatusModel.findOne({
@@ -310,12 +460,23 @@ export class OrderService {
       } as never,
     )) as unknown as Order;
 
+    await this.reprice(created._id, userId);
     await this.onOrderCreated(created._id, customerId, userId);
 
     this.logger.log(
       `${base} has successfully created order for customer ${data.customerId}`,
     );
     return 'Order created successfully';
+  }
+
+  /** PER_KG needs a positive weight (else it silently prices to 0). */
+  private assertWeightForModel(model: PricingModelEnum, weight?: number) {
+    if (model === PricingModelEnum.PER_KG && (!weight || weight <= 0)) {
+      throw new BadRequestException({
+        code: 'WEIGHT_REQUIRED',
+        message: 'A total weight (kg) is required for Per KG pricing',
+      });
+    }
   }
 
   async findAll({ page, size, ...query }: FindOrderDto) {
@@ -473,42 +634,25 @@ export class OrderService {
       throw new BadRequestException('The provided item Id is invalid');
     }
 
-    if (data.unitPrice < item.priceLow) {
-      this.logger.error(
-        `${base} unitPrice ${data.unitPrice} is lower than price low ${item.priceLow}`,
-      );
-      throw new BadRequestException(
-        `Unit price cannot be lower than the min price for ${item.itemName}`,
-      );
-    }
-
     const userId = new Types.ObjectId(this.req.user.userId);
     // Per-garment row: the same item may appear multiple times in one order with
     // different condition/colour, so we insert rather than upsert-by-(orderId,
-    // itemId). The old unique (orderId,itemId) index was relaxed accordingly.
+    // itemId). unitPrice/lineTotal are NOT taken from the client — reprice()
+    // resolves them server-side from the catalog and snapshots them.
     const orderItem = new this.orderItemModel({
       itemId: item._id,
       orderId: order._id,
+      serviceTypeId: new Types.ObjectId(data.serviceTypeId),
       quantity: data.quantity,
-      unitPrice: data.unitPrice,
+      unitPrice: 0,
+      lineTotal: 0,
       condition: data.condition ?? OrderItemConditionEnum.NORMAL,
       colour: data.colour,
     });
     orderItem.$locals.changedBy = userId;
     await orderItem.save();
 
-    const baseAmount = data.unitPrice * data.quantity;
-    const orderAmount = baseAmount + order.orderAmount;
-    const totalAmount = baseAmount + order.fee - order.discountAmount;
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderAmount, totalAmount },
-      {
-        context: { changedBy: userId },
-        upsert: true,
-        returnDocument: 'after',
-      } as never,
-    );
+    await this.reprice(order._id, userId);
 
     this.logger.log(
       `${base} has successfully created order item for order with code ${order.orderCode}`,
@@ -575,20 +719,7 @@ export class OrderService {
       throw new NotFoundException('Order item update failed');
     }
 
-    const oldPrice = orderItem.unitPrice * orderItem.quantity;
-    const newPrice = updatedItem.unitPrice * updatedItem.quantity;
-
-    const orderAmount = order.orderAmount - oldPrice + newPrice;
-    const totalAmount = orderAmount + order.fee - order.discountAmount;
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderAmount, totalAmount },
-      {
-        context: { changedBy: userId },
-        upsert: true,
-        returnDocument: 'after',
-      } as never,
-    );
+    await this.reprice(order._id, userId);
 
     this.logger.log(`${base} ${item.itemName} updated successfully`);
     return `${item.itemName} updated successfully`;
@@ -645,22 +776,10 @@ export class OrderService {
     const userId = new Types.ObjectId(this.req.user.userId);
     await this.orderItemModel.findOneAndDelete({ itemId, orderId }, {
       context: { changedBy: userId },
-      upsert: true,
       returnDocument: 'after',
     } as never);
 
-    const deletedPrice = orderItem.unitPrice * orderItem.quantity;
-    const orderAmount = order.orderAmount - deletedPrice;
-    const totalAmount = orderAmount + order.fee - order.discountAmount;
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderAmount, totalAmount },
-      {
-        context: { changedBy: userId },
-        upsert: true,
-        returnDocument: 'after',
-      } as never,
-    );
+    await this.reprice(order._id, userId);
 
     this.logger.log(
       `${base} has successfully deleted order item for order with code ${order.orderCode}`,
@@ -737,6 +856,12 @@ export class OrderService {
       { orderStatusId: targetStatus._id },
       { context: { changedBy: userId }, returnDocument: 'after' } as never,
     );
+
+    // One-time confirm side effects (quota decrement + promo usage). Safe from
+    // double-application: the guard only permits DRAFT→CONFIRMED once.
+    if (target === OrderStatusEnum.CONFIRMED) {
+      await this.finalizeOnConfirm(order as unknown as Order);
+    }
 
     await this.syncPickupOnTransition(order.pickupRequestId, target, userId);
 

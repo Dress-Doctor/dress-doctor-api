@@ -2,12 +2,15 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   IsDefined,
+  IsEnum,
+  IsInt,
   IsMongoId,
-  // IsNumber,
-  // IsOptional,
-  // Min,
+  IsOptional,
+  IsString,
+  Min,
   MinDate,
 } from 'class-validator';
+import { PricingModelEnum } from 'src/schema/order/order.dto';
 
 export class CreateOrderDto {
   @ApiProperty({ required: true, description: 'Customer id' })
@@ -19,6 +22,36 @@ export class CreateOrderDto {
   @IsDefined({ message: 'CurrencyId is required' })
   @IsMongoId({ message: 'Invalid currencyId' })
   currencyId: string;
+
+  @ApiProperty({ required: true, enum: PricingModelEnum })
+  @IsDefined({ message: 'pricingModel is required' })
+  @IsEnum(PricingModelEnum, { message: 'Invalid pricingModel' })
+  pricingModel: PricingModelEnum;
+
+  @ApiProperty({
+    required: false,
+    description: 'Total weight (kg) — required for PER_KG',
+  })
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsInt({ message: 'totalWeightKg must be an integer' })
+  @Min(0)
+  totalWeightKg?: number;
+
+  @ApiProperty({
+    required: false,
+    description: 'Staff ad-hoc discount (XAF), permissioned',
+  })
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsInt({ message: 'manualDiscount must be an integer (XAF)' })
+  @Min(0)
+  manualDiscount?: number;
+
+  @ApiProperty({ required: false, description: 'Promo code to apply' })
+  @IsOptional()
+  @IsString()
+  promoCode?: string;
 
   // @ApiProperty({ required: false, description: 'Fee amount', example: 0 })
   // @IsDefined({ message: 'fee is required' })
