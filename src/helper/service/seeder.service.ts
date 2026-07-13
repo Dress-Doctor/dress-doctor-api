@@ -34,6 +34,7 @@ import { Category } from 'src/schema/catalog/category.schema';
 import { Currency } from 'src/schema/catalog/currency.schema';
 import { Item } from 'src/schema/catalog/item.schema';
 import { ServiceType } from 'src/schema/catalog/service-type.schema';
+import { Setting, SettingKeys } from 'src/schema/settings/settings.schema';
 import { Service } from 'src/schema/catalog/service.schema';
 import { SubCategory } from 'src/schema/catalog/sub-category.schema';
 import currencyData from 'src/static/currency.data';
@@ -99,6 +100,9 @@ export class SeederService {
 
     @InjectModel(ServiceType.name)
     private readonly serviceTypeModel: Model<ServiceType>,
+
+    @InjectModel(Setting.name)
+    private readonly settingModel: Model<Setting>,
 
     @InjectModel(Service.name) private readonly serviceModel: Model<Service>,
 
@@ -669,7 +673,34 @@ export class SeederService {
     );
   }
 
+  private async seedSettings() {
+    // Rates as data (default 1,000 XAF/kg each). $setOnInsert so an operator's
+    // later override isn't clobbered on re-seed.
+    const defaults = [
+      {
+        key: SettingKeys.perKgRate,
+        value: 1000,
+        description: 'Wash Per KG rate (XAF/kg)',
+      },
+      {
+        key: SettingKeys.overageRate,
+        value: 1000,
+        description: 'Subscription overage rate (XAF/kg)',
+      },
+    ];
+    const operations = defaults.map((s) => ({
+      updateOne: {
+        filter: { key: s.key, officeId: null },
+        update: { $setOnInsert: { ...s, officeId: null } },
+        upsert: true,
+      },
+    }));
+    await this.settingModel.bulkWrite(operations);
+    this.logger.log(`🌱 Done seeding ${defaults.length} settings`);
+  }
+
   async run(): Promise<void> {
+    await this.seedSettings();
     await this.seedUserType();
     await this.seedOfficeType();
     await this.seedPickupStatus();

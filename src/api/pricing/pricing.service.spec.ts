@@ -9,8 +9,12 @@ import { Currency } from 'src/schema/catalog/currency.schema';
 import { Item } from 'src/schema/catalog/item.schema';
 import { Price } from 'src/schema/catalog/price.schema';
 import { ServiceType } from 'src/schema/catalog/service-type.schema';
+import { PricingModelEnum } from 'src/schema/order/order.dto';
 import { PromoCode } from 'src/schema/promo/promo-code.schema';
-import { QuoteDto } from './dto/quote.dto';
+import { PromoCodeUsage } from 'src/schema/promo/promo-code-usage.schema';
+import { Setting, SettingKeys } from 'src/schema/settings/settings.schema';
+import { Subscription } from 'src/schema/subscription/subscription.schema';
+import { QuoteDto, QuoteLineDto } from './dto/quote.dto';
 import { PricingService } from './pricing.service';
 
 type PriceRow = { unitPrice: number; currencyId: Types.ObjectId } | null;
@@ -19,28 +23,41 @@ describe('PricingService', () => {
   let service: PricingService;
   let priceModel: { findOne: jest.Mock };
   let promoCodeModel: { findOne: jest.Mock };
+  let promoUsageModel: { countDocuments: jest.Mock };
+  let settingModel: { findOne: jest.Mock };
+  let subscriptionModel: { findOne: jest.Mock };
 
   const currencyId = new Types.ObjectId();
-  const item = () => new Types.ObjectId().toString();
-  const stype = () => new Types.ObjectId().toString();
+  const oid = () => new Types.ObjectId().toString();
 
-  // priceModel.findOne(query).sort() → resolver(query)
   const setResolver = (resolver: (q: Record<string, unknown>) => PriceRow) => {
     priceModel.findOne.mockImplementation((q: Record<string, unknown>) => ({
       sort: () => Promise.resolve(resolver(q)),
     }));
   };
 
-  const line = (over: Partial<QuoteDto['items'][0]> = {}) => ({
-    itemId: item(),
-    serviceTypeId: stype(),
+  const line = (over: Partial<QuoteLineDto> = {}): QuoteLineDto => ({
+    itemId: oid(),
+    serviceTypeId: oid(),
     quantity: 1,
     ...over,
   });
 
+  // Rates: perKgRate + overageRate both 1000.
+  const rate = (key: string) => (key ? { value: 1000 } : null);
+
   beforeEach(async () => {
     priceModel = { findOne: jest.fn() };
     promoCodeModel = { findOne: jest.fn() };
+    promoUsageModel = { countDocuments: jest.fn().mockResolvedValue(0) };
+    settingModel = {
+      findOne: jest
+        .fn()
+        .mockImplementation((q: { key: string }) =>
+          Promise.resolve(rate(q.key)),
+        ),
+    };
+    subscriptionModel = { findOne: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -50,11 +67,7 @@ describe('PricingService', () => {
           provide: REQUEST,
           useValue: {
             data: { platform: 'WEB' },
-            user: {
-              phone: '600',
-              userId: item(),
-              ability: { can: () => true },
-            },
+            user: { phone: '600', userId: oid(), ability: { can: () => true } },
           },
         },
         { provide: getModelToken(Price.name), useValue: priceModel },
@@ -62,141 +75,210 @@ describe('PricingService', () => {
         { provide: getModelToken(Currency.name), useValue: {} },
         { provide: getModelToken(ServiceType.name), useValue: {} },
         { provide: getModelToken(PromoCode.name), useValue: promoCodeModel },
+        {
+          provide: getModelToken(PromoCodeUsage.name),
+          useValue: promoUsageModel,
+        },
+        { provide: getModelToken(Setting.name), useValue: settingModel },
+        {
+          provide: getModelToken(Subscription.name),
+          useValue: subscriptionModel,
+        },
       ],
     }).compile();
 
     service = await module.resolve<PricingService>(PricingService);
   });
 
-  describe('quote pricing', () => {
-    it('sums per-line totals into a subtotal', async () => {
+  describe('PER_PIECE', () => {
+    it('sums catalog line totals', async () => {
       setResolver(() => ({ unitPrice: 1500, currencyId }));
-
-      const res = await service.quote({
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_PIECE,
         items: [line({ quantity: 2 }), line({ quantity: 1 })],
       } as QuoteDto);
-
+      expect(res.subtotal).toBe(1500 * 3);
       expect(res.lines).toHaveLength(2);
-      expect(res.subtotal).toBe(1500 * 2 + 1500);
-      expect(res.total).toBe(res.subtotal);
-      expect(res.currencyId).toEqual(currencyId);
+      expect(res.total).toBe(4500);
     });
 
-    it('prefers a per-office price over the company-wide default', async () => {
+    it('prefers a per-office price, falling back to company-wide', async () => {
       setResolver((q) =>
         q.officeId
           ? { unitPrice: 1200, currencyId }
           : { unitPrice: 2000, currencyId },
       );
-
-      const res = await service.quote({
-        officeId: new Types.ObjectId().toString(),
-        items: [line({ quantity: 1 })],
+      const withOffice = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_PIECE,
+        officeId: oid(),
+        items: [line()],
       } as QuoteDto);
+      expect(withOffice.subtotal).toBe(1200);
 
-      expect(res.subtotal).toBe(1200);
-    });
-
-    it('falls back to the company-wide price when no office price exists', async () => {
       setResolver((q) => (q.officeId ? null : { unitPrice: 2000, currencyId }));
-
-      const res = await service.quote({
-        officeId: new Types.ObjectId().toString(),
-        items: [line({ quantity: 1 })],
+      const fallback = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_PIECE,
+        officeId: oid(),
+        items: [line()],
       } as QuoteDto);
-
-      expect(res.subtotal).toBe(2000);
+      expect(fallback.subtotal).toBe(2000);
     });
 
-    it('throws PRICE_NOT_FOUND when neither office nor company price exists', async () => {
+    it('throws PRICE_NOT_FOUND when no price exists', async () => {
       setResolver(() => null);
-
       await expect(
-        service.quote({ items: [line()] } as QuoteDto),
+        service.priceOrder({
+          pricingModel: PricingModelEnum.PER_PIECE,
+          items: [line()],
+        } as QuoteDto),
       ).rejects.toThrow(NotFoundException);
     });
   });
 
-  describe('promo application', () => {
+  describe('PER_KG', () => {
+    it('prices by weight × perKgRate and zeroes garment lines', async () => {
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_KG,
+        totalWeightKg: 7,
+        items: [line({ quantity: 3 })],
+      } as QuoteDto);
+      expect(res.subtotal).toBe(7000);
+      expect(res.lines[0].unitPrice).toBe(0);
+      expect(res.lines[0].lineTotal).toBe(0);
+      expect(settingModel.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ key: SettingKeys.perKgRate }),
+      );
+    });
+  });
+
+  describe('SUBSCRIPTION', () => {
+    it('charges only the overage beyond remaining quota', async () => {
+      subscriptionModel.findOne.mockResolvedValue({
+        _id: new Types.ObjectId(),
+        remainingQuota: 5,
+      });
+      // weight 8, quota 5 → overage 3 × 1000 = 3000; quotaConsumed 5
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.SUBSCRIPTION,
+        customerId: oid(),
+        totalWeightKg: 8,
+      } as QuoteDto);
+      expect(res.subtotal).toBe(3000);
+      expect(res.quotaConsumedKg).toBe(5);
+      expect(res.subscriptionId).not.toBeNull();
+    });
+
+    it('is free when weight is within quota', async () => {
+      subscriptionModel.findOne.mockResolvedValue({
+        _id: new Types.ObjectId(),
+        remainingQuota: 20,
+      });
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.SUBSCRIPTION,
+        customerId: oid(),
+        totalWeightKg: 8,
+      } as QuoteDto);
+      expect(res.subtotal).toBe(0);
+      expect(res.quotaConsumedKg).toBe(8);
+    });
+
+    it('rejects with NO_ACTIVE_SUBSCRIPTION when none is active', async () => {
+      subscriptionModel.findOne.mockResolvedValue(null);
+      await expect(
+        service.priceOrder({
+          pricingModel: PricingModelEnum.SUBSCRIPTION,
+          customerId: oid(),
+          totalWeightKg: 8,
+        } as QuoteDto),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('FREE', () => {
+    it('is always zero', async () => {
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.FREE,
+        items: [line()],
+      } as QuoteDto);
+      expect(res.subtotal).toBe(0);
+      expect(res.total).toBe(0);
+    });
+  });
+
+  describe('discounts', () => {
+    beforeEach(() => setResolver(() => ({ unitPrice: 2000, currencyId })));
+
     const withPromo = (over: Partial<Record<string, unknown>> = {}) =>
       promoCodeModel.findOne.mockResolvedValue({
+        _id: new Types.ObjectId(),
         promoCodeName: 'SAVE',
         discountType: RewardTypeEnum.FLAT,
         discountValue: 500,
         minOrderValue: 0,
         applicableServiceTypeIds: [],
+        perCustomerLimit: 0,
         usedCount: 0,
         ...over,
       });
 
-    beforeEach(() => setResolver(() => ({ unitPrice: 2000, currencyId })));
-
-    it('applies a FLAT discount', async () => {
-      withPromo({ discountType: RewardTypeEnum.FLAT, discountValue: 500 });
-
-      const res = await service.quote({
+    it('subtracts both manual and promo discounts', async () => {
+      withPromo({ discountValue: 500 });
+      // subtotal 2000*2 = 4000; manual 1000; promo 500 → total 2500
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_PIECE,
+        items: [line({ quantity: 2 })],
+        manualDiscount: 1000,
         promoCode: 'SAVE',
-        items: [line({ quantity: 1 })],
       } as QuoteDto);
-
-      expect(res.discount).toBe(500);
-      expect(res.total).toBe(1500);
-      expect(res.promoApplied).toEqual({ code: 'SAVE', discount: 500 });
+      expect(res.subtotal).toBe(4000);
+      expect(res.manualDiscount).toBe(1000);
+      expect(res.promoDiscount).toBe(500);
+      expect(res.total).toBe(2500);
     });
 
-    it('applies a floored PERCENTAGE discount', async () => {
-      withPromo({ discountType: RewardTypeEnum.PERCENTAGE, discountValue: 15 });
-
-      // subtotal 2000 * 3 = 6000; 15% = 900
-      const res = await service.quote({
-        promoCode: 'SAVE',
-        items: [line({ quantity: 3 })],
-      } as QuoteDto);
-
-      expect(res.discount).toBe(900);
-    });
-
-    it('caps a FLAT discount at the subtotal', async () => {
-      withPromo({ discountType: RewardTypeEnum.FLAT, discountValue: 999999 });
-
-      const res = await service.quote({
-        promoCode: 'SAVE',
+    it('floors total at zero when discounts exceed subtotal', async () => {
+      withPromo({ discountValue: 1500 });
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_PIECE,
         items: [line({ quantity: 1 })],
+        manualDiscount: 1000,
+        promoCode: 'SAVE',
       } as QuoteDto);
-
-      expect(res.discount).toBe(2000);
+      // subtotal 2000; manual 1000 + promo capped at 2000 → total 0
       expect(res.total).toBe(0);
     });
 
-    it('rejects when subtotal is below minOrderValue', async () => {
-      withPromo({ minOrderValue: 10000 });
+    it('applies a floored percentage promo', async () => {
+      withPromo({ discountType: RewardTypeEnum.PERCENTAGE, discountValue: 15 });
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_PIECE,
+        items: [line({ quantity: 3 })],
+        promoCode: 'SAVE',
+      } as QuoteDto);
+      // 6000 * 15% = 900
+      expect(res.promoDiscount).toBe(900);
+    });
 
+    it('enforces the per-customer promo limit', async () => {
+      withPromo({ perCustomerLimit: 1 });
+      promoUsageModel.countDocuments.mockResolvedValue(1);
       await expect(
-        service.quote({
-          promoCode: 'SAVE',
+        service.priceOrder({
+          pricingModel: PricingModelEnum.PER_PIECE,
           items: [line({ quantity: 1 })],
+          customerId: oid(),
+          promoCode: 'SAVE',
         } as QuoteDto),
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('rejects an expired promo', async () => {
-      withPromo({ expiresAt: new Date(Date.now() - 1000) });
-
+    it('rejects a promo below minOrderValue', async () => {
+      withPromo({ minOrderValue: 100000 });
       await expect(
-        service.quote({
+        service.priceOrder({
+          pricingModel: PricingModelEnum.PER_PIECE,
+          items: [line({ quantity: 1 })],
           promoCode: 'SAVE',
-          items: [line({ quantity: 1 })],
-        } as QuoteDto),
-      ).rejects.toThrow(BadRequestException);
-    });
-
-    it('rejects an unknown promo code', async () => {
-      promoCodeModel.findOne.mockResolvedValue(null);
-
-      await expect(
-        service.quote({
-          promoCode: 'NOPE',
-          items: [line({ quantity: 1 })],
         } as QuoteDto),
       ).rejects.toThrow(BadRequestException);
     });
