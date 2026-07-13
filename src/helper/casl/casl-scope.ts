@@ -1,11 +1,34 @@
 import { MongoAbility } from '@casl/ability';
 import { rulesToQuery } from '@casl/ability/extra';
+import { Types } from 'mongoose';
 import {
   AppAbilityDto,
   CaslActionsDto,
   CaslSubjectsDto,
   ConditionsDto,
 } from './casl.dto';
+
+const OBJECT_ID_HEX = /^[a-f0-9]{24}$/i;
+
+/**
+ * Condition ids arrive as strings (JSON-interpolated `$self`/`$office`), but
+ * Mongoose does NOT cast strings to ObjectId inside `$or`, and aggregate
+ * `$match` never casts at all — so a string officeId/customerId would match
+ * nothing and lock scoped users out. Deep-cast 24-hex id strings to ObjectId so
+ * the filter matches real ObjectId fields in both find() and aggregate().
+ */
+function castIds(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return OBJECT_ID_HEX.test(value) ? new Types.ObjectId(value) : value;
+  }
+  if (Array.isArray(value)) return value.map(castIds);
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value)) out[key] = castIds(val);
+    return out;
+  }
+  return value;
+}
 
 /**
  * Derive a Mongo filter from the caller's CASL rules for (action, subject), to
@@ -33,5 +56,5 @@ export function scopeFilter(
   );
 
   // null → at least one matching rule has no conditions → unrestricted.
-  return (query ?? {}) as Record<string, unknown>;
+  return castIds(query ?? {}) as Record<string, unknown>;
 }

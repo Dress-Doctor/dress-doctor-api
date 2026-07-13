@@ -1,4 +1,5 @@
 import { AbilityBuilder } from '@casl/ability';
+import { Types } from 'mongoose';
 import { AppAbility } from './casl.dto';
 import { scopeFilter } from './casl-scope';
 
@@ -29,6 +30,19 @@ describe('scopeFilter', () => {
     expect(scopeFilter(ability, 'READ', 'Payment')).toEqual({
       $or: [{ officeId: 'office-1' }],
     });
+  });
+
+  it('casts 24-hex id conditions to ObjectId (so $or/aggregate match)', () => {
+    const officeId = new Types.ObjectId().toString();
+    const { can, build } = new AbilityBuilder(AppAbility);
+    can('READ', 'Order', { officeId } as never);
+    const ability = build();
+
+    const filter = scopeFilter(ability, 'READ', 'Order') as {
+      $or: { officeId: unknown }[];
+    };
+    expect(filter.$or[0].officeId).toBeInstanceOf(Types.ObjectId);
+    expect(String(filter.$or[0].officeId)).toBe(officeId);
   });
 
   it('returns an impossible filter when the caller cannot access the subject', () => {
