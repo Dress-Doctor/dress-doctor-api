@@ -691,38 +691,38 @@ export class OrderService {
       );
     }
 
-    const itemId = new Types.ObjectId(params.itemId);
-    const item = await this.itemModel.findById(itemId);
-    if (!item) {
-      this.logger.error(`${base} invalid itemId ${params.itemId}`);
-      throw new BadRequestException('Invalid itemId');
-    }
-
-    const orderItem = await this.orderItemModel.findOne({ itemId, orderId });
+    // Target the specific per-garment row by its own id (not the catalog itemId,
+    // which several rows may share).
+    const orderItemId = new Types.ObjectId(params.orderItemId);
+    const orderItem = await this.orderItemModel.findOne({
+      _id: orderItemId,
+      orderId,
+    });
     if (!orderItem) {
       this.logger.error(
-        `${base} not record found for orderId ${params.orderId} and itemId ${params.itemId}`,
+        `${base} no order item ${params.orderItemId} on order ${params.orderId}`,
       );
-      throw new NotFoundException(
-        `${item.itemName} is not part of this order. Please refresh the list`,
-      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'This item is not part of this order. Please refresh the list',
+      });
     }
+
+    const update: Record<string, unknown> = { ...data };
+    if (data.serviceTypeId)
+      update.serviceTypeId = new Types.ObjectId(data.serviceTypeId);
 
     const userId = new Types.ObjectId(this.req.user.userId);
-    const updatedItem = (await this.orderItemModel.findOneAndUpdate(
-      { itemId, orderId },
-      data,
+    await this.orderItemModel.findOneAndUpdate(
+      { _id: orderItemId, orderId },
+      update,
       { context: { changedBy: userId }, returnDocument: 'after' } as never,
-    )) as unknown as OrderItem | null;
-
-    if (!updatedItem) {
-      throw new NotFoundException('Order item update failed');
-    }
+    );
 
     await this.reprice(order._id, userId);
 
-    this.logger.log(`${base} ${item.itemName} updated successfully`);
-    return `${item.itemName} updated successfully`;
+    this.logger.log(`${base} order item ${params.orderItemId} updated`);
+    return 'Order item updated successfully';
   }
 
   async deleteOrderItem(params: OrderItemParamsDto) {
@@ -738,21 +738,20 @@ export class OrderService {
       throw new BadRequestException('Invalid orderid');
     }
 
-    const itemId = new Types.ObjectId(params.itemId);
-    const item = await this.itemModel.findById(itemId);
-    if (!item) {
-      this.logger.error(`${base} invalid itemId ${params.itemId}`);
-      throw new BadRequestException('Invalid itemId');
-    }
-
-    const orderItem = await this.orderItemModel.findOne({ itemId, orderId });
+    // Target the specific per-garment row by its own id.
+    const orderItemId = new Types.ObjectId(params.orderItemId);
+    const orderItem = await this.orderItemModel.findOne({
+      _id: orderItemId,
+      orderId,
+    });
     if (!orderItem) {
       this.logger.error(
-        `${base} not record found for orderId ${params.orderId} and itemId ${params.itemId}`,
+        `${base} no order item ${params.orderItemId} on order ${params.orderId}`,
       );
-      throw new NotFoundException(
-        `${item.itemName} is not part of this order. Please refresh the list`,
-      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'This item is not part of this order. Please refresh the list',
+      });
     }
 
     // lookup draft status
@@ -774,7 +773,7 @@ export class OrderService {
     }
 
     const userId = new Types.ObjectId(this.req.user.userId);
-    await this.orderItemModel.findOneAndDelete({ itemId, orderId }, {
+    await this.orderItemModel.findOneAndDelete({ _id: orderItemId, orderId }, {
       context: { changedBy: userId },
       returnDocument: 'after',
     } as never);
@@ -782,9 +781,9 @@ export class OrderService {
     await this.reprice(order._id, userId);
 
     this.logger.log(
-      `${base} has successfully deleted order item for order with code ${order.orderCode}`,
+      `${base} deleted order item ${params.orderItemId} from ${order.orderCode}`,
     );
-    return `${item.itemName} deleted successfully`;
+    return 'Order item deleted successfully';
   }
 
   /**

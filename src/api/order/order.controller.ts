@@ -142,7 +142,7 @@ export class OrderController {
     return await this.orderService.createOrderItem(orderId, data);
   }
 
-  @Put(':orderId/items/:itemId')
+  @Put(':orderId/items/:orderItemId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Update order item' })
   @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
@@ -159,7 +159,7 @@ export class OrderController {
     return await this.orderService.updateOrderItem(params, data);
   }
 
-  @Delete(':orderId/items/:itemId')
+  @Delete(':orderId/items/:orderItemId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete order item' })
   @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
@@ -169,7 +169,7 @@ export class OrderController {
   ) {
     const { platform } = req.data;
     const phone = req.user.phone;
-    const log = `[${platform}] ${phone} is deleting order item for order ${params.orderId} with itemId ${params.itemId}`;
+    const log = `[${platform}] ${phone} is deleting order item ${params.orderItemId} for order ${params.orderId}`;
     this.logger.log(log);
 
     return await this.orderService.deleteOrderItem(params);
