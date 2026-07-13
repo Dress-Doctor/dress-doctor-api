@@ -1,3 +1,4 @@
+import { AbilityBuilder } from '@casl/ability';
 import { BadRequestException } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -15,14 +16,26 @@ import { PaymentMethod } from 'src/schema/payment/payment-method.schema';
 import { PaymentType } from 'src/schema/payment/payment-type.schema';
 import { PaymentTypeEnum } from 'src/schema/payment/payment.dto';
 import { Payment } from 'src/schema/payment/payment.schema';
+import { AppAbility } from 'src/helper/casl/casl.dto';
 import { OrderEvents } from '../order/order.events';
 import { PaymentEvents } from './payment.events';
 import { PaymentService } from './payment.service';
 
+// Real unrestricted ability so scopeFilter's rulesToQuery yields {} here.
+const manageAllAbility = () => {
+  const { can, build } = new AbilityBuilder(AppAbility);
+  can('manage', 'all');
+  return build();
+};
+
 describe('PaymentService', () => {
   let service: PaymentService;
   let paymentModel: { findOne: jest.Mock; create: jest.Mock };
-  let orderModel: { findById: jest.Mock; findOneAndUpdate: jest.Mock };
+  let orderModel: {
+    findOne: jest.Mock;
+    findById: jest.Mock;
+    findOneAndUpdate: jest.Mock;
+  };
   let paymentTypeModel: { findById: jest.Mock };
   let paymentMethodModel: { findById: jest.Mock };
   let currencyModel: { findOne: jest.Mock };
@@ -41,8 +54,9 @@ describe('PaymentService', () => {
     ...over,
   });
 
+  // createPaymentForOrder fetches via findOne({ _id, ...scope }).populate(...).
   const setOrder = (over: Record<string, unknown> = {}) =>
-    orderModel.findById.mockReturnValue({
+    orderModel.findOne.mockReturnValue({
       populate: jest.fn().mockResolvedValue(buildOrder(over)),
     });
 
@@ -74,6 +88,7 @@ describe('PaymentService', () => {
       create: jest.fn().mockResolvedValue([{ _id: new Types.ObjectId() }]),
     };
     orderModel = {
+      findOne: jest.fn(),
       findById: jest.fn(),
       findOneAndUpdate: jest.fn().mockResolvedValue({}),
     };
@@ -109,7 +124,7 @@ describe('PaymentService', () => {
             user: {
               phone: '600',
               userId: validId(),
-              ability: { can: () => true },
+              ability: manageAllAbility(),
             },
           },
         },

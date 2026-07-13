@@ -217,7 +217,7 @@ export class OrderService {
     const changedBy = new Types.ObjectId(this.req.user.userId);
 
     const order = await this.orderModel
-      .findById(id)
+      .findOne({ _id: id, ...this.orderScope('UPDATE') })
       .populate<{ orderStatusId: OrderStatus }>({
         model: OrderStatus.name,
         path: 'orderStatusId',
@@ -298,6 +298,15 @@ export class OrderService {
       this.logger.error(`[${platform}] ${phone} ${log} is`);
       throw new BadRequestException(`You are ${log}`);
     }
+  }
+
+  /**
+   * Office/self scope filter for by-id Order fetches — so a non-global staff
+   * user can't read/mutate another office's order by supplying its id (the
+   * record simply isn't found). OrderItem ops scope through their parent order.
+   */
+  private orderScope(action: CaslActionsDto): Record<string, unknown> {
+    return scopeFilter(this.req.user.ability, action, 'Order');
   }
 
   async createOrderWithPickup(data: CreateOrderWithPickupDto) {
@@ -612,10 +621,16 @@ export class OrderService {
     const { phone } = this.req.user;
     const base = `[${platform}] ${phone}`;
 
-    const order = await this.orderModel.findById(orderId);
+    const order = await this.orderModel.findOne({
+      _id: new Types.ObjectId(orderId),
+      ...this.orderScope('UPDATE'),
+    });
     if (!order) {
-      this.logger.error(`${base} invalid orderId ${orderId}`);
-      throw new BadRequestException('The order Id provided is invalid');
+      this.logger.error(`${base} invalid/out-of-scope orderId ${orderId}`);
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Order not found',
+      });
     }
 
     // lookup draft status
@@ -675,10 +690,18 @@ export class OrderService {
     const base = `[${platform}] ${phone}`;
 
     const orderId = new Types.ObjectId(params.orderId);
-    const order = await this.orderModel.findById(orderId);
+    const order = await this.orderModel.findOne({
+      _id: orderId,
+      ...this.orderScope('UPDATE'),
+    });
     if (!order) {
-      this.logger.error(`${base} invalid orderId ${params.orderId}`);
-      throw new BadRequestException('Invalid orderid');
+      this.logger.error(
+        `${base} invalid/out-of-scope orderId ${params.orderId}`,
+      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Order not found',
+      });
     }
 
     // lookup draft status
@@ -740,10 +763,18 @@ export class OrderService {
     const base = `[${platform}] ${phone}`;
 
     const orderId = new Types.ObjectId(params.orderId);
-    const order = await this.orderModel.findById(orderId);
+    const order = await this.orderModel.findOne({
+      _id: orderId,
+      ...this.orderScope('UPDATE'),
+    });
     if (!order) {
-      this.logger.error(`${base} invalid orderId ${params.orderId}`);
-      throw new BadRequestException('Invalid orderid');
+      this.logger.error(
+        `${base} invalid/out-of-scope orderId ${params.orderId}`,
+      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Order not found',
+      });
     }
 
     // Target the specific per-garment row by its own id.
@@ -811,13 +842,13 @@ export class OrderService {
     const base = `[${platform}] ${phone}`;
 
     const order = await this.orderModel
-      .findById(new Types.ObjectId(orderId))
+      .findOne({ _id: new Types.ObjectId(orderId), ...this.orderScope(action) })
       .populate<{ orderStatusId: OrderStatus }>({
         model: OrderStatus.name,
         path: 'orderStatusId',
       });
     if (!order) {
-      this.logger.error(`${base} invalid orderId ${orderId}`);
+      this.logger.error(`${base} invalid/out-of-scope orderId ${orderId}`);
       throw new NotFoundException({
         code: 'NOT_FOUND',
         message: 'Order not found',

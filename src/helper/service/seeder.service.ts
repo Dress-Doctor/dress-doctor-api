@@ -259,9 +259,10 @@ export class SeederService {
   }
 
   // Subjects that carry officeId and so are office-scoped for OFFICE-scope roles.
+  // OrderItem is intentionally NOT here — it has no officeId; item access is
+  // scoped through its parent Order at the service layer.
   private static readonly OFFICE_OWNED = new Set<string>([
     SubjectEnum.Order,
-    SubjectEnum.OrderItem,
     SubjectEnum.Payment,
     SubjectEnum.PickupRequest,
     SubjectEnum.PickupAssignment,

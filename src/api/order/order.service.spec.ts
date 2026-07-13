@@ -1,3 +1,4 @@
+import { AbilityBuilder } from '@casl/ability';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -20,13 +21,23 @@ import { PromoCodeUsage } from 'src/schema/promo/promo-code-usage.schema';
 import { Subscription } from 'src/schema/subscription/subscription.schema';
 import { User } from 'src/schema/user/user.schema';
 import { PricingService } from '../pricing/pricing.service';
+import { AppAbility } from 'src/helper/casl/casl.dto';
 import { OrderEvents } from './order.events';
 import { OrderService } from './order.service';
+
+// A real (unrestricted) ability so scopeFilter's rulesToQuery works and yields
+// an empty (unrestricted) filter in these tests.
+const manageAllAbility = () => {
+  const { can, build } = new AbilityBuilder(AppAbility);
+  can('manage', 'all');
+  return build();
+};
 
 describe('OrderService', () => {
   let service: OrderService;
   let orderModel: {
     findById: jest.Mock;
+    findOne: jest.Mock;
     findOneAndUpdate: jest.Mock;
     countDocuments: jest.Mock;
     find: jest.Mock;
@@ -52,17 +63,19 @@ describe('OrderService', () => {
     ...extra,
   });
 
+  // transition() fetches the order via findOne({ _id, ...scope }).populate(...).
   const setOrder = (
     status: OrderStatusEnum,
     extra: Record<string, unknown> = {},
   ) =>
-    orderModel.findById.mockReturnValue({
+    orderModel.findOne.mockReturnValue({
       populate: jest.fn().mockResolvedValue(orderWithStatus(status, extra)),
     });
 
   beforeEach(async () => {
     orderModel = {
       findById: jest.fn(),
+      findOne: jest.fn(),
       findOneAndUpdate: jest.fn().mockResolvedValue({}),
       countDocuments: jest.fn().mockResolvedValue(2),
       find: jest.fn(),
@@ -93,7 +106,7 @@ describe('OrderService', () => {
             user: {
               phone: '600',
               userId: new Types.ObjectId().toString(),
-              ability: { can: () => true },
+              ability: manageAllAbility(),
             },
           },
         },
@@ -175,6 +188,11 @@ describe('OrderService', () => {
 
       const msg = await service.cancelOrder('507f1f77bcf86cd799439011');
       expect(msg).toBe('Order cancelled successfully');
+      // By-id fetch is a scoped findOne({ _id, ...scope }), not findById.
+      expect(orderModel.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: expect.anything() }),
+      );
+      expect(orderModel.findById).not.toHaveBeenCalled();
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         OrderEvents.statusChanged,
         expect.objectContaining({ to: OrderStatusEnum.CANCELLED }),

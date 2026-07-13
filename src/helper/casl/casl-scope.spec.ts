@@ -13,7 +13,7 @@ describe('scopeFilter', () => {
 
   it('returns the conditions as a filter when the rule is scoped', () => {
     const { can, build } = new AbilityBuilder(AppAbility);
-    can('READ', 'Order', { customerId: 'cust-1' });
+    can('READ', 'Order', { customerId: 'cust-1' } as never);
     const ability = build();
 
     expect(scopeFilter(ability, 'READ', 'Order')).toEqual({
@@ -23,7 +23,7 @@ describe('scopeFilter', () => {
 
   it('scopes office-owned rules to the office', () => {
     const { can, build } = new AbilityBuilder(AppAbility);
-    can('READ', 'Payment', { officeId: 'office-1' });
+    can('READ', 'Payment', { officeId: 'office-1' } as never);
     const ability = build();
 
     expect(scopeFilter(ability, 'READ', 'Payment')).toEqual({
@@ -33,7 +33,7 @@ describe('scopeFilter', () => {
 
   it('returns an impossible filter when the caller cannot access the subject', () => {
     const { can, build } = new AbilityBuilder(AppAbility);
-    can('READ', 'Order', { customerId: 'cust-1' });
+    can('READ', 'Order', { customerId: 'cust-1' } as never);
     const ability = build();
 
     // Different subject the caller has no rule for → match nothing.

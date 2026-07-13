@@ -147,15 +147,26 @@ export class PaymentService {
     const { phone } = this.req.user;
     const base = `[${platform}] ${phone}`;
 
-    // Validate order exists and is in appropriate status for payment
+    // Validate order exists and is in the caller's payment scope — you can't
+    // record a payment against another office's order by supplying its id. The
+    // caller's Payment { officeId: '$office' } condition matches the order's
+    // officeId; a global cashier is unrestricted.
     const orderId = new Types.ObjectId(param.orderId);
-    const order = await this.orderModel.findById(orderId).populate<{
-      orderStatusId: OrderStatus;
-    }>({ model: OrderStatus.name, path: 'orderStatusId' });
+    const orderScope = scopeFilter(this.req.user.ability, 'CREATE', 'Payment');
+    const order = await this.orderModel
+      .findOne({ _id: orderId, ...orderScope })
+      .populate<{
+        orderStatusId: OrderStatus;
+      }>({ model: OrderStatus.name, path: 'orderStatusId' });
 
     if (!order) {
-      this.logger.error(`${base} invalid order id ${param.orderId}`);
-      throw new NotFoundException('Order not found');
+      this.logger.error(
+        `${base} invalid/out-of-scope order id ${param.orderId}`,
+      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Order not found',
+      });
     }
 
     // Check if order status allows payment (must be CONFIRMED or beyond)
