@@ -61,7 +61,9 @@ export class AuthGuard implements CanActivate {
         throw new UnauthorizedException(constant.UNAUTHORIZED);
       }
 
-      const ability = await this.abilityService.createForUser(user);
+      const ability = await this.abilityService.createForUser(user, {
+        office: payload.office,
+      });
       const userPayload: UserRequestDto = {
         ability,
         userId: payload.sub,

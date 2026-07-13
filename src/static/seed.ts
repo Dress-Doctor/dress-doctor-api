@@ -322,6 +322,55 @@ export default {
     },
   ],
 
+  // Self-scoped external roles: read-own only. `$self` resolves to the caller's
+  // user id at ability-build time; enforcement is by query (a get-by-id for
+  // someone else's record simply returns nothing).
+  selfRolePermissionMap: [
+    {
+      roleName: RoleEnum.CUSTOMER,
+      scope: ScopeEnum.GLOBAL,
+      permissions: [
+        {
+          subject: SubjectEnum.Customer,
+          action: PermissionActionEnum.READ,
+          conditions: { userId: '$self' },
+        },
+        {
+          subject: SubjectEnum.Order,
+          action: PermissionActionEnum.READ,
+          conditions: { customerId: '$self' },
+        },
+        {
+          subject: SubjectEnum.Payment,
+          action: PermissionActionEnum.READ,
+          conditions: { customerId: '$self' },
+        },
+      ],
+    },
+    {
+      roleName: RoleEnum.REFERRER,
+      scope: ScopeEnum.GLOBAL,
+      permissions: [
+        {
+          subject: SubjectEnum.Customer,
+          action: PermissionActionEnum.READ,
+          conditions: { userId: '$self' },
+        },
+      ],
+    },
+    {
+      roleName: RoleEnum.AFFILIATE,
+      scope: ScopeEnum.GLOBAL,
+      permissions: [
+        {
+          subject: SubjectEnum.Customer,
+          action: PermissionActionEnum.READ,
+          conditions: { userId: '$self' },
+        },
+      ],
+    },
+  ],
+
   apiClient: {
     name: 'System',
     description: 'Created by the system by default',

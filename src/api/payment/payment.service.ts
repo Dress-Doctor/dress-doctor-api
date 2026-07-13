@@ -12,6 +12,7 @@ import { Connection, Model, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
+import { scopeFilter } from 'src/helper/casl/casl-scope';
 import { Currency } from 'src/schema/catalog/currency.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
 import {
@@ -115,12 +116,16 @@ export class PaymentService {
     if (paymentTypeId)
       whereClause['paymentTypeId'] = new Types.ObjectId(query.paymentTypeId);
 
+    // Auto-scope: office staff → their office's payments; customer → own.
+    const scope = scopeFilter(this.req.user.ability, 'READ', 'Payment');
+    const match = { ...whereClause, ...scope };
+
     const skip = (page - 1) * size;
     const sort = this.appUtilService.parseSortParam(query.sort);
-    const total = await this.paymentModel.countDocuments(whereClause);
+    const total = await this.paymentModel.countDocuments(match);
 
     const payments = await this.paymentModel
-      .find(whereClause)
+      .find(match)
       .sort(sort)
       .skip(skip)
       .limit(size)

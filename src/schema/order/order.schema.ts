@@ -7,12 +7,17 @@ import { User } from '../user/user.schema';
 import { OrderPaymentStatusEnum, PricingModelEnum } from './order.dto';
 import { PromoCode } from '../promo/promo-code.schema';
 import { Subscription } from '../subscription/subscription.schema';
+import { Office } from '../office/office.schema';
 
 export const orderSchemaName = 'order';
 @Schema({ timestamps: true, collection: orderSchemaName })
 export class Order extends Document<Types.ObjectId> {
   @Prop({ required: true, type: Types.ObjectId, ref: User.name })
   customerId: Types.ObjectId;
+
+  // Office the order belongs to — office-scopes non-global staff (§3.7).
+  @Prop({ required: false, type: Types.ObjectId, ref: Office.name })
+  officeId?: Types.ObjectId;
 
   @Prop({ required: true, type: Types.ObjectId, ref: Currency.name })
   currencyId: Types.ObjectId;
@@ -102,6 +107,7 @@ export class Order extends Document<Types.ObjectId> {
 export const OrderSchema = SchemaFactory.createForClass(Order);
 // The flagged view sorts by outstanding balance then age.
 OrderSchema.index({ flagged: 1, balanceDue: -1, createdAt: 1 });
+OrderSchema.index({ officeId: 1, createdAt: -1 });
 OrderSchema.index(
   { pickupRequestId: 1, customerId: 1 },
   {

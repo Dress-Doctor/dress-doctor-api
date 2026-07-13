@@ -258,33 +258,86 @@ export class SeederService {
     );
   }
 
+  // Subjects that carry officeId and so are office-scoped for OFFICE-scope roles.
+  private static readonly OFFICE_OWNED = new Set<string>([
+    SubjectEnum.Order,
+    SubjectEnum.OrderItem,
+    SubjectEnum.Payment,
+    SubjectEnum.PickupRequest,
+    SubjectEnum.PickupAssignment,
+  ]);
+
+  private async upsertRolePermission(
+    roleId: Types.ObjectId,
+    action: string,
+    subject: string,
+    scope: string,
+    conditions?: Record<string, unknown>,
+  ): Promise<boolean> {
+    const permissionDoc = await this.permissionModel.findOne({
+      action,
+      subject,
+    } as Record<string, unknown>);
+    if (!permissionDoc) return false;
+
+    await this.rolePermissionModel.findOneAndUpdate(
+      { roleId, permissionId: permissionDoc._id },
+      {
+        roleId,
+        permissionId: permissionDoc._id,
+        scope,
+        // undefined leaves the field unset (GLOBAL/unrestricted rows).
+        ...(conditions ? { conditions } : {}),
+      },
+      { upsert: true },
+    );
+    return true;
+  }
+
   private async seedRolePermissions() {
     let count = 0;
+
+    // Staff/internal roles: OFFICE-scoped office-owned subjects auto-scope to
+    // the caller's office via a { officeId: '$office' } condition.
     for (const mapping of seed.rolePermissionMap) {
-      const role = await this.roleModel.findOne({
-        roleName: mapping.roleName,
-      });
+      const role = await this.roleModel.findOne({ roleName: mapping.roleName });
       if (!role) continue;
 
       for (const permission of mapping.permissions) {
-        const permissionDoc = await this.permissionModel.findOne({
-          action: permission.action,
-          subject: permission.subject,
-        });
-        if (!permissionDoc) continue;
+        const conditions =
+          mapping.scope === ScopeEnum.OFFICE &&
+          SeederService.OFFICE_OWNED.has(permission.subject)
+            ? { officeId: '$office' }
+            : undefined;
 
-        await this.rolePermissionModel.findOneAndUpdate(
-          { roleId: role._id, permissionId: permissionDoc._id },
-          {
-            roleId: role._id,
-            permissionId: permissionDoc._id,
-            scope: mapping.scope,
-          },
-          { upsert: true },
+        const ok = await this.upsertRolePermission(
+          role._id,
+          permission.action,
+          permission.subject,
+          mapping.scope,
+          conditions,
         );
-        count++;
+        if (ok) count++;
       }
     }
+
+    // External self-service roles: read-own via explicit { field: '$self' }.
+    for (const mapping of seed.selfRolePermissionMap) {
+      const role = await this.roleModel.findOne({ roleName: mapping.roleName });
+      if (!role) continue;
+
+      for (const permission of mapping.permissions) {
+        const ok = await this.upsertRolePermission(
+          role._id,
+          permission.action,
+          permission.subject,
+          mapping.scope,
+          permission.conditions,
+        );
+        if (ok) count++;
+      }
+    }
+
     this.logger.log(`🌱 Done seeding ${count} data for RolePermission`);
   }
 

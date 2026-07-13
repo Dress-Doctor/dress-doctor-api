@@ -12,6 +12,7 @@ import { Model, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
+import { scopeFilter } from 'src/helper/casl/casl-scope';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { Customer } from 'src/schema/user/customer.schema';
 import { Referral } from 'src/schema/user/referral.schema';
@@ -223,8 +224,12 @@ export class CustomerService {
 
   async findOne(id: string) {
     this.can('READ', 'Customer');
+    // Self-scope: a customer/affiliate reading another user's profile is filtered
+    // out by the seeded { userId: '$self' } condition — the record simply isn't
+    // found. Staff/global roles are unrestricted.
+    const scope = scopeFilter(this.req.user.ability, 'READ', 'Customer');
     const customer = await this.customerModel
-      .findById(new Types.ObjectId(id))
+      .findOne({ _id: new Types.ObjectId(id), ...scope })
       .populate({ model: User.name, path: 'userId', select: '-passwordHash' });
 
     if (!customer) {

@@ -12,6 +12,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
+import { scopeFilter } from 'src/helper/casl/casl-scope';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { Currency } from 'src/schema/catalog/currency.schema';
@@ -379,6 +380,7 @@ export class OrderService {
         customerId,
         currencyId,
         pickupRequestId,
+        officeId: this.req.data.officeId,
         orderStatusId: orderStatus._id,
         orderCode: await this.codeService.generateOrderReference(),
       },
@@ -450,6 +452,7 @@ export class OrderService {
         ...data,
         customerId,
         currencyId,
+        officeId: this.req.data.officeId,
         orderStatusId: orderStatus._id,
         orderCode: await this.codeService.generateOrderReference(),
       },
@@ -501,11 +504,16 @@ export class OrderService {
     const orderCode = query.orderCode;
     if (orderCode) whereClause['orderCode'] = orderCode;
 
+    // Auto-scope: office staff see their office's orders; a customer sees only
+    // their own (via the seeded CASL conditions), enforced as a query filter.
+    const scope = scopeFilter(this.req.user.ability, 'READ', 'Order');
+    const match = { ...whereClause, ...scope };
+
     const skip = (page - 1) * size;
     const sort = this.appUtilService.parseSortParam(query.sort);
-    const total = await this.orderModel.countDocuments(whereClause);
+    const total = await this.orderModel.countDocuments(match);
     const data = await this.orderModel.aggregate([
-      { $match: whereClause },
+      { $match: match },
       { $sort: sort },
       { $skip: skip },
       { $limit: size },
