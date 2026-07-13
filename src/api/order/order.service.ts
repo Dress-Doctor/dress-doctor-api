@@ -1,11 +1,13 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
@@ -32,6 +34,33 @@ import {
   OrderItemParamsDto,
   UpdateOrderItemDto,
 } from './dto/update-order-item.dto';
+import { OrderEvents, type OrderStatusChangedEvent } from './order.events';
+
+/**
+ * Legal next-states per status. Any transition not listed here is rejected with
+ * INVALID_STATUS_TRANSITION. DELIVERED and CANCELLED are terminal.
+ */
+const LEGAL_TRANSITIONS: Record<OrderStatusEnum, OrderStatusEnum[]> = {
+  [OrderStatusEnum.DRAFT]: [
+    OrderStatusEnum.CONFIRMED,
+    OrderStatusEnum.CANCELLED,
+  ],
+  [OrderStatusEnum.CONFIRMED]: [
+    OrderStatusEnum.RECEIVED,
+    OrderStatusEnum.CANCELLED,
+  ],
+  [OrderStatusEnum.RECEIVED]: [
+    OrderStatusEnum.WASHING,
+    OrderStatusEnum.CANCELLED,
+  ],
+  [OrderStatusEnum.WASHING]: [OrderStatusEnum.READY, OrderStatusEnum.CANCELLED],
+  [OrderStatusEnum.READY]: [
+    OrderStatusEnum.DELIVERED,
+    OrderStatusEnum.CANCELLED,
+  ],
+  [OrderStatusEnum.DELIVERED]: [],
+  [OrderStatusEnum.CANCELLED]: [],
+};
 
 @Injectable()
 export class OrderService {
@@ -60,6 +89,8 @@ export class OrderService {
 
     @InjectModel(PickupStatus.name)
     private readonly pickupStatusModel: Model<PickupStatus>,
+
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
@@ -591,343 +622,155 @@ export class OrderService {
     return `${item.itemName} deleted successfully`;
   }
 
-  async confirmOrder(orderId: string) {
-    this.can('CONFIRM', 'Order');
+  /**
+   * Single guarded status transition. Rejects any move not permitted by
+   * LEGAL_TRANSITIONS with INVALID_STATUS_TRANSITION, runs status-specific
+   * preconditions, mirrors the pickup side effects, and emits
+   * order.status_changed. All the per-action methods below delegate here.
+   */
+  private async transition(
+    orderId: string,
+    target: OrderStatusEnum,
+    action: CaslActionsDto = 'UPDATE',
+  ) {
+    this.can(action, 'Order');
     const platform = this.req.data.platform;
     const { phone } = this.req.user;
     const base = `[${platform}] ${phone}`;
 
-    const orderObjectId = new Types.ObjectId(orderId);
-    const order = await this.orderModel.findById(orderObjectId);
+    const order = await this.orderModel
+      .findById(new Types.ObjectId(orderId))
+      .populate<{ orderStatusId: OrderStatus }>({
+        model: OrderStatus.name,
+        path: 'orderStatusId',
+      });
     if (!order) {
       this.logger.error(`${base} invalid orderId ${orderId}`);
-      throw new NotFoundException('Order not found');
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Order not found',
+      });
     }
 
-    // lookup draft status
-    const draftStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.DRAFT,
-    });
-    if (!draftStatus) {
-      this.logger.error(`${base} draft order status not found`);
-      throw new BadRequestException('Draft order status not configured');
-    }
-
-    if (order.orderStatusId.toString() !== draftStatus._id.toString()) {
+    const current = order.orderStatusId.orderStatusName as OrderStatusEnum;
+    if (!(LEGAL_TRANSITIONS[current] ?? []).includes(target)) {
       this.logger.error(
-        `${base} cannot confirm order ${order.orderCode} because it is not in DRAFT status`,
+        `${base} illegal transition ${current}->${target} for ${order.orderCode}`,
       );
-      throw new BadRequestException('Can only confirm orders in draft status');
+      throw new ConflictException({
+        code: 'INVALID_STATUS_TRANSITION',
+        message: `An order cannot move from ${current} to ${target}`,
+      });
     }
 
-    // ensure order has at least one item
-    const itemCount = await this.orderItemModel.countDocuments({
-      orderId: order._id,
-    });
-    if (!itemCount) {
-      this.logger.error(`${base} order ${order.orderCode} has no items`);
-      throw new BadRequestException(
-        'Order must contain at least one item before confirmation',
-      );
+    // Precondition: an order must have at least one item to be confirmed.
+    if (target === OrderStatusEnum.CONFIRMED) {
+      const itemCount = await this.orderItemModel.countDocuments({
+        orderId: order._id,
+      });
+      if (!itemCount) {
+        this.logger.error(`${base} order ${order.orderCode} has no items`);
+        throw new BadRequestException({
+          code: 'ORDER_EMPTY',
+          message: 'Order must contain at least one item before confirmation',
+        });
+      }
     }
 
-    // lookup pending status
-    const confirmedStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.CONFIRMED,
+    const targetStatus = await this.orderStatusModel.findOne({
+      orderStatusName: target,
     });
-    if (!confirmedStatus) {
-      this.logger.error(`${base} confirmed order status not found`);
-      throw new BadRequestException('Confirmed order status not configured');
+    if (!targetStatus) {
+      this.logger.error(`${base} ${target} order status not found`);
+      throw new BadRequestException(`${target} order status not configured`);
     }
 
     const userId = new Types.ObjectId(this.req.user.userId);
     await this.orderModel.findOneAndUpdate(
       { _id: order._id },
-      { orderStatusId: confirmedStatus._id },
+      { orderStatusId: targetStatus._id },
       { context: { changedBy: userId }, returnDocument: 'after' } as never,
     );
 
-    if (order.pickupRequestId) {
-      const pickedUpStatus = await this.pickupStatusModel.findOne({
-        pickupStatusName: PickupStatusEnum.PICKED_UP,
-      });
+    await this.syncPickupOnTransition(order.pickupRequestId, target, userId);
 
-      const assignStatus = await this.pickupStatusModel.findOne({
-        pickupStatusName: PickupStatusEnum.ASSIGNED,
-      });
+    const event: OrderStatusChangedEvent = {
+      orderId: order._id,
+      from: current,
+      to: target,
+      changedBy: userId,
+    };
+    this.eventEmitter.emit(OrderEvents.statusChanged, event);
+
+    this.logger.log(`${base} order ${order.orderCode} ${current}->${target}`);
+  }
+
+  /** Keep the linked pickup request in step with the order's lifecycle. */
+  private async syncPickupOnTransition(
+    pickupRequestId: Types.ObjectId | undefined,
+    target: OrderStatusEnum,
+    userId: Types.ObjectId,
+  ) {
+    if (!pickupRequestId) return;
+
+    if (target === OrderStatusEnum.CONFIRMED) {
+      const [pickedUp, assigned] = await Promise.all([
+        this.pickupStatusModel.findOne({
+          pickupStatusName: PickupStatusEnum.PICKED_UP,
+        }),
+        this.pickupStatusModel.findOne({
+          pickupStatusName: PickupStatusEnum.ASSIGNED,
+        }),
+      ]);
       await this.pickupRequestModel.findOneAndUpdate(
-        { _id: order.pickupRequestId, pickupStatusId: assignStatus?._id },
-        { pickupStatusId: pickedUpStatus?._id },
+        { _id: pickupRequestId, pickupStatusId: assigned?._id },
+        { pickupStatusId: pickedUp?._id },
         { context: { changedBy: userId }, returnDocument: 'after' } as never,
       );
+      return;
     }
 
-    this.logger.log(`${base} order ${order.orderCode} confirmed`);
-    return 'Order confirmed successfully';
-  }
-
-  async receiveOrder(orderId: string) {
-    this.can('UPDATE', 'Order');
-    const platform = this.req.data.platform;
-    const { phone } = this.req.user;
-    const base = `[${platform}] ${phone}`;
-
-    const orderObjectId = new Types.ObjectId(orderId);
-    const order = await this.orderModel.findById(orderObjectId);
-    if (!order) {
-      this.logger.error(`${base} invalid orderId ${orderId}`);
-      throw new NotFoundException('Order not found');
-    }
-
-    // only confirmed orders can be marked received
-    const confirmedStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.CONFIRMED,
-    });
-    if (!confirmedStatus) {
-      this.logger.error(`${base} confirmed order status not found`);
-      throw new BadRequestException('Confirmed order status not configured');
-    }
-
-    if (order.orderStatusId.toString() !== confirmedStatus._id.toString()) {
-      this.logger.error(
-        `${base} cannot mark order ${order.orderCode} as received because it is not in CONFIRMED status`,
-      );
-      throw new BadRequestException(
-        'Can only receive orders that are confirmed',
-      );
-    }
-
-    const receivedStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.RECEIVED,
-    });
-    if (!receivedStatus) {
-      this.logger.error(`${base} received order status not found`);
-      throw new BadRequestException('Received order status not configured');
-    }
-
-    const userId = new Types.ObjectId(this.req.user.userId);
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderStatusId: receivedStatus._id },
-      { context: { changedBy: userId }, returnDocument: 'after' } as never,
-    );
-
-    this.logger.log(`${base} order ${order.orderCode} marked received`);
-    return 'Order received successfully';
-  }
-
-  async washOrder(orderId: string) {
-    this.can('UPDATE', 'Order');
-    const platform = this.req.data.platform;
-    const { phone } = this.req.user;
-    const base = `[${platform}] ${phone}`;
-
-    const orderObjectId = new Types.ObjectId(orderId);
-    const order = await this.orderModel.findById(orderObjectId);
-    if (!order) {
-      this.logger.error(`${base} invalid orderId ${orderId}`);
-      throw new NotFoundException('Order not found');
-    }
-
-    // only received orders can be moved to washing
-    const receivedStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.RECEIVED,
-    });
-    if (!receivedStatus) {
-      this.logger.error(`${base} received order status not found`);
-      throw new BadRequestException('Received order status not configured');
-    }
-
-    if (order.orderStatusId.toString() !== receivedStatus._id.toString()) {
-      this.logger.error(
-        `${base} cannot mark order ${order.orderCode} as washing because it is not in RECEIVED status`,
-      );
-      throw new BadRequestException(
-        'Can only wash orders that have been received',
-      );
-    }
-
-    const washingStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.WASHING,
-    });
-    if (!washingStatus) {
-      this.logger.error(`${base} washing order status not found`);
-      throw new BadRequestException('Washing order status not configured');
-    }
-
-    const userId = new Types.ObjectId(this.req.user.userId);
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderStatusId: washingStatus._id },
-      { context: { changedBy: userId }, returnDocument: 'after' } as never,
-    );
-
-    this.logger.log(`${base} order ${order.orderCode} marked washing`);
-    return 'Order is now being washed';
-  }
-
-  async readyOrder(orderId: string) {
-    this.can('UPDATE', 'Order');
-    const platform = this.req.data.platform;
-    const { phone } = this.req.user;
-    const base = `[${platform}] ${phone}`;
-
-    const orderObjectId = new Types.ObjectId(orderId);
-    const order = await this.orderModel.findById(orderObjectId);
-    if (!order) {
-      this.logger.error(`${base} invalid orderId ${orderId}`);
-      throw new NotFoundException('Order not found');
-    }
-
-    // only washing orders can be moved to ready
-    const washingStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.WASHING,
-    });
-    if (!washingStatus) {
-      this.logger.error(`${base} washing order status not found`);
-      throw new BadRequestException('Washing order status not configured');
-    }
-
-    if (order.orderStatusId.toString() !== washingStatus._id.toString()) {
-      this.logger.error(
-        `${base} cannot mark order ${order.orderCode} as ready because it is not in WASHING status`,
-      );
-      throw new BadRequestException(
-        'Can only mark orders as ready when washing',
-      );
-    }
-
-    const readyStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.READY,
-    });
-    if (!readyStatus) {
-      this.logger.error(`${base} ready order status not found`);
-      throw new BadRequestException('Ready order status not configured');
-    }
-
-    const userId = new Types.ObjectId(this.req.user.userId);
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderStatusId: readyStatus._id },
-      { context: { changedBy: userId }, returnDocument: 'after' } as never,
-    );
-
-    this.logger.log(`${base} order ${order.orderCode} marked ready`);
-    return 'Order is ready for delivery';
-  }
-
-  async deliverOrder(orderId: string) {
-    this.can('UPDATE', 'Order');
-    const platform = this.req.data.platform;
-    const { phone } = this.req.user;
-    const base = `[${platform}] ${phone}`;
-
-    const orderObjectId = new Types.ObjectId(orderId);
-    const order = await this.orderModel.findById(orderObjectId);
-    if (!order) {
-      this.logger.error(`${base} invalid orderId ${orderId}`);
-      throw new NotFoundException('Order not found');
-    }
-
-    // only ready orders can be delivered
-    const readyStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.READY,
-    });
-    if (!readyStatus) {
-      this.logger.error(`${base} ready order status not found`);
-      throw new BadRequestException('Ready order status not configured');
-    }
-
-    if (order.orderStatusId.toString() !== readyStatus._id.toString()) {
-      this.logger.error(
-        `${base} cannot mark order ${order.orderCode} as delivered because it is not in READY status`,
-      );
-      throw new BadRequestException('Can only deliver orders that are ready');
-    }
-
-    const deliveredStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.DELIVERED,
-    });
-    if (!deliveredStatus) {
-      this.logger.error(`${base} delivered order status not found`);
-      throw new BadRequestException('Delivered order status not configured');
-    }
-
-    const userId = new Types.ObjectId(this.req.user.userId);
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderStatusId: deliveredStatus._id },
-      { context: { changedBy: userId }, returnDocument: 'after' } as never,
-    );
-
-    this.logger.log(`${base} order ${order.orderCode} marked delivered`);
-    return 'Order delivered successfully';
-  }
-
-  async cancelOrder(orderId: string) {
-    this.can('UPDATE', 'Order');
-    const platform = this.req.data.platform;
-    const { phone } = this.req.user;
-    const base = `[${platform}] ${phone}`;
-
-    const orderObjectId = new Types.ObjectId(orderId);
-    const order = await this.orderModel.findById(orderObjectId);
-    if (!order) {
-      this.logger.error(`${base} invalid orderId ${orderId}`);
-      throw new NotFoundException('Order not found');
-    }
-
-    const cancelledStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.CANCELLED,
-    });
-    if (!cancelledStatus) {
-      this.logger.error(`${base} cancelled order status not found`);
-      throw new BadRequestException('Cancelled order status not configured');
-    }
-
-    // disallow cancelling delivered or already cancelled orders
-    if (order.orderStatusId.toString() === cancelledStatus._id.toString()) {
-      this.logger.error(
-        `${base} order ${order.orderCode} is already cancelled`,
-      );
-      throw new BadRequestException('Order is already cancelled');
-    }
-
-    const deliveredStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.DELIVERED,
-    });
-    if (
-      deliveredStatus &&
-      order.orderStatusId.toString() === deliveredStatus._id.toString()
-    ) {
-      this.logger.error(
-        `${base} cannot cancel delivered order ${order.orderCode}`,
-      );
-      throw new BadRequestException('Cannot cancel a delivered order');
-    }
-
-    const userId = new Types.ObjectId(this.req.user.userId);
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderStatusId: cancelledStatus._id },
-      { context: { changedBy: userId }, returnDocument: 'after' } as never,
-    );
-
-    if (order.pickupRequestId) {
-      // optionally update pickup request to cancelled if still assigned or picked up
-      const cancelledPickup = await this.pickupStatusModel.findOne({
+    if (target === OrderStatusEnum.CANCELLED) {
+      const cancelled = await this.pickupStatusModel.findOne({
         pickupStatusName: PickupStatusEnum.CANCELLED,
       });
-      if (cancelledPickup) {
+      if (cancelled) {
         await this.pickupRequestModel.findOneAndUpdate(
-          { _id: order.pickupRequestId },
-          { pickupStatusId: cancelledPickup._id },
+          { _id: pickupRequestId },
+          { pickupStatusId: cancelled._id },
           { context: { changedBy: userId }, returnDocument: 'after' } as never,
         );
       }
     }
+  }
 
-    this.logger.log(`${base} order ${order.orderCode} cancelled`);
+  async confirmOrder(orderId: string) {
+    await this.transition(orderId, OrderStatusEnum.CONFIRMED, 'CONFIRM');
+    return 'Order confirmed successfully';
+  }
+
+  async receiveOrder(orderId: string) {
+    await this.transition(orderId, OrderStatusEnum.RECEIVED);
+    return 'Order received successfully';
+  }
+
+  async washOrder(orderId: string) {
+    await this.transition(orderId, OrderStatusEnum.WASHING);
+    return 'Order is now being washed';
+  }
+
+  async readyOrder(orderId: string) {
+    await this.transition(orderId, OrderStatusEnum.READY);
+    return 'Order is ready for delivery';
+  }
+
+  async deliverOrder(orderId: string) {
+    await this.transition(orderId, OrderStatusEnum.DELIVERED);
+    return 'Order delivered successfully';
+  }
+
+  async cancelOrder(orderId: string) {
+    await this.transition(orderId, OrderStatusEnum.CANCELLED);
     return 'Order cancelled successfully';
   }
 }
