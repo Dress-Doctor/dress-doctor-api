@@ -67,6 +67,16 @@ export class OrderController {
     return await this.orderService.findAll(query);
   }
 
+  @Get('flagged')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Orders with an outstanding balance (by amount+age)',
+  })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async getFlaggedOrders(@Query() query: FindOrderDto) {
+    return await this.orderService.findFlagged(query);
+  }
+
   @Post('pickup')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create order for a pickup request' })

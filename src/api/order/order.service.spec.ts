@@ -14,6 +14,7 @@ import { OrderStatusEnum } from 'src/schema/order/order.dto';
 import { Order } from 'src/schema/order/order.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
+import { Customer } from 'src/schema/user/customer.schema';
 import { User } from 'src/schema/user/user.schema';
 import { OrderEvents } from './order.events';
 import { OrderService } from './order.service';
@@ -23,6 +24,8 @@ describe('OrderService', () => {
   let orderModel: {
     findById: jest.Mock;
     findOneAndUpdate: jest.Mock;
+    countDocuments: jest.Mock;
+    find: jest.Mock;
   };
   let orderItemModel: { countDocuments: jest.Mock };
   let orderStatusModel: { findOne: jest.Mock };
@@ -44,6 +47,8 @@ describe('OrderService', () => {
     orderModel = {
       findById: jest.fn(),
       findOneAndUpdate: jest.fn().mockResolvedValue({}),
+      countDocuments: jest.fn().mockResolvedValue(2),
+      find: jest.fn(),
     };
     orderItemModel = { countDocuments: jest.fn().mockResolvedValue(1) };
     orderStatusModel = {
@@ -78,6 +83,7 @@ describe('OrderService', () => {
         },
         { provide: getModelToken(PickupRequest.name), useValue: {} },
         { provide: getModelToken(PickupStatus.name), useValue: {} },
+        { provide: getModelToken(Customer.name), useValue: {} },
         { provide: EventEmitter2, useValue: eventEmitter },
       ],
     }).compile();
@@ -146,6 +152,23 @@ describe('OrderService', () => {
 
       const msg = await service.washOrder('507f1f77bcf86cd799439011');
       expect(msg).toBe('Order is now being washed');
+    });
+  });
+
+  describe('findFlagged', () => {
+    it('lists flagged orders sorted by balance then age', async () => {
+      const populate = jest.fn().mockResolvedValue([{ orderCode: 'OR-1' }]);
+      const limit = jest.fn().mockReturnValue({ populate });
+      const skip = jest.fn().mockReturnValue({ limit });
+      const sort = jest.fn().mockReturnValue({ skip });
+      orderModel.find.mockReturnValue({ sort });
+
+      const res = await service.findFlagged({ page: 1, size: 20 } as never);
+
+      expect(orderModel.find).toHaveBeenCalledWith({ flagged: true });
+      expect(sort).toHaveBeenCalledWith({ balanceDue: -1, createdAt: 1 });
+      expect(res.total).toBe(2);
+      expect(res.data).toHaveLength(1);
     });
   });
 });

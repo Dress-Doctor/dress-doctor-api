@@ -18,10 +18,15 @@ import { Currency } from 'src/schema/catalog/currency.schema';
 import { Item } from 'src/schema/catalog/item.schema';
 import { OrderItem } from 'src/schema/order/order-item.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
-import { OrderStatusEnum } from 'src/schema/order/order.dto';
+import {
+  OrderItemConditionEnum,
+  OrderStatusEnum,
+} from 'src/schema/order/order.dto';
 import { Order } from 'src/schema/order/order.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { User } from 'src/schema/user/user.schema';
+import { Customer } from 'src/schema/user/customer.schema';
+import { type PaginationDto } from 'src/dto/request-data.dto';
 import { CreateOrderItemDto } from './dto/create-order-item.dto';
 import {
   CreateOrderDto,
@@ -34,7 +39,11 @@ import {
   OrderItemParamsDto,
   UpdateOrderItemDto,
 } from './dto/update-order-item.dto';
-import { OrderEvents, type OrderStatusChangedEvent } from './order.events';
+import {
+  OrderEvents,
+  type OrderCreatedEvent,
+  type OrderStatusChangedEvent,
+} from './order.events';
 
 /**
  * Legal next-states per status. Any transition not listed here is rejected with
@@ -90,8 +99,49 @@ export class OrderService {
     @InjectModel(PickupStatus.name)
     private readonly pickupStatusModel: Model<PickupStatus>,
 
+    @InjectModel(Customer.name)
+    private readonly customerModel: Model<Customer>,
+
     private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * On order creation: bump the customer's lastOrderAt rollup and emit
+   * order.created. totalOrders/totalSpend mature on order paid (§3.6).
+   */
+  private async onOrderCreated(
+    orderId: Types.ObjectId,
+    customerId: Types.ObjectId,
+    changedBy: Types.ObjectId,
+  ) {
+    await this.customerModel.findOneAndUpdate(
+      { userId: customerId },
+      { lastOrderAt: new Date() },
+      { context: { changedBy } } as never,
+    );
+
+    const event: OrderCreatedEvent = { orderId, customerId, changedBy };
+    this.eventEmitter.emit(OrderEvents.created, event);
+  }
+
+  async findFlagged({ page, size }: PaginationDto) {
+    this.can('READ', 'Order');
+
+    const where = { flagged: true };
+    const skip = (page - 1) * size;
+    const total = await this.orderModel.countDocuments(where);
+    const data = await this.orderModel
+      .find(where)
+      // Outstanding by amount, then oldest first.
+      .sort({ balanceDue: -1, createdAt: 1 })
+      .skip(skip)
+      .limit(size)
+      .populate({ model: OrderStatus.name, path: 'orderStatusId' });
+
+    const totalPages = Math.ceil(total / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+    return { total, data, nextPage };
+  }
 
   private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
     const platform = this.req.data.platform;
@@ -174,7 +224,8 @@ export class OrderService {
       );
     }
 
-    await this.orderModel.findOneAndUpdate(
+    const userId = new Types.ObjectId(this.req.user.userId);
+    const created = (await this.orderModel.findOneAndUpdate(
       { customerId: customerId, pickupRequestId: pickupRequestId },
       {
         ...data,
@@ -185,11 +236,13 @@ export class OrderService {
         orderCode: await this.codeService.generateOrderReference(),
       },
       {
-        context: { changedBy: new Types.ObjectId(this.req.user.userId) },
+        context: { changedBy: userId },
         upsert: true,
         returnDocument: 'after',
       } as never,
-    );
+    )) as unknown as Order;
+
+    await this.onOrderCreated(created._id, customerId, userId);
 
     this.logger.log(
       `${base} has successfully created order for pickup request ${data.pickupRequestId}`,
@@ -240,7 +293,8 @@ export class OrderService {
       throw new BadRequestException('A customer can only have one draft order');
     }
 
-    await this.orderModel.findOneAndUpdate(
+    const userId = new Types.ObjectId(this.req.user.userId);
+    const created = (await this.orderModel.findOneAndUpdate(
       { customerId, orderStatusId: orderStatus._id },
       {
         ...data,
@@ -250,11 +304,13 @@ export class OrderService {
         orderCode: await this.codeService.generateOrderReference(),
       },
       {
-        context: { changedBy: new Types.ObjectId(this.req.user.userId) },
+        context: { changedBy: userId },
         upsert: true,
         returnDocument: 'after',
       } as never,
-    );
+    )) as unknown as Order;
+
+    await this.onOrderCreated(created._id, customerId, userId);
 
     this.logger.log(
       `${base} has successfully created order for customer ${data.customerId}`,
@@ -426,30 +482,20 @@ export class OrderService {
       );
     }
 
-    const orderItemExist = await this.orderItemModel.findOne({
+    const userId = new Types.ObjectId(this.req.user.userId);
+    // Per-garment row: the same item may appear multiple times in one order with
+    // different condition/colour, so we insert rather than upsert-by-(orderId,
+    // itemId). The old unique (orderId,itemId) index was relaxed accordingly.
+    const orderItem = new this.orderItemModel({
       itemId: item._id,
       orderId: order._id,
+      quantity: data.quantity,
+      unitPrice: data.unitPrice,
+      condition: data.condition ?? OrderItemConditionEnum.NORMAL,
+      colour: data.colour,
     });
-    if (orderItemExist) {
-      this.logger.error(`${base} ${item.itemName} already exist on oder`);
-      throw new BadRequestException(`${item.itemName} already exist on order`);
-    }
-
-    const userId = new Types.ObjectId(this.req.user.userId);
-    await this.orderItemModel.findOneAndUpdate(
-      { itemId: item._id, orderId: order._id },
-      {
-        itemId: item._id,
-        orderId: order._id,
-        quantity: data.quantity,
-        unitPrice: data.unitPrice,
-      },
-      {
-        context: { changedBy: userId },
-        upsert: true,
-        returnDocument: 'after',
-      } as never,
-    );
+    orderItem.$locals.changedBy = userId;
+    await orderItem.save();
 
     const baseAmount = data.unitPrice * data.quantity;
     const orderAmount = baseAmount + order.orderAmount;

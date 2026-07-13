@@ -47,6 +47,11 @@ export class Order extends Document<Types.ObjectId> {
   })
   paymentStatus: OrderPaymentStatusEnum;
 
+  // Computed, never hand-set: an order needing attention — READY/DELIVERED with
+  // an outstanding balance, or OVERPAID. Maintained when payments recompute.
+  @Prop({ required: true, default: false })
+  flagged: boolean;
+
   @Prop({ required: true })
   estimatedDeliveryDate: Date;
 
@@ -55,6 +60,8 @@ export class Order extends Document<Types.ObjectId> {
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);
+// The flagged view sorts by outstanding balance then age.
+OrderSchema.index({ flagged: 1, balanceDue: -1, createdAt: 1 });
 OrderSchema.index(
   { pickupRequestId: 1, customerId: 1 },
   {

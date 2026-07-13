@@ -1,6 +1,16 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsDefined, IsMongoId, IsNumber, IsPositive } from 'class-validator';
+import {
+  IsDefined,
+  IsEnum,
+  IsMongoId,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
+import { IsPositive } from 'class-validator';
+import { OrderItemConditionEnum } from 'src/schema/order/order.dto';
 
 export class CreateOrderItemDto {
   @ApiProperty({ required: true, description: 'Item id' })
@@ -21,6 +31,22 @@ export class CreateOrderItemDto {
   @IsPositive({ message: 'Unit price cannot be negative or zero' })
   @IsNumber({}, { message: 'Unit price must be a number' })
   unitPrice: number;
+
+  @ApiProperty({
+    required: false,
+    enum: OrderItemConditionEnum,
+    description: 'Per-garment condition',
+    example: OrderItemConditionEnum.NORMAL,
+  })
+  @IsOptional()
+  @IsEnum(OrderItemConditionEnum, { message: 'Invalid condition' })
+  condition?: OrderItemConditionEnum;
+
+  @ApiProperty({ required: false, description: 'Per-garment colour' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  colour?: string;
 }
 
 export class OrderParamsDto {
