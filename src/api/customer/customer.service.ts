@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, PipelineStage, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
@@ -16,6 +16,7 @@ import { scopeFilter } from 'src/helper/casl/casl-scope';
 import { maskPhone } from 'src/helper/pii';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { Customer } from 'src/schema/user/customer.schema';
+import { followUpSchemaName } from 'src/schema/follow-up/follow-up.schema';
 import { Referral } from 'src/schema/user/referral.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { UserTypeEum } from 'src/schema/user/user.dto';
@@ -181,7 +182,7 @@ export class CustomerService {
     const skip = (page - 1) * size;
     const sort = this.appUtilService.parseSortParam(query.sort);
 
-    const pipeline = [
+    const pipeline: PipelineStage[] = [
       { $match: match },
       {
         $lookup: {
@@ -194,6 +195,26 @@ export class CustomerService {
       { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
       { $match: userMatch },
     ];
+
+    // Inactive view (§2.4): attach the latest follow-up so the list shows
+    // whether CS was already alerted and whether it's resolved.
+    if (query.inactiveDays) {
+      pipeline.push(
+        {
+          $lookup: {
+            from: followUpSchemaName,
+            let: { cid: '$_id' },
+            pipeline: [
+              { $match: { $expr: { $eq: ['$customerId', '$$cid'] } } },
+              { $sort: { triggeredAt: -1 } },
+              { $limit: 1 },
+            ],
+            as: 'followUp',
+          },
+        },
+        { $addFields: { followUp: { $arrayElemAt: ['$followUp', 0] } } },
+      );
+    }
 
     const countResult = await this.customerModel.aggregate<{ total: number }>([
       ...pipeline,

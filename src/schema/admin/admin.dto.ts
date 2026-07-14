@@ -81,6 +81,9 @@ export enum SubjectEnum {
   Currency = 'Currency',
   SubCategory = 'SubCategory',
   ServiceType = 'ServiceType',
+
+  // follow-up (customer-inactivity alerts)
+  FollowUp = 'FollowUp',
 }
 
 export enum RoleEnum {

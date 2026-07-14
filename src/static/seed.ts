@@ -266,6 +266,7 @@ export default {
         ...crud(SubjectEnum.Payment),
         ...crud(SubjectEnum.PickupRequest),
         ...crud(SubjectEnum.Customer),
+        ...readUpdate(SubjectEnum.FollowUp),
       ],
     },
     {
@@ -301,6 +302,7 @@ export default {
         ...crud(SubjectEnum.Customer),
         ...crud(SubjectEnum.Order),
         ...crud(SubjectEnum.PickupRequest),
+        ...readUpdate(SubjectEnum.FollowUp),
       ],
     },
     {

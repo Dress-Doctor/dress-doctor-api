@@ -25,4 +25,21 @@ export default [
     titleEn: 'Login verification code',
     variables: ['code', 'minutes', 'firstName'],
   },
+  {
+    // CS-facing inactivity alert (§2.4). Carries the full context so CS can
+    // call the customer without opening anything. Ordered to match the approved
+    // WhatsApp template's body parameters.
+    channel: OTPChannelEnum.WHATSAPP,
+    templateName: NotificationTemplateNameEnum.INACTIVE_CUSTOMER_ALERT,
+    titleFr: 'Client inactif — relance',
+    titleEn: 'Inactive customer — follow up',
+    variables: [
+      'customerName',
+      'customerPhone',
+      'lastOrderDate',
+      'lastOrderItems',
+      'lastOrderValue',
+      'totalOrders',
+    ],
+  },
 ];

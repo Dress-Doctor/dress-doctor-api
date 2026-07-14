@@ -11,6 +11,7 @@ import { JobRunService } from 'src/helper/service/job-run.service';
 import { FailedJobsService } from 'src/helper/service/failed-jobs.service';
 import { RedisModule } from 'src/helper/redis/redis.module';
 import { PaymentReconcileService } from 'src/api/payment/payment-reconcile.service';
+import { InactivityScanService } from 'src/api/follow-up/inactivity-scan.service';
 
 @Module({
   imports: [QueueProducerModule, RedisModule],
@@ -25,6 +26,7 @@ import { PaymentReconcileService } from 'src/api/payment/payment-reconcile.servi
     JobRunService,
     FailedJobsService,
     PaymentReconcileService,
+    InactivityScanService,
   ],
 })
 export class QueueProcessorModule {}

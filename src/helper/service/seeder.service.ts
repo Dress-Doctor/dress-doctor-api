@@ -746,6 +746,16 @@ export class SeederService {
         value: 1000,
         description: 'Subscription overage rate (XAF/kg)',
       },
+      {
+        key: SettingKeys.inactiveDays,
+        value: 14,
+        description: 'Days without an order before a customer is inactive',
+      },
+      {
+        key: SettingKeys.followUpCooldownDays,
+        value: 7,
+        description: 'Days before an unresolved inactivity alert can re-fire',
+      },
     ];
     const operations = defaults.map((s) => ({
       updateOne: {
