@@ -8,6 +8,7 @@ import {
 } from './customer-history.schema';
 import { Customer, CustomerSchema } from './customer.schema';
 import { Referral, ReferralSchema } from './referral.schema';
+import { RefreshToken, RefreshTokenSchema } from './refresh-token.schema';
 import { UserHistory, UserHistorySchema } from './user-history.schema';
 import { UserType, UserTypeSchema } from './user-type.schema';
 import { User, UserSchema } from './user.schema';
@@ -48,6 +49,7 @@ import { User, UserSchema } from './user.schema';
     MongooseModule.forFeature([
       { name: UserType.name, schema: UserTypeSchema },
       { name: Referral.name, schema: ReferralSchema },
+      { name: RefreshToken.name, schema: RefreshTokenSchema },
       { name: UserHistory.name, schema: UserHistorySchema },
       { name: CustomerHistory.name, schema: CustomerHistorySchema },
     ]),

@@ -34,6 +34,7 @@ import { Category } from 'src/schema/catalog/category.schema';
 import { Currency } from 'src/schema/catalog/currency.schema';
 import { Item } from 'src/schema/catalog/item.schema';
 import { ServiceType } from 'src/schema/catalog/service-type.schema';
+import { Setting, SettingKeys } from 'src/schema/settings/settings.schema';
 import { Service } from 'src/schema/catalog/service.schema';
 import { SubCategory } from 'src/schema/catalog/sub-category.schema';
 import currencyData from 'src/static/currency.data';
@@ -99,6 +100,9 @@ export class SeederService {
 
     @InjectModel(ServiceType.name)
     private readonly serviceTypeModel: Model<ServiceType>,
+
+    @InjectModel(Setting.name)
+    private readonly settingModel: Model<Setting>,
 
     @InjectModel(Service.name) private readonly serviceModel: Model<Service>,
 
@@ -203,11 +207,13 @@ export class SeederService {
   }
 
   private async seedOffice() {
-    const url = process.env.DD_API_URL;
+    const url = process.env.DD_API_URL ?? '';
+    const ttlDays = Number(process.env.OFFICE_LINK_TTL_DAYS) || 365;
     for (const office of seed.offices) {
       const { officeType, ...data } = office;
-      const sig = this.codeService.signOfficeLink(office.slug);
-      const signedLink = `${url}/o/${office.slug}?sig=${sig}`;
+      const exp = Date.now() + ttlDays * 24 * 60 * 60 * 1000;
+      const sig = this.codeService.signOfficeLink(office.slug, exp);
+      const signedLink = `${url}/o/${office.slug}?sig=${sig}&exp=${exp}`;
 
       const officeTypeDoc = await this.officeTypeModel.findOne({
         officeTypeName: officeType,
@@ -252,33 +258,87 @@ export class SeederService {
     );
   }
 
+  // Subjects that carry officeId and so are office-scoped for OFFICE-scope roles.
+  // OrderItem is intentionally NOT here — it has no officeId; item access is
+  // scoped through its parent Order at the service layer.
+  private static readonly OFFICE_OWNED = new Set<string>([
+    SubjectEnum.Order,
+    SubjectEnum.Payment,
+    SubjectEnum.PickupRequest,
+    SubjectEnum.PickupAssignment,
+  ]);
+
+  private async upsertRolePermission(
+    roleId: Types.ObjectId,
+    action: string,
+    subject: string,
+    scope: string,
+    conditions?: Record<string, unknown>,
+  ): Promise<boolean> {
+    const permissionDoc = await this.permissionModel.findOne({
+      action,
+      subject,
+    } as Record<string, unknown>);
+    if (!permissionDoc) return false;
+
+    await this.rolePermissionModel.findOneAndUpdate(
+      { roleId, permissionId: permissionDoc._id },
+      {
+        roleId,
+        permissionId: permissionDoc._id,
+        scope,
+        // undefined leaves the field unset (GLOBAL/unrestricted rows).
+        ...(conditions ? { conditions } : {}),
+      },
+      { upsert: true },
+    );
+    return true;
+  }
+
   private async seedRolePermissions() {
     let count = 0;
+
+    // Staff/internal roles: OFFICE-scoped office-owned subjects auto-scope to
+    // the caller's office via a { officeId: '$office' } condition.
     for (const mapping of seed.rolePermissionMap) {
-      const role = await this.roleModel.findOne({
-        roleName: mapping.roleName,
-      });
+      const role = await this.roleModel.findOne({ roleName: mapping.roleName });
       if (!role) continue;
 
       for (const permission of mapping.permissions) {
-        const permissionDoc = await this.permissionModel.findOne({
-          action: permission.action,
-          subject: permission.subject,
-        });
-        if (!permissionDoc) continue;
+        const conditions =
+          mapping.scope === ScopeEnum.OFFICE &&
+          SeederService.OFFICE_OWNED.has(permission.subject)
+            ? { officeId: '$office' }
+            : undefined;
 
-        await this.rolePermissionModel.findOneAndUpdate(
-          { roleId: role._id, permissionId: permissionDoc._id },
-          {
-            roleId: role._id,
-            permissionId: permissionDoc._id,
-            scope: mapping.scope,
-          },
-          { upsert: true },
+        const ok = await this.upsertRolePermission(
+          role._id,
+          permission.action,
+          permission.subject,
+          mapping.scope,
+          conditions,
         );
-        count++;
+        if (ok) count++;
       }
     }
+
+    // External self-service roles: read-own via explicit { field: '$self' }.
+    for (const mapping of seed.selfRolePermissionMap) {
+      const role = await this.roleModel.findOne({ roleName: mapping.roleName });
+      if (!role) continue;
+
+      for (const permission of mapping.permissions) {
+        const ok = await this.upsertRolePermission(
+          role._id,
+          permission.action,
+          permission.subject,
+          mapping.scope,
+          permission.conditions,
+        );
+        if (ok) count++;
+      }
+    }
+
     this.logger.log(`🌱 Done seeding ${count} data for RolePermission`);
   }
 
@@ -667,7 +727,34 @@ export class SeederService {
     );
   }
 
+  private async seedSettings() {
+    // Rates as data (default 1,000 XAF/kg each). $setOnInsert so an operator's
+    // later override isn't clobbered on re-seed.
+    const defaults = [
+      {
+        key: SettingKeys.perKgRate,
+        value: 1000,
+        description: 'Wash Per KG rate (XAF/kg)',
+      },
+      {
+        key: SettingKeys.overageRate,
+        value: 1000,
+        description: 'Subscription overage rate (XAF/kg)',
+      },
+    ];
+    const operations = defaults.map((s) => ({
+      updateOne: {
+        filter: { key: s.key, officeId: null },
+        update: { $setOnInsert: { ...s, officeId: null } },
+        upsert: true,
+      },
+    }));
+    await this.settingModel.bulkWrite(operations);
+    this.logger.log(`🌱 Done seeding ${defaults.length} settings`);
+  }
+
   async run(): Promise<void> {
+    await this.seedSettings();
     await this.seedUserType();
     await this.seedOfficeType();
     await this.seedPickupStatus();

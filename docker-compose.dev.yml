@@ -1,0 +1,73 @@
+# Local development stack. Unlike prod/stage (external managed Mongo cluster,
+# already a replica set), this brings up a LOCAL Mongo — as a single-node
+# replica set so multi-document transactions (payment record, order confirm
+# finalize) work. A standalone mongod throws on those paths.
+#
+#   docker compose -f docker-compose.dev.yml up
+#
+# The mongo healthcheck self-initiates rs0 on first boot; api waits for it.
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      # Idempotent: initiate the single-node replica set if not already up.
+      test: >
+        mongosh --quiet --eval "try { rs.status().ok } catch (e) {
+        rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }) }"
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: redis-cli ping
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    restart: unless-stopped
+    command: ['node', 'dist/main']
+    environment:
+      PORT: '3000'
+      DATABASE_URL: mongodb://mongo:27017/dress-doctor?replicaSet=rs0
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      REDIS_NAME: dev
+    ports:
+      - '3000:3000'
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ['node', 'dist/worker']
+    environment:
+      DATABASE_URL: mongodb://mongo:27017/dress-doctor?replicaSet=rs0
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      REDIS_NAME: dev
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  mongo_data:

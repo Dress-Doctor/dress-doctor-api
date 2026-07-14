@@ -1,10 +1,13 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
   Logger,
+  Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -24,8 +27,10 @@ import {
   xApiKey,
   xApiSecret,
 } from 'src/dto/swagger.dto';
+import { AssignRoleDto } from './dto/assign-role.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { FindAllUserDto } from './dto/find-all-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 import { UserService } from './user.service';
 
 @Controller('user')
@@ -72,5 +77,47 @@ export class UserController {
     this.logger.log(log);
 
     return await this.userService.findAll(query);
+  }
+
+  @Get(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Get a user by id' })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async findOne(@Param('id') id: string) {
+    return await this.userService.findOne(id);
+  }
+
+  @Patch(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update a user profile' })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async update(@Param('id') id: string, @Body() data: UpdateUserDto) {
+    return await this.userService.update(id, data);
+  }
+
+  @Post(':id/roles')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Assign a role (global, or per-office if officeId)',
+  })
+  @ApiResponse({ status: HttpStatus.CREATED, type: ApiSuccessResponse })
+  async assignRole(@Param('id') id: string, @Body() data: AssignRoleDto) {
+    return await this.userService.assignRole(id, data);
+  }
+
+  @Delete(':id/roles/:roleId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Revoke a role from a user' })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async revokeRole(@Param('id') id: string, @Param('roleId') roleId: string) {
+    return await this.userService.revokeRole(id, roleId);
+  }
+
+  @Patch(':id/deactivate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Soft-deactivate a user' })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async deactivate(@Param('id') id: string) {
+    return await this.userService.deactivate(id);
   }
 }

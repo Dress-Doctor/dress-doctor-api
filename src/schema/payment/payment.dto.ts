@@ -8,3 +8,10 @@ export enum PaymentTypeEnum {
   PAYMENT = 'PAYMENT',
   REFUND = 'REFUND',
 }
+
+// AR-aging distinction preserved from the sheets: a payment either
+// settles the current order balance or clears prior outstanding debt.
+export enum DebtTypeEnum {
+  CURRENT = 'Current',
+  OLD_DEBT = 'Old Debt',
+}

@@ -40,7 +40,14 @@ export class CompleteLoginEntity extends Base {
   @ApiProperty({
     required: true,
     example: 'JWT Token',
-    description: 'Client token',
+    description: 'Short-lived access token (Bearer)',
   })
   accessToken: string;
+
+  @ApiProperty({
+    required: true,
+    example: 'a1b2c3…',
+    description: 'Opaque refresh token — rotate via POST /auth/refresh',
+  })
+  refreshToken: string;
 }

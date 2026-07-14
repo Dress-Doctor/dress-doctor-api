@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Logger,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -34,6 +35,7 @@ import {
   CreateOrderWithPickupDto,
 } from './dto/create-order.dto';
 import { FindOrderDto } from './dto/find-order.dto';
+import { UpdateOrderDraftDto } from './dto/update-order-draft.dto';
 import {
   OrderItemParamsDto,
   UpdateOrderItemDto,
@@ -65,6 +67,16 @@ export class OrderController {
       `[${platform}] ${phone} is fetching orders with query ${JSON.stringify(query)}`,
     );
     return await this.orderService.findAll(query);
+  }
+
+  @Get('flagged')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Orders with an outstanding balance (by amount+age)',
+  })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async getFlaggedOrders(@Query() query: FindOrderDto) {
+    return await this.orderService.findFlagged(query);
   }
 
   @Post('pickup')
@@ -100,6 +112,19 @@ export class OrderController {
     return await this.orderService.createOrder(data);
   }
 
+  @Patch(':orderId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Update draft inputs (weight/manualDiscount/promo)',
+  })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async updateOrderDraft(
+    @Param() { orderId }: OrderParamsDto,
+    @Body() data: UpdateOrderDraftDto,
+  ) {
+    return await this.orderService.updateOrderDraft(orderId, data);
+  }
+
   @Post(':orderId/items')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create order items' })
@@ -117,7 +142,7 @@ export class OrderController {
     return await this.orderService.createOrderItem(orderId, data);
   }
 
-  @Put(':orderId/items/:itemId')
+  @Put(':orderId/items/:orderItemId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Update order item' })
   @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
@@ -134,7 +159,7 @@ export class OrderController {
     return await this.orderService.updateOrderItem(params, data);
   }
 
-  @Delete(':orderId/items/:itemId')
+  @Delete(':orderId/items/:orderItemId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete order item' })
   @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
@@ -144,7 +169,7 @@ export class OrderController {
   ) {
     const { platform } = req.data;
     const phone = req.user.phone;
-    const log = `[${platform}] ${phone} is deleting order item for order ${params.orderId} with itemId ${params.itemId}`;
+    const log = `[${platform}] ${phone} is deleting order item ${params.orderItemId} for order ${params.orderId}`;
     this.logger.log(log);
 
     return await this.orderService.deleteOrderItem(params);

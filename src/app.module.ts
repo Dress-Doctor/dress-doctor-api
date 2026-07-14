@@ -24,15 +24,20 @@ import { APP_GUARD } from '@nestjs/core';
 import { ApiClientGuard } from './helper/guard/api-client.guard';
 import { UtilModule } from './api/util/util.module';
 import { UserModule } from './api/user/user.module';
+import { CustomerModule } from './api/customer/customer.module';
+import { OfficeModule } from './api/office/office.module';
+import { PricingModule } from './api/pricing/pricing.module';
 import { OrderModule } from './api/order/order.module';
 import { PaymentModule } from './api/payment/payment.module';
 import { BullModule } from '@nestjs/bullmq';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { QueueProcessorModule } from './queue/queue-processor.module';
 import { envValidationSchema } from './config/env.validation';
 
 @Module({
   imports: [
     i18nModule,
+    EventEmitterModule.forRoot(),
     AuthModule,
     SchemaModule,
     PickupModule,
@@ -41,6 +46,9 @@ import { envValidationSchema } from './config/env.validation';
     ApiClientModule,
     UtilModule,
     UserModule,
+    CustomerModule,
+    OfficeModule,
+    PricingModule,
     OrderModule,
     PaymentModule,
     QueueProcessorModule,

@@ -6,22 +6,29 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
+import { scopeFilter } from 'src/helper/casl/casl-scope';
 import { Currency } from 'src/schema/catalog/currency.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
-import { OrderPaymentStatusEnum } from 'src/schema/order/order.dto';
+import {
+  OrderPaymentStatusEnum,
+  OrderStatusEnum,
+} from 'src/schema/order/order.dto';
 import { Order } from 'src/schema/order/order.schema';
 import { PaymentMethod } from 'src/schema/payment/payment-method.schema';
 import { PaymentType } from 'src/schema/payment/payment-type.schema';
-import { PaymentTypeEnum } from 'src/schema/payment/payment.dto';
+import { DebtTypeEnum, PaymentTypeEnum } from 'src/schema/payment/payment.dto';
 import { Payment } from 'src/schema/payment/payment.schema';
+import { OrderEvents, type OrderPaidEvent } from '../order/order.events';
 import { OrderParamsDto } from '../order/dto/create-order-item.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { FindPaymentDto } from './dto/find-payment.dto';
+import { PaymentEvents, type PaymentRecordedEvent } from './payment.events';
 
 @Injectable()
 export class PaymentService {
@@ -41,7 +48,41 @@ export class PaymentService {
     private readonly paymentMethodModel: Model<PaymentMethod>,
 
     @InjectModel(Currency.name) private readonly currencyModel: Model<Currency>,
+
+    @InjectConnection() private readonly connection: Connection,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * Compute the order payment status from paid vs total (integer XAF):
+   * UNPAID (≤0) · PARTIAL (0<paid<total) · PAID (==) · OVERPAID (>total).
+   */
+  private computePaymentStatus(
+    amountPaid: number,
+    total: number,
+  ): OrderPaymentStatusEnum {
+    if (amountPaid <= 0) return OrderPaymentStatusEnum.UNPAID;
+    if (amountPaid < total) return OrderPaymentStatusEnum.PARTIAL;
+    if (amountPaid === total) return OrderPaymentStatusEnum.PAID;
+    return OrderPaymentStatusEnum.OVERPAID;
+  }
+
+  /**
+   * flagged = status ∈ {READY, DELIVERED} and not fully PAID, or OVERPAID.
+   * Computed, never hand-set.
+   */
+  private computeFlagged(
+    statusName: string,
+    paymentStatus: OrderPaymentStatusEnum,
+  ): boolean {
+    const readyOrDelivered =
+      statusName === OrderStatusEnum.READY.toString() ||
+      statusName === OrderStatusEnum.DELIVERED.toString();
+    return (
+      paymentStatus === OrderPaymentStatusEnum.OVERPAID ||
+      (readyOrDelivered && paymentStatus !== OrderPaymentStatusEnum.PAID)
+    );
+  }
 
   private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
     const platform = this.req.data.platform;
@@ -75,12 +116,16 @@ export class PaymentService {
     if (paymentTypeId)
       whereClause['paymentTypeId'] = new Types.ObjectId(query.paymentTypeId);
 
+    // Auto-scope: office staff → their office's payments; customer → own.
+    const scope = scopeFilter(this.req.user.ability, 'READ', 'Payment');
+    const match = { ...whereClause, ...scope };
+
     const skip = (page - 1) * size;
     const sort = this.appUtilService.parseSortParam(query.sort);
-    const total = await this.paymentModel.countDocuments(whereClause);
+    const total = await this.paymentModel.countDocuments(match);
 
     const payments = await this.paymentModel
-      .find(whereClause)
+      .find(match)
       .sort(sort)
       .skip(skip)
       .limit(size)
@@ -102,15 +147,26 @@ export class PaymentService {
     const { phone } = this.req.user;
     const base = `[${platform}] ${phone}`;
 
-    // Validate order exists and is in appropriate status for payment
+    // Validate order exists and is in the caller's payment scope — you can't
+    // record a payment against another office's order by supplying its id. The
+    // caller's Payment { officeId: '$office' } condition matches the order's
+    // officeId; a global cashier is unrestricted.
     const orderId = new Types.ObjectId(param.orderId);
-    const order = await this.orderModel.findById(orderId).populate<{
-      orderStatusId: OrderStatus;
-    }>({ model: OrderStatus.name, path: 'orderStatusId' });
+    const orderScope = scopeFilter(this.req.user.ability, 'CREATE', 'Payment');
+    const order = await this.orderModel
+      .findOne({ _id: orderId, ...orderScope })
+      .populate<{
+        orderStatusId: OrderStatus;
+      }>({ model: OrderStatus.name, path: 'orderStatusId' });
 
     if (!order) {
-      this.logger.error(`${base} invalid order id ${param.orderId}`);
-      throw new NotFoundException('Order not found');
+      this.logger.error(
+        `${base} invalid/out-of-scope order id ${param.orderId}`,
+      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Order not found',
+      });
     }
 
     // Check if order status allows payment (must be CONFIRMED or beyond)
@@ -148,18 +204,32 @@ export class PaymentService {
       throw new BadRequestException('Invalid payment type id');
     }
 
-    // Check if this is a refund
     const isRefund =
       paymentType.paymentTypeName === PaymentTypeEnum.REFUND.toString();
 
-    // Prevent refunds on orders with no prior payments
-    if (isRefund && order.amountPaid === 0) {
-      this.logger.error(
-        `${base} cannot refund payment on order ${order.orderCode} with no prior payments`,
-      );
-      throw new BadRequestException(
-        'Cannot refund payment on an order with no prior payments. First payment cannot be a refund.',
-      );
+    // Refunds are permissioned and can't precede any payment.
+    if (isRefund) {
+      this.can('manage', 'Payment');
+      if (order.amountPaid === 0) {
+        this.logger.error(
+          `${base} cannot refund order ${order.orderCode} with no prior payments`,
+        );
+        throw new BadRequestException({
+          code: 'REFUND_WITHOUT_PAYMENT',
+          message: 'Cannot refund an order with no prior payments',
+        });
+      }
+    }
+
+    // Idempotency: a retried request carrying the same x-idempotency-key must
+    // not double-count. Return the prior result instead of recording again.
+    const idempotencyKey = this.getIdempotencyKey();
+    if (idempotencyKey) {
+      const existing = await this.paymentModel.findOne({ idempotencyKey });
+      if (existing) {
+        this.logger.log(`${base} idempotent replay for key ${idempotencyKey}`);
+        return 'Payment already recorded';
+      }
     }
 
     const currency = await this.currencyModel.findOne({ isoCode: 'XAF' });
@@ -168,56 +238,81 @@ export class PaymentService {
       throw new NotFoundException('XAF currency not found');
     }
 
-    // Create payment
     const userId = new Types.ObjectId(this.req.user.userId);
-    const payment = new this.paymentModel({
-      orderId,
-      note: data.note,
-      paidAt: new Date(),
-      amount: data.amount,
-      currencyId: currency.id,
-      paymentTypeId: paymentTypeId,
-      paymentMethodId: paymentMethod._id,
-      transactionRef: data.transactionRef,
-    });
+    const delta = isRefund ? -data.amount : data.amount;
+    const newAmountPaid = order.amountPaid + delta;
+    const newBalanceDue = Math.max(0, order.totalAmount - newAmountPaid);
+    const paymentStatus = this.computePaymentStatus(
+      newAmountPaid,
+      order.totalAmount,
+    );
+    const flagged = this.computeFlagged(statusName, paymentStatus);
 
-    payment.$locals.changedBy = userId;
-    await payment.save();
+    // Record the payment and recompute the order's money in one transaction so a
+    // retry/crash can't leave them inconsistent.
+    let paymentId: Types.ObjectId | undefined;
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const [payment] = await this.paymentModel.create(
+          [
+            {
+              orderId,
+              customerId: order.customerId,
+              officeId: this.req.data.officeId,
+              note: data.note,
+              paidAt: new Date(),
+              amount: data.amount,
+              debtType: data.debtType ?? DebtTypeEnum.CURRENT,
+              currencyId: currency.id,
+              paymentTypeId,
+              paymentMethodId: paymentMethod._id,
+              transactionRef: data.transactionRef,
+              idempotencyKey,
+              receivedBy: userId,
+            },
+          ],
+          { session },
+        );
+        paymentId = payment._id;
 
-    // Update order payment tracking fields
-    const newAmountPaid = isRefund
-      ? order.amountPaid - data.amount
-      : order.amountPaid + data.amount;
-    const newBalanceDue = order.totalAmount - newAmountPaid;
-
-    // Determine payment status
-    let paymentStatusEnum: OrderPaymentStatusEnum;
-    if (newBalanceDue <= 0) {
-      paymentStatusEnum = OrderPaymentStatusEnum.PAID;
-    } else if (newAmountPaid > 0 && newBalanceDue > 0) {
-      paymentStatusEnum = OrderPaymentStatusEnum.PARTIAL;
-    } else {
-      paymentStatusEnum = OrderPaymentStatusEnum.UNPAID;
+        await this.orderModel.findOneAndUpdate(
+          { _id: orderId },
+          {
+            amountPaid: newAmountPaid,
+            balanceDue: newBalanceDue,
+            paymentStatus,
+            flagged,
+          },
+          { session, context: { changedBy: userId } } as never,
+        );
+      });
+    } finally {
+      await session.endSession();
     }
 
-    // Update order
-    await this.orderModel.findOneAndUpdate(
-      { _id: orderId },
-      {
-        amountPaid: newAmountPaid,
-        paymentStatus: paymentStatusEnum,
-        balanceDue: Math.max(0, newBalanceDue),
-      },
-      {
-        context: { changedBy: userId },
-        upsert: true,
-        returnDocument: 'after',
-      } as never,
-    );
+    // Emit after commit: payment.recorded always; order.paid when settled.
+    const recorded: PaymentRecordedEvent = {
+      paymentId: paymentId as Types.ObjectId,
+      orderId,
+      amount: data.amount,
+      isRefund,
+    };
+    this.eventEmitter.emit(PaymentEvents.recorded, recorded);
+    if (paymentStatus === OrderPaymentStatusEnum.PAID) {
+      const paid: OrderPaidEvent = { orderId, customerId: order.customerId };
+      this.eventEmitter.emit(OrderEvents.paid, paid);
+    }
 
     this.logger.log(
-      `${base} has successfully created payment for order ${order.orderCode}`,
+      `${base} recorded payment for order ${order.orderCode} (${paymentStatus})`,
     );
     return 'Payment created successfully';
+  }
+
+  /** The x-idempotency-key request header, if present. */
+  private getIdempotencyKey(): string | undefined {
+    const raw = this.req.headers['x-idempotency-key'];
+    return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
   }
 }

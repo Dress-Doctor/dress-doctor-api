@@ -35,6 +35,36 @@ export class Base {
   timestamp: Date;
 }
 
+class ApiErrorDetail {
+  @ApiProperty({
+    example: 'amount',
+    description: 'The request field the message applies to (dotted path)',
+  })
+  field: string;
+
+  @ApiProperty({
+    example: 'must be a positive integer',
+    description: 'Human-readable message for this field',
+  })
+  message: string;
+}
+
+class ApiErrorObject {
+  @ApiProperty({
+    example: 'VALIDATION_ERROR',
+    description: 'Stable machine error code (SCREAMING_SNAKE_CASE)',
+  })
+  code: string;
+
+  @ApiProperty({
+    required: false,
+    type: [ApiErrorDetail],
+    description:
+      'Per-field validation messages; present only for validation errors',
+  })
+  details?: ApiErrorDetail[];
+}
+
 export class ApiErrorResponse extends Base {
   @ApiProperty({
     required: true,
@@ -52,17 +82,18 @@ export class ApiErrorResponse extends Base {
 
   @ApiProperty({
     required: true,
-    example: 'Bad Request',
-    description: 'A message describing the error',
+    type: ApiErrorObject,
+    description:
+      'Error detail: a machine code and, for validation, per-field messages',
   })
-  error: string;
+  error: ApiErrorObject;
 
   @ApiProperty({
     required: true,
-    example: 'serverError',
-    description: 'Unique identifier for the error message',
+    example: 'Validation failed',
+    description: 'A human-readable message describing the error',
   })
-  errorCode: string;
+  message: string;
 }
 
 export class ApiSuccessResponse extends Base {

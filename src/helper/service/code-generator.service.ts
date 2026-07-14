@@ -4,6 +4,7 @@ import * as bcrypt from 'bcrypt';
 import { Chance } from 'chance';
 import * as crypto from 'crypto';
 import { Model } from 'mongoose';
+import { Office } from 'src/schema/office/office.schema';
 import { Order } from 'src/schema/order/order.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { Customer } from 'src/schema/user/customer.schema';
@@ -15,6 +16,7 @@ export class CodeGeneratorService {
   constructor(
     @InjectModel(Order.name) private readonly orderModel: Model<Order>,
     @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
+    @InjectModel(Office.name) private readonly officeModel: Model<Office>,
 
     @InjectModel(PickupRequest.name)
     private readonly pickupRequestModel: Model<PickupRequest>,
@@ -32,12 +34,26 @@ export class CodeGeneratorService {
     return prefix ? `${prefix}-${code}` : code;
   }
 
-  signOfficeLink(slug: string): string {
+  /**
+   * HMAC over `slug.exp` so office links expire — the expiry is part of the
+   * signed payload and can't be tampered with. `exp` is a unix-ms timestamp.
+   */
+  signOfficeLink(slug: string, exp: number): string {
+    const secret = process.env.DD_OFFICE_LINK_SECRET;
+    if (!secret) throw new Error('DD_OFFICE_LINK_SECRET is not configured');
     return crypto
-      .createHmac('sha256', process.env.DD_OFFICE_LINK_SECRET!)
-      .update(slug)
-      .digest('hex')
-      .slice(0, 12);
+      .createHmac('sha256', secret)
+      .update(`${slug}.${exp}`)
+      .digest('hex');
+  }
+
+  /** Constant-time verification of a signed office link. */
+  verifyOfficeLink(slug: string, exp: number, sig: string): boolean {
+    const expected = this.signOfficeLink(slug, exp);
+    const expectedBuf = Buffer.from(expected, 'utf8');
+    const sigBuf = Buffer.from(sig, 'utf8');
+    if (expectedBuf.length !== sigBuf.length) return false;
+    return crypto.timingSafeEqual(expectedBuf, sigBuf);
   }
 
   async generateReferralCode() {
@@ -47,6 +63,32 @@ export class CodeGeneratorService {
     do {
       code = this.generateCode(6);
       const doc = await this.customerModel.exists({ referralCode: code });
+      exists = doc ? true : false;
+    } while (exists);
+
+    return code;
+  }
+
+  async generateOfficeCode() {
+    let code: string;
+    let exists: boolean;
+
+    do {
+      code = this.generateCode(4, 'OF');
+      const doc = await this.officeModel.exists({ officeCode: code });
+      exists = doc ? true : false;
+    } while (exists);
+
+    return code;
+  }
+
+  async generateCustomerCode() {
+    let code: string;
+    let exists: boolean;
+
+    do {
+      code = this.generateCode(6, 'CU');
+      const doc = await this.customerModel.exists({ customerCode: code });
       exists = doc ? true : false;
     } while (exists);
 

@@ -92,7 +92,6 @@ export class OtpService {
       return;
     }
 
-    console.log('hello');
     state.verifyCoolDownLevel += 1;
     const coolDownMinutes = this.getCoolDownMinutes(state.verifyCoolDownLevel);
 

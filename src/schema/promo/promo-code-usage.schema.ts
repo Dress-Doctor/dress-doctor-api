@@ -16,9 +16,16 @@ export class PromoCodeUsage extends Document<Types.ObjectId> {
   @Prop({ required: true, type: Types.ObjectId, ref: Order.name })
   orderId: Types.ObjectId;
 
+  // Discount (XAF) this redemption actually applied — recorded so
+  // per-customer/total caps and reporting don't have to recompute it.
+  @Prop({ required: true, default: 0 })
+  discountApplied: number;
+
   @Prop({ required: true })
   useAt: Date;
 }
 
 export const PromoCodeUsageSchema =
   SchemaFactory.createForClass(PromoCodeUsage);
+PromoCodeUsageSchema.index({ promoCodeId: 1, userId: 1 });
+PromoCodeUsageSchema.index({ orderId: 1 });

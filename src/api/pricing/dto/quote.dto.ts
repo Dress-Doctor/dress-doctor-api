@@ -1,0 +1,89 @@
+import { ApiProperty } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import {
+  IsArray,
+  IsDefined,
+  IsEnum,
+  IsInt,
+  IsMongoId,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { PricingModelEnum } from 'src/schema/order/order.dto';
+
+export class QuoteLineDto {
+  @ApiProperty({ required: true, description: 'Catalog item id' })
+  @IsDefined({ message: 'itemId is required' })
+  @IsMongoId({ message: 'Invalid itemId' })
+  itemId: string;
+
+  @ApiProperty({ required: true, description: 'Service type id for this line' })
+  @IsDefined({ message: 'serviceTypeId is required' })
+  @IsMongoId({ message: 'Invalid serviceTypeId' })
+  serviceTypeId: string;
+
+  @ApiProperty({ required: true, example: 2 })
+  @IsDefined({ message: 'quantity is required' })
+  @IsInt({ message: 'quantity must be an integer' })
+  @Min(1, { message: 'quantity must be at least 1' })
+  quantity: number;
+}
+
+export class QuoteDto {
+  @ApiProperty({ required: true, enum: PricingModelEnum })
+  @IsDefined({ message: 'pricingModel is required' })
+  @IsEnum(PricingModelEnum, { message: 'Invalid pricingModel' })
+  pricingModel: PricingModelEnum;
+
+  @ApiProperty({
+    required: false,
+    description: 'Office id — omit for company-wide pricing',
+  })
+  @IsOptional()
+  @IsMongoId({ message: 'Invalid officeId' })
+  officeId?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Customer id — enables per-customer promo limits',
+  })
+  @IsOptional()
+  @IsMongoId({ message: 'Invalid customerId' })
+  customerId?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Total weight (kg) — required for PER_KG and SUBSCRIPTION',
+  })
+  @IsOptional()
+  @IsInt({ message: 'totalWeightKg must be an integer' })
+  @Min(0)
+  totalWeightKg?: number;
+
+  @ApiProperty({ required: false, description: 'Promo code to apply' })
+  @IsOptional()
+  @IsString()
+  promoCode?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Staff ad-hoc discount (XAF) — permissioned, not a promo',
+  })
+  @IsOptional()
+  @IsInt({ message: 'manualDiscount must be an integer (XAF)' })
+  @Min(0)
+  manualDiscount?: number;
+
+  @ApiProperty({
+    required: false,
+    type: [QuoteLineDto],
+    description: 'Garment lines (priced for PER_PIECE; QC-only otherwise)',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => QuoteLineDto)
+  items?: QuoteLineDto[];
+}

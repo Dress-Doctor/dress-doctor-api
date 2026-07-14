@@ -3,10 +3,12 @@ import { IsDefined, IsMongoId } from 'class-validator';
 import { CreateOrderItemDto, OrderParamsDto } from './create-order-item.dto';
 
 export class OrderItemParamsDto extends OrderParamsDto {
-  @ApiProperty({ required: true, description: 'Item id' })
-  @IsDefined({ message: 'itemId is required' })
-  @IsMongoId({ message: 'Invalid itemId' })
-  itemId: string;
+  // The order-item row's own id — NOT the catalog itemId. Per-garment rows mean
+  // several rows can share an itemId, so update/delete must target the row _id.
+  @ApiProperty({ required: true, description: 'Order-item row id' })
+  @IsDefined({ message: 'orderItemId is required' })
+  @IsMongoId({ message: 'Invalid orderItemId' })
+  orderItemId: string;
 }
 
 export class UpdateOrderItemDto extends PartialType(

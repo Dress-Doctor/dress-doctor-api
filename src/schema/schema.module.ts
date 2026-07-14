@@ -11,6 +11,8 @@ import { UserSchemaModule } from './user/user.module';
 import { OtpSchemaModule } from './otp/otp.module';
 import { CatalogSchemaModule } from './catalog/catalog.module';
 import { NotificationSchemaModule } from './notification/notification.module';
+import { SettingsSchemaModule } from './settings/settings.module';
+import { SubscriptionSchemaModule } from './subscription/subscription.module';
 
 @Global()
 @Module({
@@ -27,8 +29,10 @@ import { NotificationSchemaModule } from './notification/notification.module';
     PickupSchemaModule,
     CatalogSchemaModule,
     PaymentSchemaModule,
+    SettingsSchemaModule,
     AffiliateSchemaModule,
     NotificationSchemaModule,
+    SubscriptionSchemaModule,
   ],
   exports: [MongooseModule],
 })

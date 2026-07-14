@@ -1,30 +1,44 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
+import { scopeFilter } from 'src/helper/casl/casl-scope';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { Currency } from 'src/schema/catalog/currency.schema';
 import { Item } from 'src/schema/catalog/item.schema';
 import { OrderItem } from 'src/schema/order/order-item.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
-import { OrderStatusEnum } from 'src/schema/order/order.dto';
+import {
+  OrderItemConditionEnum,
+  OrderStatusEnum,
+  PricingModelEnum,
+} from 'src/schema/order/order.dto';
 import { Order } from 'src/schema/order/order.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { User } from 'src/schema/user/user.schema';
+import { Customer } from 'src/schema/user/customer.schema';
+import { PromoCode } from 'src/schema/promo/promo-code.schema';
+import { PromoCodeUsage } from 'src/schema/promo/promo-code-usage.schema';
+import { Subscription } from 'src/schema/subscription/subscription.schema';
+import { type PaginationDto } from 'src/dto/request-data.dto';
+import { PricingService } from '../pricing/pricing.service';
 import { CreateOrderItemDto } from './dto/create-order-item.dto';
 import {
   CreateOrderDto,
   CreateOrderWithPickupDto,
 } from './dto/create-order.dto';
+import { UpdateOrderDraftDto } from './dto/update-order-draft.dto';
 import { FindOrderDto } from './dto/find-order.dto';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { PickupStatusEnum } from 'src/schema/pickup/pickup.dto';
@@ -32,6 +46,37 @@ import {
   OrderItemParamsDto,
   UpdateOrderItemDto,
 } from './dto/update-order-item.dto';
+import {
+  OrderEvents,
+  type OrderCreatedEvent,
+  type OrderStatusChangedEvent,
+} from './order.events';
+
+/**
+ * Legal next-states per status. Any transition not listed here is rejected with
+ * INVALID_STATUS_TRANSITION. DELIVERED and CANCELLED are terminal.
+ */
+const LEGAL_TRANSITIONS: Record<OrderStatusEnum, OrderStatusEnum[]> = {
+  [OrderStatusEnum.DRAFT]: [
+    OrderStatusEnum.CONFIRMED,
+    OrderStatusEnum.CANCELLED,
+  ],
+  [OrderStatusEnum.CONFIRMED]: [
+    OrderStatusEnum.RECEIVED,
+    OrderStatusEnum.CANCELLED,
+  ],
+  [OrderStatusEnum.RECEIVED]: [
+    OrderStatusEnum.WASHING,
+    OrderStatusEnum.CANCELLED,
+  ],
+  [OrderStatusEnum.WASHING]: [OrderStatusEnum.READY, OrderStatusEnum.CANCELLED],
+  [OrderStatusEnum.READY]: [
+    OrderStatusEnum.DELIVERED,
+    OrderStatusEnum.CANCELLED,
+  ],
+  [OrderStatusEnum.DELIVERED]: [],
+  [OrderStatusEnum.CANCELLED]: [],
+};
 
 @Injectable()
 export class OrderService {
@@ -60,7 +105,189 @@ export class OrderService {
 
     @InjectModel(PickupStatus.name)
     private readonly pickupStatusModel: Model<PickupStatus>,
+
+    @InjectModel(Customer.name)
+    private readonly customerModel: Model<Customer>,
+
+    @InjectModel(PromoCode.name)
+    private readonly promoCodeModel: Model<PromoCode>,
+
+    @InjectModel(PromoCodeUsage.name)
+    private readonly promoUsageModel: Model<PromoCodeUsage>,
+
+    @InjectModel(Subscription.name)
+    private readonly subscriptionModel: Model<Subscription>,
+
+    private readonly pricingService: PricingService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * Recompute the order's price snapshot from its current inputs (items, weight,
+   * manual discount, promo) via the pricing engine and write it onto the order +
+   * its lines. PURE snapshot — NO side effects: it must never touch subscription
+   * remainingQuota or write PromoCodeUsage (those happen once, at confirm),
+   * otherwise repeated draft edits would over-decrement quota and burn promo
+   * uses. Called after every draft mutation so the snapshot never drifts.
+   */
+  private async reprice(orderId: Types.ObjectId, changedBy: Types.ObjectId) {
+    const order = await this.orderModel.findById(orderId);
+    if (!order) return;
+
+    const items = await this.orderItemModel.find({ orderId });
+    const pricing = await this.pricingService.priceOrder({
+      pricingModel: order.pricingModel,
+      officeId: this.req.data.officeId?.toString(),
+      customerId: order.customerId.toString(),
+      totalWeightKg: order.totalWeightKg,
+      promoCode: order.promoCode,
+      manualDiscount: order.manualDiscount,
+      items: items.map((i) => ({
+        itemId: i.itemId.toString(),
+        serviceTypeId: i.serviceTypeId.toString(),
+        quantity: i.quantity,
+      })),
+    });
+
+    // Snapshot resolved unitPrice/lineTotal onto each line (Per Piece prices;
+    // other models keep them at 0). Order of pricing.lines matches items.
+    await Promise.all(
+      items.map((item, idx) =>
+        this.orderItemModel.updateOne(
+          { _id: item._id },
+          {
+            unitPrice: pricing.lines[idx]?.unitPrice ?? 0,
+            lineTotal: pricing.lines[idx]?.lineTotal ?? 0,
+          },
+        ),
+      ),
+    );
+
+    const combinedDiscount = pricing.manualDiscount + pricing.promoDiscount;
+    await this.orderModel.findOneAndUpdate(
+      { _id: orderId },
+      {
+        orderAmount: pricing.subtotal,
+        manualDiscount: pricing.manualDiscount,
+        promoDiscount: pricing.promoDiscount,
+        discountAmount: combinedDiscount,
+        totalAmount: pricing.total,
+        promoCodeId: pricing.promoCodeId ?? null,
+        subscriptionId: pricing.subscriptionId ?? null,
+        quotaConsumedKg: pricing.quotaConsumedKg,
+        balanceDue: Math.max(0, pricing.total - order.amountPaid),
+      },
+      { context: { changedBy }, returnDocument: 'after' } as never,
+    );
+  }
+
+  /**
+   * Apply the one-time side effects of confirming an order: decrement the
+   * subscription's remainingQuota by the snapshotted quotaConsumedKg and record
+   * the promo redemption. Runs exactly once because the transition guard only
+   * permits DRAFT→CONFIRMED (a confirmed order can't be re-confirmed).
+   */
+  private async finalizeOnConfirm(order: Order) {
+    if (order.subscriptionId && order.quotaConsumedKg > 0) {
+      await this.subscriptionModel.updateOne(
+        { _id: order.subscriptionId },
+        { $inc: { remainingQuota: -order.quotaConsumedKg } },
+      );
+    }
+
+    if (order.promoCodeId) {
+      await this.promoUsageModel.create({
+        promoCodeId: order.promoCodeId,
+        userId: order.customerId,
+        orderId: order._id,
+        discountApplied: order.promoDiscount,
+        useAt: new Date(),
+      });
+      await this.promoCodeModel.updateOne(
+        { _id: order.promoCodeId },
+        { $inc: { usedCount: 1 } },
+      );
+    }
+  }
+
+  /** Update draft-only inputs (weight/manualDiscount/promo) and reprice. */
+  async updateOrderDraft(orderId: string, data: UpdateOrderDraftDto) {
+    this.can('UPDATE', 'Order');
+    const id = new Types.ObjectId(orderId);
+    const changedBy = new Types.ObjectId(this.req.user.userId);
+
+    const order = await this.orderModel
+      .findOne({ _id: id, ...this.orderScope('UPDATE') })
+      .populate<{ orderStatusId: OrderStatus }>({
+        model: OrderStatus.name,
+        path: 'orderStatusId',
+      });
+    if (!order) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Order not found',
+      });
+    }
+    const current = order.orderStatusId.orderStatusName as OrderStatusEnum;
+    if (current !== OrderStatusEnum.DRAFT) {
+      throw new BadRequestException({
+        code: 'ORDER_NOT_DRAFT',
+        message: 'Only draft orders can be edited',
+      });
+    }
+
+    // manualDiscount is permissioned separately from ordinary edits.
+    if (data.manualDiscount !== undefined) this.can('UPDATE', 'Payment');
+
+    const update: Record<string, unknown> = {};
+    if (data.totalWeightKg !== undefined)
+      update.totalWeightKg = data.totalWeightKg;
+    if (data.manualDiscount !== undefined)
+      update.manualDiscount = data.manualDiscount;
+    if (data.promoCode !== undefined) update.promoCode = data.promoCode;
+
+    await this.orderModel.updateOne({ _id: id }, update);
+    await this.reprice(id, changedBy);
+    return 'Order updated successfully';
+  }
+
+  /**
+   * On order creation: bump the customer's lastOrderAt rollup and emit
+   * order.created. totalOrders/totalSpend mature on order paid (§3.6).
+   */
+  private async onOrderCreated(
+    orderId: Types.ObjectId,
+    customerId: Types.ObjectId,
+    changedBy: Types.ObjectId,
+  ) {
+    await this.customerModel.findOneAndUpdate(
+      { userId: customerId },
+      { lastOrderAt: new Date() },
+      { context: { changedBy } } as never,
+    );
+
+    const event: OrderCreatedEvent = { orderId, customerId, changedBy };
+    this.eventEmitter.emit(OrderEvents.created, event);
+  }
+
+  async findFlagged({ page, size }: PaginationDto) {
+    this.can('READ', 'Order');
+
+    const where = { flagged: true };
+    const skip = (page - 1) * size;
+    const total = await this.orderModel.countDocuments(where);
+    const data = await this.orderModel
+      .find(where)
+      // Outstanding by amount, then oldest first.
+      .sort({ balanceDue: -1, createdAt: 1 })
+      .skip(skip)
+      .limit(size)
+      .populate({ model: OrderStatus.name, path: 'orderStatusId' });
+
+    const totalPages = Math.ceil(total / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+    return { total, data, nextPage };
+  }
 
   private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
     const platform = this.req.data.platform;
@@ -71,6 +298,15 @@ export class OrderService {
       this.logger.error(`[${platform}] ${phone} ${log} is`);
       throw new BadRequestException(`You are ${log}`);
     }
+  }
+
+  /**
+   * Office/self scope filter for by-id Order fetches — so a non-global staff
+   * user can't read/mutate another office's order by supplying its id (the
+   * record simply isn't found). OrderItem ops scope through their parent order.
+   */
+  private orderScope(action: CaslActionsDto): Record<string, unknown> {
+    return scopeFilter(this.req.user.ability, action, 'Order');
   }
 
   async createOrderWithPickup(data: CreateOrderWithPickupDto) {
@@ -106,6 +342,8 @@ export class OrderService {
       );
       throw new BadRequestException('Invalid pickup request id');
     }
+
+    this.assertWeightForModel(data.pricingModel, data.totalWeightKg);
 
     const orderStatusDraft = OrderStatusEnum.DRAFT;
     const orderStatus = await this.orderStatusModel.findOne({
@@ -143,22 +381,27 @@ export class OrderService {
       );
     }
 
-    await this.orderModel.findOneAndUpdate(
+    const userId = new Types.ObjectId(this.req.user.userId);
+    const created = (await this.orderModel.findOneAndUpdate(
       { customerId: customerId, pickupRequestId: pickupRequestId },
       {
         ...data,
         customerId,
         currencyId,
         pickupRequestId,
+        officeId: this.req.data.officeId,
         orderStatusId: orderStatus._id,
         orderCode: await this.codeService.generateOrderReference(),
       },
       {
-        context: { changedBy: new Types.ObjectId(this.req.user.userId) },
+        context: { changedBy: userId },
         upsert: true,
         returnDocument: 'after',
       } as never,
-    );
+    )) as unknown as Order;
+
+    await this.reprice(created._id, userId);
+    await this.onOrderCreated(created._id, customerId, userId);
 
     this.logger.log(
       `${base} has successfully created order for pickup request ${data.pickupRequestId}`,
@@ -187,6 +430,8 @@ export class OrderService {
       throw new BadRequestException('Invalid currency id');
     }
 
+    this.assertWeightForModel(data.pricingModel, data.totalWeightKg);
+
     const orderStatusDraft = OrderStatusEnum.DRAFT;
     const orderStatus = await this.orderStatusModel.findOne({
       orderStatusName: orderStatusDraft,
@@ -209,26 +454,41 @@ export class OrderService {
       throw new BadRequestException('A customer can only have one draft order');
     }
 
-    await this.orderModel.findOneAndUpdate(
+    const userId = new Types.ObjectId(this.req.user.userId);
+    const created = (await this.orderModel.findOneAndUpdate(
       { customerId, orderStatusId: orderStatus._id },
       {
         ...data,
         customerId,
         currencyId,
+        officeId: this.req.data.officeId,
         orderStatusId: orderStatus._id,
         orderCode: await this.codeService.generateOrderReference(),
       },
       {
-        context: { changedBy: new Types.ObjectId(this.req.user.userId) },
+        context: { changedBy: userId },
         upsert: true,
         returnDocument: 'after',
       } as never,
-    );
+    )) as unknown as Order;
+
+    await this.reprice(created._id, userId);
+    await this.onOrderCreated(created._id, customerId, userId);
 
     this.logger.log(
       `${base} has successfully created order for customer ${data.customerId}`,
     );
     return 'Order created successfully';
+  }
+
+  /** PER_KG needs a positive weight (else it silently prices to 0). */
+  private assertWeightForModel(model: PricingModelEnum, weight?: number) {
+    if (model === PricingModelEnum.PER_KG && (!weight || weight <= 0)) {
+      throw new BadRequestException({
+        code: 'WEIGHT_REQUIRED',
+        message: 'A total weight (kg) is required for Per KG pricing',
+      });
+    }
   }
 
   async findAll({ page, size, ...query }: FindOrderDto) {
@@ -253,11 +513,16 @@ export class OrderService {
     const orderCode = query.orderCode;
     if (orderCode) whereClause['orderCode'] = orderCode;
 
+    // Auto-scope: office staff see their office's orders; a customer sees only
+    // their own (via the seeded CASL conditions), enforced as a query filter.
+    const scope = scopeFilter(this.req.user.ability, 'READ', 'Order');
+    const match = { ...whereClause, ...scope };
+
     const skip = (page - 1) * size;
     const sort = this.appUtilService.parseSortParam(query.sort);
-    const total = await this.orderModel.countDocuments(whereClause);
+    const total = await this.orderModel.countDocuments(match);
     const data = await this.orderModel.aggregate([
-      { $match: whereClause },
+      { $match: match },
       { $sort: sort },
       { $skip: skip },
       { $limit: size },
@@ -356,10 +621,16 @@ export class OrderService {
     const { phone } = this.req.user;
     const base = `[${platform}] ${phone}`;
 
-    const order = await this.orderModel.findById(orderId);
+    const order = await this.orderModel.findOne({
+      _id: new Types.ObjectId(orderId),
+      ...this.orderScope('UPDATE'),
+    });
     if (!order) {
-      this.logger.error(`${base} invalid orderId ${orderId}`);
-      throw new BadRequestException('The order Id provided is invalid');
+      this.logger.error(`${base} invalid/out-of-scope orderId ${orderId}`);
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Order not found',
+      });
     }
 
     // lookup draft status
@@ -386,52 +657,25 @@ export class OrderService {
       throw new BadRequestException('The provided item Id is invalid');
     }
 
-    if (data.unitPrice < item.priceLow) {
-      this.logger.error(
-        `${base} unitPrice ${data.unitPrice} is lower than price low ${item.priceLow}`,
-      );
-      throw new BadRequestException(
-        `Unit price cannot be lower than the min price for ${item.itemName}`,
-      );
-    }
-
-    const orderItemExist = await this.orderItemModel.findOne({
+    const userId = new Types.ObjectId(this.req.user.userId);
+    // Per-garment row: the same item may appear multiple times in one order with
+    // different condition/colour, so we insert rather than upsert-by-(orderId,
+    // itemId). unitPrice/lineTotal are NOT taken from the client — reprice()
+    // resolves them server-side from the catalog and snapshots them.
+    const orderItem = new this.orderItemModel({
       itemId: item._id,
       orderId: order._id,
+      serviceTypeId: new Types.ObjectId(data.serviceTypeId),
+      quantity: data.quantity,
+      unitPrice: 0,
+      lineTotal: 0,
+      condition: data.condition ?? OrderItemConditionEnum.NORMAL,
+      colour: data.colour,
     });
-    if (orderItemExist) {
-      this.logger.error(`${base} ${item.itemName} already exist on oder`);
-      throw new BadRequestException(`${item.itemName} already exist on order`);
-    }
+    orderItem.$locals.changedBy = userId;
+    await orderItem.save();
 
-    const userId = new Types.ObjectId(this.req.user.userId);
-    await this.orderItemModel.findOneAndUpdate(
-      { itemId: item._id, orderId: order._id },
-      {
-        itemId: item._id,
-        orderId: order._id,
-        quantity: data.quantity,
-        unitPrice: data.unitPrice,
-      },
-      {
-        context: { changedBy: userId },
-        upsert: true,
-        returnDocument: 'after',
-      } as never,
-    );
-
-    const baseAmount = data.unitPrice * data.quantity;
-    const orderAmount = baseAmount + order.orderAmount;
-    const totalAmount = baseAmount + order.fee - order.discountAmount;
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderAmount, totalAmount },
-      {
-        context: { changedBy: userId },
-        upsert: true,
-        returnDocument: 'after',
-      } as never,
-    );
+    await this.reprice(order._id, userId);
 
     this.logger.log(
       `${base} has successfully created order item for order with code ${order.orderCode}`,
@@ -446,10 +690,18 @@ export class OrderService {
     const base = `[${platform}] ${phone}`;
 
     const orderId = new Types.ObjectId(params.orderId);
-    const order = await this.orderModel.findById(orderId);
+    const order = await this.orderModel.findOne({
+      _id: orderId,
+      ...this.orderScope('UPDATE'),
+    });
     if (!order) {
-      this.logger.error(`${base} invalid orderId ${params.orderId}`);
-      throw new BadRequestException('Invalid orderid');
+      this.logger.error(
+        `${base} invalid/out-of-scope orderId ${params.orderId}`,
+      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Order not found',
+      });
     }
 
     // lookup draft status
@@ -470,51 +722,38 @@ export class OrderService {
       );
     }
 
-    const itemId = new Types.ObjectId(params.itemId);
-    const item = await this.itemModel.findById(itemId);
-    if (!item) {
-      this.logger.error(`${base} invalid itemId ${params.itemId}`);
-      throw new BadRequestException('Invalid itemId');
-    }
-
-    const orderItem = await this.orderItemModel.findOne({ itemId, orderId });
+    // Target the specific per-garment row by its own id (not the catalog itemId,
+    // which several rows may share).
+    const orderItemId = new Types.ObjectId(params.orderItemId);
+    const orderItem = await this.orderItemModel.findOne({
+      _id: orderItemId,
+      orderId,
+    });
     if (!orderItem) {
       this.logger.error(
-        `${base} not record found for orderId ${params.orderId} and itemId ${params.itemId}`,
+        `${base} no order item ${params.orderItemId} on order ${params.orderId}`,
       );
-      throw new NotFoundException(
-        `${item.itemName} is not part of this order. Please refresh the list`,
-      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'This item is not part of this order. Please refresh the list',
+      });
     }
+
+    const update: Record<string, unknown> = { ...data };
+    if (data.serviceTypeId)
+      update.serviceTypeId = new Types.ObjectId(data.serviceTypeId);
 
     const userId = new Types.ObjectId(this.req.user.userId);
-    const updatedItem = (await this.orderItemModel.findOneAndUpdate(
-      { itemId, orderId },
-      data,
+    await this.orderItemModel.findOneAndUpdate(
+      { _id: orderItemId, orderId },
+      update,
       { context: { changedBy: userId }, returnDocument: 'after' } as never,
-    )) as unknown as OrderItem | null;
-
-    if (!updatedItem) {
-      throw new NotFoundException('Order item update failed');
-    }
-
-    const oldPrice = orderItem.unitPrice * orderItem.quantity;
-    const newPrice = updatedItem.unitPrice * updatedItem.quantity;
-
-    const orderAmount = order.orderAmount - oldPrice + newPrice;
-    const totalAmount = orderAmount + order.fee - order.discountAmount;
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderAmount, totalAmount },
-      {
-        context: { changedBy: userId },
-        upsert: true,
-        returnDocument: 'after',
-      } as never,
     );
 
-    this.logger.log(`${base} ${item.itemName} updated successfully`);
-    return `${item.itemName} updated successfully`;
+    await this.reprice(order._id, userId);
+
+    this.logger.log(`${base} order item ${params.orderItemId} updated`);
+    return 'Order item updated successfully';
   }
 
   async deleteOrderItem(params: OrderItemParamsDto) {
@@ -524,27 +763,34 @@ export class OrderService {
     const base = `[${platform}] ${phone}`;
 
     const orderId = new Types.ObjectId(params.orderId);
-    const order = await this.orderModel.findById(orderId);
+    const order = await this.orderModel.findOne({
+      _id: orderId,
+      ...this.orderScope('UPDATE'),
+    });
     if (!order) {
-      this.logger.error(`${base} invalid orderId ${params.orderId}`);
-      throw new BadRequestException('Invalid orderid');
+      this.logger.error(
+        `${base} invalid/out-of-scope orderId ${params.orderId}`,
+      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Order not found',
+      });
     }
 
-    const itemId = new Types.ObjectId(params.itemId);
-    const item = await this.itemModel.findById(itemId);
-    if (!item) {
-      this.logger.error(`${base} invalid itemId ${params.itemId}`);
-      throw new BadRequestException('Invalid itemId');
-    }
-
-    const orderItem = await this.orderItemModel.findOne({ itemId, orderId });
+    // Target the specific per-garment row by its own id.
+    const orderItemId = new Types.ObjectId(params.orderItemId);
+    const orderItem = await this.orderItemModel.findOne({
+      _id: orderItemId,
+      orderId,
+    });
     if (!orderItem) {
       this.logger.error(
-        `${base} not record found for orderId ${params.orderId} and itemId ${params.itemId}`,
+        `${base} no order item ${params.orderItemId} on order ${params.orderId}`,
       );
-      throw new NotFoundException(
-        `${item.itemName} is not part of this order. Please refresh the list`,
-      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'This item is not part of this order. Please refresh the list',
+      });
     }
 
     // lookup draft status
@@ -566,368 +812,174 @@ export class OrderService {
     }
 
     const userId = new Types.ObjectId(this.req.user.userId);
-    await this.orderItemModel.findOneAndDelete({ itemId, orderId }, {
+    await this.orderItemModel.findOneAndDelete({ _id: orderItemId, orderId }, {
       context: { changedBy: userId },
-      upsert: true,
       returnDocument: 'after',
     } as never);
 
-    const deletedPrice = orderItem.unitPrice * orderItem.quantity;
-    const orderAmount = order.orderAmount - deletedPrice;
-    const totalAmount = orderAmount + order.fee - order.discountAmount;
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderAmount, totalAmount },
-      {
-        context: { changedBy: userId },
-        upsert: true,
-        returnDocument: 'after',
-      } as never,
-    );
+    await this.reprice(order._id, userId);
 
     this.logger.log(
-      `${base} has successfully deleted order item for order with code ${order.orderCode}`,
+      `${base} deleted order item ${params.orderItemId} from ${order.orderCode}`,
     );
-    return `${item.itemName} deleted successfully`;
+    return 'Order item deleted successfully';
   }
 
-  async confirmOrder(orderId: string) {
-    this.can('CONFIRM', 'Order');
+  /**
+   * Single guarded status transition. Rejects any move not permitted by
+   * LEGAL_TRANSITIONS with INVALID_STATUS_TRANSITION, runs status-specific
+   * preconditions, mirrors the pickup side effects, and emits
+   * order.status_changed. All the per-action methods below delegate here.
+   */
+  private async transition(
+    orderId: string,
+    target: OrderStatusEnum,
+    action: CaslActionsDto = 'UPDATE',
+  ) {
+    this.can(action, 'Order');
     const platform = this.req.data.platform;
     const { phone } = this.req.user;
     const base = `[${platform}] ${phone}`;
 
-    const orderObjectId = new Types.ObjectId(orderId);
-    const order = await this.orderModel.findById(orderObjectId);
+    const order = await this.orderModel
+      .findOne({ _id: new Types.ObjectId(orderId), ...this.orderScope(action) })
+      .populate<{ orderStatusId: OrderStatus }>({
+        model: OrderStatus.name,
+        path: 'orderStatusId',
+      });
     if (!order) {
-      this.logger.error(`${base} invalid orderId ${orderId}`);
-      throw new NotFoundException('Order not found');
+      this.logger.error(`${base} invalid/out-of-scope orderId ${orderId}`);
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Order not found',
+      });
     }
 
-    // lookup draft status
-    const draftStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.DRAFT,
-    });
-    if (!draftStatus) {
-      this.logger.error(`${base} draft order status not found`);
-      throw new BadRequestException('Draft order status not configured');
-    }
-
-    if (order.orderStatusId.toString() !== draftStatus._id.toString()) {
+    const current = order.orderStatusId.orderStatusName as OrderStatusEnum;
+    if (!(LEGAL_TRANSITIONS[current] ?? []).includes(target)) {
       this.logger.error(
-        `${base} cannot confirm order ${order.orderCode} because it is not in DRAFT status`,
+        `${base} illegal transition ${current}->${target} for ${order.orderCode}`,
       );
-      throw new BadRequestException('Can only confirm orders in draft status');
+      throw new ConflictException({
+        code: 'INVALID_STATUS_TRANSITION',
+        message: `An order cannot move from ${current} to ${target}`,
+      });
     }
 
-    // ensure order has at least one item
-    const itemCount = await this.orderItemModel.countDocuments({
-      orderId: order._id,
-    });
-    if (!itemCount) {
-      this.logger.error(`${base} order ${order.orderCode} has no items`);
-      throw new BadRequestException(
-        'Order must contain at least one item before confirmation',
-      );
+    // Precondition: an order must have at least one item to be confirmed.
+    if (target === OrderStatusEnum.CONFIRMED) {
+      const itemCount = await this.orderItemModel.countDocuments({
+        orderId: order._id,
+      });
+      if (!itemCount) {
+        this.logger.error(`${base} order ${order.orderCode} has no items`);
+        throw new BadRequestException({
+          code: 'ORDER_EMPTY',
+          message: 'Order must contain at least one item before confirmation',
+        });
+      }
     }
 
-    // lookup pending status
-    const confirmedStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.CONFIRMED,
+    const targetStatus = await this.orderStatusModel.findOne({
+      orderStatusName: target,
     });
-    if (!confirmedStatus) {
-      this.logger.error(`${base} confirmed order status not found`);
-      throw new BadRequestException('Confirmed order status not configured');
+    if (!targetStatus) {
+      this.logger.error(`${base} ${target} order status not found`);
+      throw new BadRequestException(`${target} order status not configured`);
     }
 
     const userId = new Types.ObjectId(this.req.user.userId);
     await this.orderModel.findOneAndUpdate(
       { _id: order._id },
-      { orderStatusId: confirmedStatus._id },
+      { orderStatusId: targetStatus._id },
       { context: { changedBy: userId }, returnDocument: 'after' } as never,
     );
 
-    if (order.pickupRequestId) {
-      const pickedUpStatus = await this.pickupStatusModel.findOne({
-        pickupStatusName: PickupStatusEnum.PICKED_UP,
-      });
+    // One-time confirm side effects (quota decrement + promo usage). Safe from
+    // double-application: the guard only permits DRAFT→CONFIRMED once.
+    if (target === OrderStatusEnum.CONFIRMED) {
+      await this.finalizeOnConfirm(order as unknown as Order);
+    }
 
-      const assignStatus = await this.pickupStatusModel.findOne({
-        pickupStatusName: PickupStatusEnum.ASSIGNED,
-      });
+    await this.syncPickupOnTransition(order.pickupRequestId, target, userId);
+
+    const event: OrderStatusChangedEvent = {
+      orderId: order._id,
+      from: current,
+      to: target,
+      changedBy: userId,
+    };
+    this.eventEmitter.emit(OrderEvents.statusChanged, event);
+
+    this.logger.log(`${base} order ${order.orderCode} ${current}->${target}`);
+  }
+
+  /** Keep the linked pickup request in step with the order's lifecycle. */
+  private async syncPickupOnTransition(
+    pickupRequestId: Types.ObjectId | undefined,
+    target: OrderStatusEnum,
+    userId: Types.ObjectId,
+  ) {
+    if (!pickupRequestId) return;
+
+    if (target === OrderStatusEnum.CONFIRMED) {
+      const [pickedUp, assigned] = await Promise.all([
+        this.pickupStatusModel.findOne({
+          pickupStatusName: PickupStatusEnum.PICKED_UP,
+        }),
+        this.pickupStatusModel.findOne({
+          pickupStatusName: PickupStatusEnum.ASSIGNED,
+        }),
+      ]);
       await this.pickupRequestModel.findOneAndUpdate(
-        { _id: order.pickupRequestId, pickupStatusId: assignStatus?._id },
-        { pickupStatusId: pickedUpStatus?._id },
+        { _id: pickupRequestId, pickupStatusId: assigned?._id },
+        { pickupStatusId: pickedUp?._id },
         { context: { changedBy: userId }, returnDocument: 'after' } as never,
       );
+      return;
     }
 
-    this.logger.log(`${base} order ${order.orderCode} confirmed`);
-    return 'Order confirmed successfully';
-  }
-
-  async receiveOrder(orderId: string) {
-    this.can('UPDATE', 'Order');
-    const platform = this.req.data.platform;
-    const { phone } = this.req.user;
-    const base = `[${platform}] ${phone}`;
-
-    const orderObjectId = new Types.ObjectId(orderId);
-    const order = await this.orderModel.findById(orderObjectId);
-    if (!order) {
-      this.logger.error(`${base} invalid orderId ${orderId}`);
-      throw new NotFoundException('Order not found');
-    }
-
-    // only confirmed orders can be marked received
-    const confirmedStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.CONFIRMED,
-    });
-    if (!confirmedStatus) {
-      this.logger.error(`${base} confirmed order status not found`);
-      throw new BadRequestException('Confirmed order status not configured');
-    }
-
-    if (order.orderStatusId.toString() !== confirmedStatus._id.toString()) {
-      this.logger.error(
-        `${base} cannot mark order ${order.orderCode} as received because it is not in CONFIRMED status`,
-      );
-      throw new BadRequestException(
-        'Can only receive orders that are confirmed',
-      );
-    }
-
-    const receivedStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.RECEIVED,
-    });
-    if (!receivedStatus) {
-      this.logger.error(`${base} received order status not found`);
-      throw new BadRequestException('Received order status not configured');
-    }
-
-    const userId = new Types.ObjectId(this.req.user.userId);
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderStatusId: receivedStatus._id },
-      { context: { changedBy: userId }, returnDocument: 'after' } as never,
-    );
-
-    this.logger.log(`${base} order ${order.orderCode} marked received`);
-    return 'Order received successfully';
-  }
-
-  async washOrder(orderId: string) {
-    this.can('UPDATE', 'Order');
-    const platform = this.req.data.platform;
-    const { phone } = this.req.user;
-    const base = `[${platform}] ${phone}`;
-
-    const orderObjectId = new Types.ObjectId(orderId);
-    const order = await this.orderModel.findById(orderObjectId);
-    if (!order) {
-      this.logger.error(`${base} invalid orderId ${orderId}`);
-      throw new NotFoundException('Order not found');
-    }
-
-    // only received orders can be moved to washing
-    const receivedStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.RECEIVED,
-    });
-    if (!receivedStatus) {
-      this.logger.error(`${base} received order status not found`);
-      throw new BadRequestException('Received order status not configured');
-    }
-
-    if (order.orderStatusId.toString() !== receivedStatus._id.toString()) {
-      this.logger.error(
-        `${base} cannot mark order ${order.orderCode} as washing because it is not in RECEIVED status`,
-      );
-      throw new BadRequestException(
-        'Can only wash orders that have been received',
-      );
-    }
-
-    const washingStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.WASHING,
-    });
-    if (!washingStatus) {
-      this.logger.error(`${base} washing order status not found`);
-      throw new BadRequestException('Washing order status not configured');
-    }
-
-    const userId = new Types.ObjectId(this.req.user.userId);
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderStatusId: washingStatus._id },
-      { context: { changedBy: userId }, returnDocument: 'after' } as never,
-    );
-
-    this.logger.log(`${base} order ${order.orderCode} marked washing`);
-    return 'Order is now being washed';
-  }
-
-  async readyOrder(orderId: string) {
-    this.can('UPDATE', 'Order');
-    const platform = this.req.data.platform;
-    const { phone } = this.req.user;
-    const base = `[${platform}] ${phone}`;
-
-    const orderObjectId = new Types.ObjectId(orderId);
-    const order = await this.orderModel.findById(orderObjectId);
-    if (!order) {
-      this.logger.error(`${base} invalid orderId ${orderId}`);
-      throw new NotFoundException('Order not found');
-    }
-
-    // only washing orders can be moved to ready
-    const washingStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.WASHING,
-    });
-    if (!washingStatus) {
-      this.logger.error(`${base} washing order status not found`);
-      throw new BadRequestException('Washing order status not configured');
-    }
-
-    if (order.orderStatusId.toString() !== washingStatus._id.toString()) {
-      this.logger.error(
-        `${base} cannot mark order ${order.orderCode} as ready because it is not in WASHING status`,
-      );
-      throw new BadRequestException(
-        'Can only mark orders as ready when washing',
-      );
-    }
-
-    const readyStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.READY,
-    });
-    if (!readyStatus) {
-      this.logger.error(`${base} ready order status not found`);
-      throw new BadRequestException('Ready order status not configured');
-    }
-
-    const userId = new Types.ObjectId(this.req.user.userId);
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderStatusId: readyStatus._id },
-      { context: { changedBy: userId }, returnDocument: 'after' } as never,
-    );
-
-    this.logger.log(`${base} order ${order.orderCode} marked ready`);
-    return 'Order is ready for delivery';
-  }
-
-  async deliverOrder(orderId: string) {
-    this.can('UPDATE', 'Order');
-    const platform = this.req.data.platform;
-    const { phone } = this.req.user;
-    const base = `[${platform}] ${phone}`;
-
-    const orderObjectId = new Types.ObjectId(orderId);
-    const order = await this.orderModel.findById(orderObjectId);
-    if (!order) {
-      this.logger.error(`${base} invalid orderId ${orderId}`);
-      throw new NotFoundException('Order not found');
-    }
-
-    // only ready orders can be delivered
-    const readyStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.READY,
-    });
-    if (!readyStatus) {
-      this.logger.error(`${base} ready order status not found`);
-      throw new BadRequestException('Ready order status not configured');
-    }
-
-    if (order.orderStatusId.toString() !== readyStatus._id.toString()) {
-      this.logger.error(
-        `${base} cannot mark order ${order.orderCode} as delivered because it is not in READY status`,
-      );
-      throw new BadRequestException('Can only deliver orders that are ready');
-    }
-
-    const deliveredStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.DELIVERED,
-    });
-    if (!deliveredStatus) {
-      this.logger.error(`${base} delivered order status not found`);
-      throw new BadRequestException('Delivered order status not configured');
-    }
-
-    const userId = new Types.ObjectId(this.req.user.userId);
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderStatusId: deliveredStatus._id },
-      { context: { changedBy: userId }, returnDocument: 'after' } as never,
-    );
-
-    this.logger.log(`${base} order ${order.orderCode} marked delivered`);
-    return 'Order delivered successfully';
-  }
-
-  async cancelOrder(orderId: string) {
-    this.can('UPDATE', 'Order');
-    const platform = this.req.data.platform;
-    const { phone } = this.req.user;
-    const base = `[${platform}] ${phone}`;
-
-    const orderObjectId = new Types.ObjectId(orderId);
-    const order = await this.orderModel.findById(orderObjectId);
-    if (!order) {
-      this.logger.error(`${base} invalid orderId ${orderId}`);
-      throw new NotFoundException('Order not found');
-    }
-
-    const cancelledStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.CANCELLED,
-    });
-    if (!cancelledStatus) {
-      this.logger.error(`${base} cancelled order status not found`);
-      throw new BadRequestException('Cancelled order status not configured');
-    }
-
-    // disallow cancelling delivered or already cancelled orders
-    if (order.orderStatusId.toString() === cancelledStatus._id.toString()) {
-      this.logger.error(
-        `${base} order ${order.orderCode} is already cancelled`,
-      );
-      throw new BadRequestException('Order is already cancelled');
-    }
-
-    const deliveredStatus = await this.orderStatusModel.findOne({
-      orderStatusName: OrderStatusEnum.DELIVERED,
-    });
-    if (
-      deliveredStatus &&
-      order.orderStatusId.toString() === deliveredStatus._id.toString()
-    ) {
-      this.logger.error(
-        `${base} cannot cancel delivered order ${order.orderCode}`,
-      );
-      throw new BadRequestException('Cannot cancel a delivered order');
-    }
-
-    const userId = new Types.ObjectId(this.req.user.userId);
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderStatusId: cancelledStatus._id },
-      { context: { changedBy: userId }, returnDocument: 'after' } as never,
-    );
-
-    if (order.pickupRequestId) {
-      // optionally update pickup request to cancelled if still assigned or picked up
-      const cancelledPickup = await this.pickupStatusModel.findOne({
+    if (target === OrderStatusEnum.CANCELLED) {
+      const cancelled = await this.pickupStatusModel.findOne({
         pickupStatusName: PickupStatusEnum.CANCELLED,
       });
-      if (cancelledPickup) {
+      if (cancelled) {
         await this.pickupRequestModel.findOneAndUpdate(
-          { _id: order.pickupRequestId },
-          { pickupStatusId: cancelledPickup._id },
+          { _id: pickupRequestId },
+          { pickupStatusId: cancelled._id },
           { context: { changedBy: userId }, returnDocument: 'after' } as never,
         );
       }
     }
+  }
 
-    this.logger.log(`${base} order ${order.orderCode} cancelled`);
+  async confirmOrder(orderId: string) {
+    await this.transition(orderId, OrderStatusEnum.CONFIRMED, 'CONFIRM');
+    return 'Order confirmed successfully';
+  }
+
+  async receiveOrder(orderId: string) {
+    await this.transition(orderId, OrderStatusEnum.RECEIVED);
+    return 'Order received successfully';
+  }
+
+  async washOrder(orderId: string) {
+    await this.transition(orderId, OrderStatusEnum.WASHING);
+    return 'Order is now being washed';
+  }
+
+  async readyOrder(orderId: string) {
+    await this.transition(orderId, OrderStatusEnum.READY);
+    return 'Order is ready for delivery';
+  }
+
+  async deliverOrder(orderId: string) {
+    await this.transition(orderId, OrderStatusEnum.DELIVERED);
+    return 'Order delivered successfully';
+  }
+
+  async cancelOrder(orderId: string) {
+    await this.transition(orderId, OrderStatusEnum.CANCELLED);
     return 'Order cancelled successfully';
   }
 }

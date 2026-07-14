@@ -4,6 +4,7 @@ import { Category, CategorySchema } from './category.schema';
 import { SubCategory, SubCategorySchema } from './sub-category.schema';
 import { Currency, CurrencySchema } from './currency.schema';
 import { Item, ItemSchema } from './item.schema';
+import { Price, PriceSchema } from './price.schema';
 import { Service, ServiceSchema } from './service.schema';
 import { ServiceType, ServiceTypeSchema } from './service-type.schema';
 import { ItemHistory, ItemHistorySchema } from './item-history.schema';
@@ -34,6 +35,7 @@ import {
       },
     ]),
     MongooseModule.forFeature([
+      { name: Price.name, schema: PriceSchema },
       { name: Service.name, schema: ServiceSchema },
       { name: Category.name, schema: CategorySchema },
       { name: Currency.name, schema: CurrencySchema },

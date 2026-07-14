@@ -30,6 +30,14 @@ export class AppUtilService {
   }
 
   /**
+   * Escapes regex metacharacters in a user-supplied string so it can be used as
+   * a literal inside a `RegExp` (e.g. free-text search) without injection.
+   */
+  escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /**
    * Replaces placeholders in the given template string with corresponding values from the provided data object.
    *
    * Placeholders in the template should be in the format `{key}`. If a key exists in the data object,
