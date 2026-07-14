@@ -13,12 +13,14 @@ import { Connection, ConnectionStates } from 'mongoose';
 import { Public } from 'src/helper/decorator/public.decorator';
 import { SkipApiKeyCheck } from 'src/helper/decorator/skip-api-key.decorator';
 import { Queues } from 'src/queue/queue.dto';
+import { MetricsService } from './metrics.service';
 
 @Controller({ version: VERSION_NEUTRAL })
 export class HealthController {
   constructor(
     @InjectConnection() private readonly connection: Connection,
     @InjectQueue(Queues.notification) private readonly queue: Queue,
+    private readonly metricsService: MetricsService,
   ) {}
 
   @Public()
@@ -54,5 +56,15 @@ export class HealthController {
     }
 
     return { status: 'ok', mongo: mongoUp, redis: redisUp };
+  }
+
+  // §2.6 observability: queue depths/outcomes, failed-set sizes, cron last-run
+  // age, provider counters, and an alerts[] a monitor can string-match on.
+  @Public()
+  @SkipApiKeyCheck()
+  @Get('metrics')
+  @HttpCode(HttpStatus.OK)
+  async metrics() {
+    return this.metricsService.snapshot();
   }
 }
