@@ -13,6 +13,7 @@ import { CatalogSchemaModule } from './catalog/catalog.module';
 import { NotificationSchemaModule } from './notification/notification.module';
 import { SettingsSchemaModule } from './settings/settings.module';
 import { SubscriptionSchemaModule } from './subscription/subscription.module';
+import { JobRunSchemaModule } from './job-run/job-run.module';
 
 @Global()
 @Module({
@@ -33,6 +34,7 @@ import { SubscriptionSchemaModule } from './subscription/subscription.module';
     AffiliateSchemaModule,
     NotificationSchemaModule,
     SubscriptionSchemaModule,
+    JobRunSchemaModule,
   ],
   exports: [MongooseModule],
 })
