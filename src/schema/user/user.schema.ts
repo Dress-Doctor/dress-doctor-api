@@ -11,7 +11,9 @@ export class User extends Document<Types.ObjectId> {
   @Prop({ required: false })
   lastName: string;
 
-  @Prop({ required: false, unique: true })
+  // Sparse: email is optional (customers), so multiple users without an email
+  // must not collide on a null unique key.
+  @Prop({ required: false, unique: true, sparse: true })
   email?: string;
 
   @Prop({ required: true, unique: true, index: true })
