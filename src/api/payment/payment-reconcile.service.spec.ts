@@ -20,10 +20,19 @@ type OrderRow = {
   orderStatusId: { orderStatusName: string };
 };
 
+// The exact shape the reconcile writes — typing the mock with it keeps the
+// assertions on mock.calls type-safe.
+type ReconcileUpdate = {
+  $set: { paymentStatus: OrderPaymentStatusEnum; flagged: boolean };
+};
+
 describe('PaymentReconcileService', () => {
   let service: PaymentReconcileService;
   let orders: Map<string, OrderRow>;
-  let updateOne: jest.Mock;
+  let updateOne: jest.Mock<
+    Promise<{ modifiedCount: number }>,
+    [{ _id: Types.ObjectId }, ReconcileUpdate]
+  >;
   let distinct: jest.Mock;
 
   const buildOrder = (over: Partial<OrderRow> = {}): OrderRow => ({
@@ -42,7 +51,10 @@ describe('PaymentReconcileService', () => {
   };
 
   beforeEach(async () => {
-    updateOne = jest.fn().mockResolvedValue({ modifiedCount: 1 });
+    updateOne = jest.fn<
+      Promise<{ modifiedCount: number }>,
+      [{ _id: Types.ObjectId }, ReconcileUpdate]
+    >(() => Promise.resolve({ modifiedCount: 1 }));
     distinct = jest.fn();
 
     const orderModel = {
@@ -74,10 +86,7 @@ describe('PaymentReconcileService', () => {
       computePaymentStatus(order.amountPaid, order.totalAmount),
     );
     expect(order.flagged).toBe(
-      computeFlagged(
-        order.orderStatusId.orderStatusName,
-        order.paymentStatus,
-      ),
+      computeFlagged(order.orderStatusId.orderStatusName, order.paymentStatus),
     );
     seed([order]);
 

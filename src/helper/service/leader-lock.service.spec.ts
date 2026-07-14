@@ -1,7 +1,4 @@
-import {
-  LeaderLockService,
-  LeaderLockRedis,
-} from './leader-lock.service';
+import { LeaderLockService, LeaderLockRedis } from './leader-lock.service';
 
 // In-memory Redis honouring exactly the ops the lock uses: SET NX PX and the
 // compare-and-delete release eval. Shared by two service instances to model two
@@ -24,8 +21,9 @@ class FakeRedis implements LeaderLockRedis {
     value: string,
     _mode: 'PX',
     ttlMs: number,
-    _cond: 'NX',
+    cond: 'NX',
   ): Promise<'OK' | null> {
+    if (cond !== 'NX') throw new Error('FakeRedis only supports NX');
     if (this.live(key)) return Promise.resolve(null); // NX: already held
     this.store.set(key, { value, expireAt: Date.now() + ttlMs });
     return Promise.resolve('OK');
