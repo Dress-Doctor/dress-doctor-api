@@ -75,7 +75,7 @@ export class HTTPExceptionFilter implements ExceptionFilter {
     }
 
     // Never leak internals on a 500 — mask message, drop code specifics + details.
-    if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
+    if (status === (HttpStatus.INTERNAL_SERVER_ERROR as number)) {
       this.logger.error(
         exception instanceof Error ? exception.message : constant.SERVER_ERROR,
         exception instanceof Error ? exception.stack : undefined,

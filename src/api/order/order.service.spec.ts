@@ -201,9 +201,11 @@ describe('OrderService', () => {
       const msg = await service.cancelOrder('507f1f77bcf86cd799439011');
       expect(msg).toBe('Order cancelled successfully');
       // By-id fetch is a scoped findOne({ _id, ...scope }), not findById.
-      expect(orderModel.findOne).toHaveBeenCalledWith(
-        expect.objectContaining({ _id: expect.anything() }),
-      );
+      expect(orderModel.findOne).toHaveBeenCalledTimes(1);
+      const [findFilter] = orderModel.findOne.mock.calls[0] as [
+        Record<string, unknown>,
+      ];
+      expect(findFilter).toHaveProperty('_id');
       expect(orderModel.findById).not.toHaveBeenCalled();
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         OrderEvents.statusChanged,
@@ -294,12 +296,19 @@ describe('OrderService', () => {
       });
 
       expect(pricingService.priceOrder).toHaveBeenCalled();
-      const update = orderModel.findOneAndUpdate.mock.calls.at(-1)?.[1] as {
-        orderAmount: number;
-        promoDiscount: number;
-        totalAmount: number;
-        discountAmount: number;
-      };
+      const updateCalls = orderModel.findOneAndUpdate.mock
+        .calls as unknown as Array<
+        [
+          unknown,
+          {
+            orderAmount: number;
+            promoDiscount: number;
+            totalAmount: number;
+            discountAmount: number;
+          },
+        ]
+      >;
+      const update = updateCalls[updateCalls.length - 1][1];
       expect(update.orderAmount).toBe(4000);
       expect(update.promoDiscount).toBe(500);
       expect(update.totalAmount).toBe(2500);
