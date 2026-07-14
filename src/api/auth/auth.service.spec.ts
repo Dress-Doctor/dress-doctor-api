@@ -35,6 +35,7 @@ describe('AuthService', () => {
     create: jest.Mock;
     findOne: jest.Mock;
     updateOne: jest.Mock;
+    updateMany: jest.Mock;
   };
 
   const buildUser = (over: Partial<MockUser> = {}): MockUser => ({
@@ -60,6 +61,7 @@ describe('AuthService', () => {
       create: jest.fn().mockResolvedValue(undefined),
       findOne: jest.fn(),
       updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
+      updateMany: jest.fn().mockResolvedValue({ modifiedCount: 2 }),
     };
     otpService = {
       requestOtp: jest.fn().mockResolvedValue({
@@ -295,7 +297,7 @@ describe('AuthService', () => {
       expect(stored.save).toHaveBeenCalled();
     });
 
-    it('rejects a revoked token', async () => {
+    it('rejects a revoked token AND revokes the user live chain (reuse detection)', async () => {
       const stored = validStored();
       stored.revokedAt = new Date();
       refreshTokenModel.findOne.mockResolvedValue(stored);
@@ -303,6 +305,15 @@ describe('AuthService', () => {
       await expect(
         service.refresh({ refreshToken: 'raw-token' }),
       ).rejects.toThrow(UnauthorizedException);
+
+      // Breach response: nuke all of the user's still-live refresh tokens.
+      expect(refreshTokenModel.updateMany).toHaveBeenCalledTimes(1);
+      const [filter, update] = refreshTokenModel.updateMany.mock.calls[0] as [
+        { revokedAt: { $exists: boolean } },
+        { revokedAt: Date },
+      ];
+      expect(filter.revokedAt).toEqual({ $exists: false });
+      expect(update.revokedAt).toBeInstanceOf(Date);
     });
 
     it('rejects an expired token', async () => {
