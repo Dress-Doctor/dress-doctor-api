@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-require-imports */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-require-imports */
 import {
   INestApplication,
   RequestMethod,
@@ -156,5 +156,199 @@ describe('HTTP contract (e2e)', () => {
     // list contract: total + data + nextPage
     expect(res.body.data).toBeDefined();
     expect(res.body).toHaveProperty('total');
+  });
+
+  // Admin-authed request helper.
+  const auth = (r: request.Test) =>
+    r.set(apiHeaders).set('Authorization', `Bearer ${adminToken}`);
+  const tomorrow = () => new Date(Date.now() + 86_400_000).toISOString();
+  const model = (name: string) => app.get(getModelToken(name));
+
+  describe('order → payment → flag (full lifecycle over HTTP)', () => {
+    let orderId: string;
+    let currencyId: string;
+    let itemId: string;
+    let serviceTypeId: string;
+    let methodId: string;
+    let typeId: string;
+    let customerId: string;
+
+    beforeAll(async () => {
+      currencyId = (
+        await model('Currency').findOne({ isoCode: 'XAF' })
+      )._id.toString();
+      itemId = (await model('Item').findOne({}))._id.toString();
+      serviceTypeId = (await model('ServiceType').findOne({}))._id.toString();
+      methodId = (await model('PaymentMethod').findOne({}))._id.toString();
+      typeId = (
+        await model('PaymentType').findOne({ paymentTypeName: 'PAYMENT' })
+      )._id.toString();
+      const customerType = await model('UserType').findOne({
+        userTypeName: 'CUSTOMER',
+      });
+      const customer = await model('User').create({
+        firstName: 'Flow',
+        lastName: 'Customer',
+        phone: '611111111',
+        whatsappPhone: '611111111',
+        userTypeId: customerType._id,
+      });
+      customerId = customer._id.toString();
+    });
+
+    it('creates → items → confirm → ready → partial payment → flagged', async () => {
+      // PER_KG so the price is weight × perKgRate (no catalog Price row needed).
+      await auth(request(app.getHttpServer()).post('/api/v1/order'))
+        .send({
+          customerId,
+          currencyId,
+          pricingModel: 'PER_KG',
+          totalWeightKg: 5,
+          estimatedDeliveryDate: tomorrow(),
+        })
+        .expect(201);
+
+      const order = await model('Order')
+        .findOne({ customerId: new Types.ObjectId(customerId) })
+        .sort({ createdAt: -1 });
+      orderId = order._id.toString();
+      expect(order.totalAmount).toBe(5000); // 5kg × 1000 XAF/kg
+
+      // A garment row (QC), then walk the lifecycle to READY.
+      await auth(
+        request(app.getHttpServer()).post(`/api/v1/order/${orderId}/items`),
+      )
+        .send({ itemId, serviceTypeId, quantity: 1 })
+        .expect(201);
+
+      for (const step of ['confirm', 'received', 'washing', 'ready']) {
+        await auth(
+          request(app.getHttpServer()).post(`/api/v1/order/${orderId}/${step}`),
+        ).expect(200);
+      }
+
+      // Partial payment on a READY order → flagged, PARTIAL.
+      await auth(
+        request(app.getHttpServer()).post(`/api/v1/order/${orderId}/payment`),
+      )
+        .send({
+          paymentMethodId: methodId,
+          paymentTypeId: typeId,
+          amount: 2000,
+        })
+        .expect(201);
+
+      const flagged = await model('Order').findById(orderId);
+      expect(flagged.paymentStatus).toBe('PARTIAL');
+      expect(flagged.flagged).toBe(true);
+      expect(flagged.amountPaid).toBe(2000);
+
+      const res = await auth(
+        request(app.getHttpServer()).get('/api/v1/order/flagged'),
+      ).expect(200);
+      expect(res.body.success).toBe(true);
+      expect(
+        res.body.data.some((o: { _id: string }) => o._id === orderId),
+      ).toBe(true);
+    });
+
+    it('payment is idempotent (same x-idempotency-key → one payment)', async () => {
+      const key = 'e2e-idem-key-1';
+      const pay = () =>
+        auth(
+          request(app.getHttpServer()).post(`/api/v1/order/${orderId}/payment`),
+        )
+          .set('x-idempotency-key', key)
+          .send({
+            paymentMethodId: methodId,
+            paymentTypeId: typeId,
+            amount: 500,
+          });
+
+      await pay().expect(201);
+      await pay().expect(201); // replay — must not double-count
+
+      const count = await model('Payment').countDocuments({
+        orderId: new Types.ObjectId(orderId),
+        idempotencyKey: key,
+      });
+      expect(count).toBe(1);
+    });
+  });
+
+  describe('by-id office scoping over HTTP', () => {
+    let scopedToken: string;
+    let orderBId: string;
+
+    beforeAll(async () => {
+      const [officeA, officeB] = await model('Office').find({}).limit(2);
+      const draft = await model('OrderStatus').findOne({
+        orderStatusName: 'DRAFT',
+      });
+      const staffType = await model('UserType').findOne({
+        userTypeName: 'ADMIN',
+      });
+      const officeManager = await model('Role').findOne({
+        roleName: 'Office Manager',
+      });
+
+      // Staff scoped to office A (Office Manager → { officeId: '$office' }).
+      const staff = await model('User').create({
+        firstName: 'Scoped',
+        lastName: 'Staff',
+        phone: '622222222',
+        whatsappPhone: '622222222',
+        userTypeId: staffType._id,
+      });
+      await model('UserRole').create({
+        userId: staff._id,
+        roleId: officeManager._id,
+      });
+      scopedToken = await app.get(JwtService).signAsync({
+        sub: staff._id.toString(),
+        phone: staff.phone,
+        userType: 'ADMIN',
+        office: officeA._id.toString(),
+      });
+
+      // An order that belongs to office B.
+      const orderB = await model('Order').create({
+        customerId: new Types.ObjectId(),
+        currencyId: new Types.ObjectId(),
+        officeId: officeB._id,
+        orderCode: 'OR-E2E-B',
+        pricingModel: 'PER_KG',
+        estimatedDeliveryDate: new Date(),
+        orderStatusId: draft._id,
+      });
+      orderBId = orderB._id.toString();
+    });
+
+    const scoped = (r: request.Test) =>
+      r.set(apiHeaders).set('Authorization', `Bearer ${scopedToken}`);
+
+    it("office-A staff cannot PATCH office B's order (404, not a leak)", async () => {
+      await scoped(
+        request(app.getHttpServer()).patch(`/api/v1/order/${orderBId}`),
+      )
+        .send({ totalWeightKg: 3 })
+        .expect(404);
+    });
+
+    it('office-A staff cannot pay an out-of-scope order (404)', async () => {
+      const method = await model('PaymentMethod').findOne({});
+      const type = await model('PaymentType').findOne({
+        paymentTypeName: 'PAYMENT',
+      });
+      await scoped(
+        request(app.getHttpServer()).post(`/api/v1/order/${orderBId}/payment`),
+      )
+        .send({
+          paymentMethodId: method._id.toString(),
+          paymentTypeId: type._id.toString(),
+          amount: 500,
+        })
+        .expect(404);
+    });
   });
 });
