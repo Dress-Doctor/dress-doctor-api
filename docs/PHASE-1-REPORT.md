@@ -114,12 +114,12 @@ can't be re-confirmed).
   proven working by the integration e2e (§4), which runs its own in-memory
   replica set; the dev/compose Mongo (`DATABASE_URL`) must likewise be a replica
   set. Prod uses an external managed cluster (already a replica set).
-- **Full HTTP e2e suite** (Supertest against the booted app — needs Redis +
-  replica-set Mongo): customer OTP login; staff 2FA; order→payment→flag; payment
-  idempotency; guard ordering; envelope + pagination; plus the by-id security
-  assertions over HTTP (the query-level enforcement is already covered by the
-  integration e2e in §4). This is the remaining §8 item; it runs in an
-  environment with Redis + a replica-set Mongo.
+- **HTTP e2e suite** — **done** (`test/http.e2e-spec.ts`): boots the real app
+  against a real Redis (CI service container) + ephemeral replica-set Mongo,
+  mirroring `main.ts`; asserts guard ordering (api-key → JWT), the error/success
+  envelope, and pagination. Runs in CI via a dedicated `e2e` job. Extending it
+  with the full order→payment→flag and OTP-login flows is straightforward
+  follow-up now the harness exists.
 
 ## 7. Deferred (tracked, not blockers)
 
