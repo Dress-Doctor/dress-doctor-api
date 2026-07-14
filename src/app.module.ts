@@ -26,6 +26,7 @@ import { UtilModule } from './api/util/util.module';
 import { UserModule } from './api/user/user.module';
 import { CustomerModule } from './api/customer/customer.module';
 import { OfficeModule } from './api/office/office.module';
+import { WebhookModule } from './api/webhook/webhook.module';
 import { PricingModule } from './api/pricing/pricing.module';
 import { OrderModule } from './api/order/order.module';
 import { PaymentModule } from './api/payment/payment.module';
@@ -48,6 +49,7 @@ import { envValidationSchema } from './config/env.validation';
     UserModule,
     CustomerModule,
     OfficeModule,
+    WebhookModule,
     PricingModule,
     OrderModule,
     PaymentModule,

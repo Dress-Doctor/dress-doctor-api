@@ -715,7 +715,12 @@ export class SeederService {
   private async seedNotificationTemplates() {
     const operations = notificationData.map((notification) => ({
       updateOne: {
-        filter: { templateName: notification.templateName },
+        // Templates are keyed by (templateName, channel) — same name can exist
+        // per channel (email + WhatsApp).
+        filter: {
+          templateName: notification.templateName,
+          channel: notification.channel,
+        },
         update: { $set: notification },
         upsert: true,
       },

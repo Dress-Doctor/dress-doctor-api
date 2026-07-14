@@ -15,16 +15,14 @@ import { AppUtilService } from 'src/helper/service/app-util.service';
 import { scopeFilter } from 'src/helper/casl/casl-scope';
 import { Currency } from 'src/schema/catalog/currency.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
-import {
-  OrderPaymentStatusEnum,
-  OrderStatusEnum,
-} from 'src/schema/order/order.dto';
+import { OrderPaymentStatusEnum } from 'src/schema/order/order.dto';
 import { Order } from 'src/schema/order/order.schema';
 import { PaymentMethod } from 'src/schema/payment/payment-method.schema';
 import { PaymentType } from 'src/schema/payment/payment-type.schema';
 import { DebtTypeEnum, PaymentTypeEnum } from 'src/schema/payment/payment.dto';
 import { Payment } from 'src/schema/payment/payment.schema';
 import { OrderEvents, type OrderPaidEvent } from '../order/order.events';
+import { computePaymentStatus, computeFlagged } from './payment-status.util';
 import { OrderParamsDto } from '../order/dto/create-order-item.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { FindPaymentDto } from './dto/find-payment.dto';
@@ -52,37 +50,6 @@ export class PaymentService {
     @InjectConnection() private readonly connection: Connection,
     private readonly eventEmitter: EventEmitter2,
   ) {}
-
-  /**
-   * Compute the order payment status from paid vs total (integer XAF):
-   * UNPAID (≤0) · PARTIAL (0<paid<total) · PAID (==) · OVERPAID (>total).
-   */
-  private computePaymentStatus(
-    amountPaid: number,
-    total: number,
-  ): OrderPaymentStatusEnum {
-    if (amountPaid <= 0) return OrderPaymentStatusEnum.UNPAID;
-    if (amountPaid < total) return OrderPaymentStatusEnum.PARTIAL;
-    if (amountPaid === total) return OrderPaymentStatusEnum.PAID;
-    return OrderPaymentStatusEnum.OVERPAID;
-  }
-
-  /**
-   * flagged = status ∈ {READY, DELIVERED} and not fully PAID, or OVERPAID.
-   * Computed, never hand-set.
-   */
-  private computeFlagged(
-    statusName: string,
-    paymentStatus: OrderPaymentStatusEnum,
-  ): boolean {
-    const readyOrDelivered =
-      statusName === OrderStatusEnum.READY.toString() ||
-      statusName === OrderStatusEnum.DELIVERED.toString();
-    return (
-      paymentStatus === OrderPaymentStatusEnum.OVERPAID ||
-      (readyOrDelivered && paymentStatus !== OrderPaymentStatusEnum.PAID)
-    );
-  }
 
   private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
     const platform = this.req.data.platform;
@@ -242,11 +209,11 @@ export class PaymentService {
     const delta = isRefund ? -data.amount : data.amount;
     const newAmountPaid = order.amountPaid + delta;
     const newBalanceDue = Math.max(0, order.totalAmount - newAmountPaid);
-    const paymentStatus = this.computePaymentStatus(
+    const paymentStatus = computePaymentStatus(
       newAmountPaid,
       order.totalAmount,
     );
-    const flagged = this.computeFlagged(statusName, paymentStatus);
+    const flagged = computeFlagged(statusName, paymentStatus);
 
     // Record the payment and recompute the order's money in one transaction so a
     // retry/crash can't leave them inconsistent.

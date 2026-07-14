@@ -42,10 +42,13 @@ export const envValidationSchema = Joi.object({
   SMTP_PASS: Joi.string().required(),
   MAIL_FROM: Joi.string().required(),
 
-  // WhatsApp (send path not implemented yet — optional placeholders)
+  // WhatsApp Business Cloud API (optional in dev — provider falls back to console)
   WHATSAPP_API_URL: Joi.string().uri().optional(),
   WHATSAPP_TOKEN: Joi.string().optional(),
   WHATSAPP_PHONE_NUMBER: Joi.string().optional(),
+  // Inbound status-webhook: HMAC app secret + verification handshake token.
+  WHATSAPP_APP_SECRET: Joi.string().optional(),
+  WHATSAPP_VERIFY_TOKEN: Joi.string().optional(),
 
   // Google Sheets migration (Phase 1 script) — optional
   GOOGLE_APPLICATION_CREDENTIALS: Joi.string().optional(),

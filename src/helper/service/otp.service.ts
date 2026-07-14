@@ -20,6 +20,7 @@ import {
 } from 'src/schema/otp/otp-security-state.schema';
 import { RequestOtpDto, VerifyOtpDto } from 'src/schema/otp/otp.dto';
 import { AppAbilityDto, ConditionsDto } from '../casl/casl.dto';
+import { maskPhone } from '../pii';
 import { CodeGeneratorService } from './code-generator.service';
 
 @Injectable()
@@ -73,7 +74,7 @@ export class OtpService {
 
   private async handleFailure(state: OtpSecurityStateDoc) {
     const platform = this.request.data.platform;
-    const identifier = state.identifier;
+    const identifier = maskPhone(state.identifier);
 
     const now = new Date();
     if (state.verifyCoolDownUntil && state.verifyCoolDownUntil > now) {
@@ -130,7 +131,7 @@ export class OtpService {
 
   private async handleOtpRequestAttempt(state: OtpSecurityStateDoc) {
     const platform = this.request.data.platform;
-    const identifier = state.identifier;
+    const identifier = maskPhone(state.identifier);
 
     if (state.isLocked) {
       this.logger.error(`[${platform}] ${identifier} ${this.accountLocked}`);
@@ -234,7 +235,7 @@ export class OtpService {
 
     if (state.isLocked) {
       this.logger.error(
-        `[${platform}] ${otpRequest.identifier} ${this.accountLocked}`,
+        `[${platform}] ${maskPhone(otpRequest.identifier)} ${this.accountLocked}`,
       );
       throw new ForbiddenException(
         `Your ${this.accountLocked}. Please contact support`,
@@ -247,8 +248,8 @@ export class OtpService {
     );
     if (!isValid) {
       await this.handleFailure(state);
-      this.logger.error(
-        `[${platform}] ${this.expiredCode} for ${otpRequest.identifier}`,
+      this.logger.warn(
+        `[${platform}] ${this.expiredCode} for ${maskPhone(otpRequest.identifier)}`,
       );
       throw new UnauthorizedException(this.expiredCode);
     }

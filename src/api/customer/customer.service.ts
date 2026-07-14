@@ -13,6 +13,7 @@ import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { scopeFilter } from 'src/helper/casl/casl-scope';
+import { maskPhone } from 'src/helper/pii';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { Customer } from 'src/schema/user/customer.schema';
 import { Referral } from 'src/schema/user/referral.schema';
@@ -71,7 +72,7 @@ export class CustomerService {
 
     const phoneTaken = await this.userModel.exists({ phone: data.phone });
     if (phoneTaken) {
-      this.logger.error(`${base} phone ${data.phone} already exists`);
+      this.logger.warn(`${base} phone ${maskPhone(data.phone)} already exists`);
       throw new ConflictException({
         code: 'CONFLICT',
         message: 'A user with this phone already exists',
@@ -81,7 +82,7 @@ export class CustomerService {
     if (data.email) {
       const emailTaken = await this.userModel.exists({ email: data.email });
       if (emailTaken) {
-        this.logger.error(`${base} email ${data.email} already taken`);
+        this.logger.warn(`${base} email already taken`);
         throw new ConflictException({
           code: 'CONFLICT',
           message: 'The provided email has been taken',

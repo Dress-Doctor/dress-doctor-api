@@ -27,6 +27,7 @@ import {
 } from 'src/schema/notification/notification.dto';
 import { OTPChannelEnum, OTPPurposeEnum } from 'src/schema/otp/otp.dto';
 import { UserTypeEum } from 'src/schema/user/user.dto';
+import { maskPhone } from 'src/helper/pii';
 
 /** Just the user fields OTP delivery needs — works for populated or raw docs. */
 type OtpTarget = Pick<User, 'phone' | 'firstName' | 'email' | 'whatsappPhone'>;
@@ -163,7 +164,9 @@ export class AuthService {
       }>({ model: UserType.name, path: 'userTypeId' });
 
     if (!foundedUser) {
-      this.logger.error(`[${platform}] This user ${data.phone} doesn't exists`);
+      this.logger.warn(
+        `[${platform}] login for unknown phone ${maskPhone(data.phone)}`,
+      );
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
         message: 'Invalid login credentials',
@@ -171,8 +174,8 @@ export class AuthService {
     }
 
     if (!foundedUser.isActive) {
-      this.logger.error(
-        `[${platform}] This account ${data.phone} has been deactivated`,
+      this.logger.warn(
+        `[${platform}] login for deactivated account ${maskPhone(data.phone)}`,
       );
       throw new ForbiddenException({
         code: 'ACCOUNT_INACTIVE',
@@ -186,7 +189,9 @@ export class AuthService {
     // Staff are 2FA: password is checked before an OTP is ever issued.
     if (!isCustomer) {
       if (!data.password) {
-        this.logger.error(`[${platform}] Staff ${data.phone} sent no password`);
+        this.logger.warn(
+          `[${platform}] staff ${maskPhone(data.phone)} sent no password`,
+        );
         throw new UnauthorizedException({
           code: 'INVALID_CREDENTIALS',
           message: 'Invalid login credentials',
@@ -198,8 +203,8 @@ export class AuthService {
         foundedUser.passwordHash,
       );
       if (!isValid) {
-        this.logger.error(
-          `[${platform}] This user ${data.phone} sent the wrong password`,
+        this.logger.warn(
+          `[${platform}] wrong password for ${maskPhone(data.phone)}`,
         );
         throw new UnauthorizedException({
           code: 'INVALID_CREDENTIALS',
@@ -221,8 +226,8 @@ export class AuthService {
         path: 'userTypeId',
       });
     if (!foundedUser) {
-      this.logger.error(
-        `[${platform}] This user ${data.identifier} doesn't exists.`,
+      this.logger.warn(
+        `[${platform}] verify for unknown phone ${maskPhone(data.identifier)}`,
       );
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
@@ -237,29 +242,47 @@ export class AuthService {
       userType,
     );
 
-    this.logger.log(`[${platform}] ${data.identifier} have successfully login`);
+    this.logger.log(
+      `[${platform}] ${maskPhone(data.identifier)} have successfully login`,
+    );
     return { accessToken, refreshToken, message: 'Login successful' };
   }
 
   /**
    * Rotate a refresh token: validate the presented token, revoke it, and issue a
-   * fresh access + refresh pair. A revoked/expired/unknown token is rejected.
+   * fresh access + refresh pair. Unknown/expired tokens are rejected. Replaying a
+   * token that was already rotated (revoked) is treated as a breach: the user's
+   * entire live refresh-token chain is revoked so a stolen token can't be reused.
    */
   async refresh(data: RefreshTokenDto) {
     const platform = this.req.data.platform;
     const tokenHash = this.hashRefreshToken(data.refreshToken);
+    const invalid = new UnauthorizedException({
+      code: 'INVALID_REFRESH_TOKEN',
+      message: 'Invalid or expired refresh token',
+    });
 
     const stored = await this.refreshTokenModel.findOne({ tokenHash });
-    if (
-      !stored ||
-      stored.revokedAt ||
-      stored.expiresAt.getTime() <= Date.now()
-    ) {
-      this.logger.error(`[${platform}] refresh presented an invalid token`);
-      throw new UnauthorizedException({
-        code: 'INVALID_REFRESH_TOKEN',
-        message: 'Invalid or expired refresh token',
-      });
+    if (!stored) {
+      this.logger.warn(`[${platform}] refresh presented an unknown token`);
+      throw invalid;
+    }
+
+    // Reuse detection: a revoked token being replayed means the chain leaked.
+    if (stored.revokedAt) {
+      await this.refreshTokenModel.updateMany(
+        { userId: stored.userId, revokedAt: { $exists: false } },
+        { revokedAt: new Date() },
+      );
+      this.logger.error(
+        `[${platform}] refresh-token reuse detected for user ${stored.userId.toString()} — revoked live chain`,
+      );
+      throw invalid;
+    }
+
+    if (stored.expiresAt.getTime() <= Date.now()) {
+      this.logger.warn(`[${platform}] refresh presented an expired token`);
+      throw invalid;
     }
 
     const user = await this.userModel.findById(stored.userId);
@@ -280,7 +303,9 @@ export class AuthService {
     stored.replacedByTokenHash = this.hashRefreshToken(tokens.refreshToken);
     await stored.save();
 
-    this.logger.log(`[${platform}] ${user.phone} rotated a refresh token`);
+    this.logger.log(
+      `[${platform}] ${maskPhone(user.phone)} rotated a refresh token`,
+    );
     return tokens;
   }
 
