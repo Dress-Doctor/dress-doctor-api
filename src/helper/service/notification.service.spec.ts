@@ -91,10 +91,11 @@ describe('NotificationService (WhatsApp dispatch)', () => {
     it('uses the dedupKey as the BullMQ jobId (enqueue-level idempotency)', async () => {
       await service.addToQueue({ ...data, dedupKey: 'order-status:o1:READY' });
 
+      // BullMQ forbids ':' in custom ids — flattened, same uniqueness.
       expect(queue.add).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({ dedupKey: 'order-status:o1:READY' }),
-        { jobId: 'order-status:o1:READY' },
+        { jobId: 'order-status-o1-READY' },
       );
     });
 

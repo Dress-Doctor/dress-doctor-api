@@ -60,8 +60,9 @@ export class HealthController {
 
   // §2.6 observability: queue depths/outcomes, failed-set sizes, cron last-run
   // age, provider counters, and an alerts[] a monitor can string-match on.
+  // Unlike /health + /ready this exposes operational intelligence, so it sits
+  // behind the platform api-key gate (@Public only skips the JWT layer).
   @Public()
-  @SkipApiKeyCheck()
   @Get('metrics')
   @HttpCode(HttpStatus.OK)
   async metrics() {

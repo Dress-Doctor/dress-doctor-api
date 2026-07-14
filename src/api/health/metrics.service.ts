@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { Queue } from 'bullmq';
 import { Queues } from 'src/queue/queue.dto';
 import { JobRunService } from 'src/helper/service/job-run.service';
@@ -9,11 +11,13 @@ import {
   ProviderMetrics,
 } from 'src/helper/metrics/provider-metrics.service';
 import { WHATSAPP_PROVIDER_NAME } from 'src/helper/service/whatsapp.provider';
+import { Setting, SettingKeys } from 'src/schema/settings/settings.schema';
 
 // Cron is overdue when the last COMPLETED run is older than ~3 intervals —
-// late enough to mean "stopped", not "slightly behind".
-const RECONCILE_OVERDUE_S = 45 * 60; // 15-min cron
-const INACTIVITY_OVERDUE_S = 26 * 60 * 60; // nightly cron
+// late enough to mean "stopped", not "slightly behind". Defaults; operators
+// override via the reconcileOverdueMinutes / inactivityOverdueHours settings.
+const DEFAULT_RECONCILE_OVERDUE_MIN = 45; // 15-min cron
+const DEFAULT_INACTIVITY_OVERDUE_H = 26; // nightly cron
 
 interface QueueMetrics {
   counts: Record<string, number>;
@@ -51,7 +55,13 @@ export class MetricsService {
     private readonly jobRun: JobRunService,
     private readonly failedJobs: FailedJobsService,
     private readonly providerMetrics: ProviderMetricsService,
+    @InjectModel(Setting.name) private readonly settingModel: Model<Setting>,
   ) {}
+
+  private async settingValue(key: string, fallback: number): Promise<number> {
+    const row = await this.settingModel.findOne({ key, officeId: null }).lean();
+    return row?.value ?? fallback;
+  }
 
   async snapshot(): Promise<MetricsSnapshot> {
     const alerts: string[] = [];
@@ -79,14 +89,27 @@ export class MetricsService {
       }
     }
 
+    const reconcileOverdueS =
+      (await this.settingValue(
+        SettingKeys.reconcileOverdueMinutes,
+        DEFAULT_RECONCILE_OVERDUE_MIN,
+      )) * 60;
+    const inactivityOverdueS =
+      (await this.settingValue(
+        SettingKeys.inactivityOverdueHours,
+        DEFAULT_INACTIVITY_OVERDUE_H,
+      )) *
+      60 *
+      60;
+
     const cron: Record<string, CronMetrics> = {
       [Queues.paymentReconcile]: await this.cronMetrics(
         Queues.paymentReconcile,
-        RECONCILE_OVERDUE_S,
+        reconcileOverdueS,
       ),
       [Queues.inactivityScan]: await this.cronMetrics(
         Queues.inactivityScan,
-        INACTIVITY_OVERDUE_S,
+        inactivityOverdueS,
       ),
     };
     for (const [name, m] of Object.entries(cron)) {

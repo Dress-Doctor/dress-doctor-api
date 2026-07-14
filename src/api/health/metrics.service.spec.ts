@@ -1,4 +1,6 @@
 import { Queue } from 'bullmq';
+import { Model } from 'mongoose';
+import { Setting } from 'src/schema/settings/settings.schema';
 import { JobRunService } from 'src/helper/service/job-run.service';
 import { FailedJobsService } from 'src/helper/service/failed-jobs.service';
 import { ProviderMetricsService } from 'src/helper/metrics/provider-metrics.service';
@@ -28,6 +30,11 @@ describe('MetricsService', () => {
       .fn()
       .mockResolvedValue({ calls: 10, failures: 0, avgLatencyMs: 120 });
 
+    // No settings rows — default thresholds (45 min / 26 h) apply.
+    const settingModel = {
+      findOne: jest.fn(() => ({ lean: () => Promise.resolve(null) })),
+    };
+
     service = new MetricsService(
       makeQueue(),
       makeQueue(),
@@ -35,6 +42,7 @@ describe('MetricsService', () => {
       { lastCompletedFinishedAt } as unknown as JobRunService,
       { size: failedSize } as unknown as FailedJobsService,
       { read: providerRead } as unknown as ProviderMetricsService,
+      settingModel as unknown as Model<Setting>,
     );
   });
 
@@ -87,6 +95,34 @@ describe('MetricsService', () => {
       overdue: false,
     });
     expect(snap.alerts).toEqual([]);
+  });
+
+  it('honours setting-overridden overdue thresholds', async () => {
+    // reconcileOverdueMinutes = 10 → a 30-min-old run is overdue.
+    const settingModel = {
+      findOne: jest.fn((filter: { key: string }) => ({
+        lean: () =>
+          Promise.resolve(
+            filter.key === 'reconcileOverdueMinutes' ? { value: 10 } : null,
+          ),
+      })),
+    };
+    lastCompletedFinishedAt.mockResolvedValue(
+      new Date(Date.now() - 30 * 60 * 1000),
+    );
+    service = new MetricsService(
+      makeQueue(),
+      makeQueue(),
+      makeQueue(),
+      { lastCompletedFinishedAt } as unknown as JobRunService,
+      { size: failedSize } as unknown as FailedJobsService,
+      { read: providerRead } as unknown as ProviderMetricsService,
+      settingModel as unknown as Model<Setting>,
+    );
+
+    const snap = await service.snapshot();
+
+    expect(snap.cron['payment-reconcile'].overdue).toBe(true);
   });
 
   it('alerts on provider failures', async () => {

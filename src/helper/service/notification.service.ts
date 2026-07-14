@@ -248,11 +248,13 @@ export class NotificationService implements OnModuleInit {
     // dedupKey as the BullMQ jobId: a duplicate event re-enqueueing the same
     // transactional message is dropped by BullMQ while the first job is still
     // queued/retained — the first idempotency layer (§2.5); the unique
-    // delivery-log index is the durable second one.
+    // delivery-log index is the durable second one. BullMQ forbids ':' in
+    // custom job ids (its Redis key separator), so the id is the dedupKey
+    // with ':' flattened — same uniqueness, valid id.
     await this.notificationsQueue.add(
       QueueProcessor.notification,
       data,
-      data.dedupKey ? { jobId: data.dedupKey } : undefined,
+      data.dedupKey ? { jobId: data.dedupKey.replace(/:/g, '-') } : undefined,
     );
   }
 }
