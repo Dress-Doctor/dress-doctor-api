@@ -46,6 +46,10 @@ export class Notification extends Document<Types.ObjectId> {
 
   @Prop({ required: false })
   failedAt?: Date;
+
+  // Inactivity alerts only: the follow-up row this delivery belongs to.
+  @Prop({ required: false, type: Types.ObjectId })
+  followUpId?: Types.ObjectId;
 }
 
 export const NotificationSchema = SchemaFactory.createForClass(Notification);

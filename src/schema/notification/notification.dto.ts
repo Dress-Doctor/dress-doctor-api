@@ -20,6 +20,9 @@ export type SendEmailDto = {
   otpChannel: OTPChannelEnum;
   variables?: Record<string, string>;
   templateName: NotificationTemplateNameEnum;
+  // Set on inactivity alerts — links the delivery-log row back to the
+  // follow-up so "who was contacted, when, did they respond" is one join.
+  followUpId?: string;
 };
 
 export type SendNotificationDto = {
@@ -34,4 +37,5 @@ export type GetHTMLDto = {
 
 export enum NotificationTemplateNameEnum {
   LOGIN_VERIFICATION_CODE = 'login_verification_code',
+  INACTIVE_CUSTOMER_ALERT = 'inactive_customer_alert',
 }

@@ -14,6 +14,7 @@ import { NotificationSchemaModule } from './notification/notification.module';
 import { SettingsSchemaModule } from './settings/settings.module';
 import { SubscriptionSchemaModule } from './subscription/subscription.module';
 import { JobRunSchemaModule } from './job-run/job-run.module';
+import { FollowUpSchemaModule } from './follow-up/follow-up.module';
 
 @Global()
 @Module({
@@ -35,6 +36,7 @@ import { JobRunSchemaModule } from './job-run/job-run.module';
     NotificationSchemaModule,
     SubscriptionSchemaModule,
     JobRunSchemaModule,
+    FollowUpSchemaModule,
   ],
   exports: [MongooseModule],
 })

@@ -49,6 +49,9 @@ export const envValidationSchema = Joi.object({
   // Inbound status-webhook: HMAC app secret + verification handshake token.
   WHATSAPP_APP_SECRET: Joi.string().optional(),
   WHATSAPP_VERIFY_TOKEN: Joi.string().optional(),
+  // Customer Service destination for inactivity alerts (E.164). Optional in
+  // dev — the scan logs + counts skipped alerts when unset.
+  CS_WHATSAPP_PHONE: Joi.string().optional(),
 
   // Google Sheets migration (Phase 1 script) — optional
   GOOGLE_APPLICATION_CREDENTIALS: Joi.string().optional(),

@@ -38,4 +38,5 @@ export const SettingKeys = {
   perKgRate: 'perKgRate',
   overageRate: 'overageRate',
   inactiveDays: 'inactiveDays',
+  followUpCooldownDays: 'followUpCooldownDays',
 } as const;
