@@ -34,9 +34,15 @@ Delivered against `../dress-doctor-blueprint/backend/BUILD-PHASE-2.md`. Every §
 - **Dispatch**: provider-mocked WhatsApp send + delivery-log write; OTP targets `whatsappPhone`; webhook updates the log (e2e).
 - **Metrics**: healthy snapshot no alerts; failed-set growth, cron-overdue, provider-failure alerts fire; fresh-deploy cron not overdue; counter accumulation; metrics writes never fail a send.
 
-## Not driven end-to-end
+## End-to-end coverage (close-out A)
 
-The live worker loop (cron → Redis lock → queue → processor) and a real WhatsApp API call need a running Redis/Mongo/WhatsApp stack; they're covered by unit tests with mocked providers and by the HTTP e2e suite for the webhook. Exercised when the compose stack is up / in a CI services job.
+`test/worker-loop.e2e-spec.ts` drives the live loop in the CI e2e services job (real Redis + replica-set Mongo): cron → leader lock → queue → processor → `JobRun` COMPLETED with a drifted order corrected; two cron owners racing one tick → exactly one dispatch; the reconcile watermark carried into the next job; a replayed `payment.recorded` writing exactly one delivery-log row. The live loop caught a real bug the unit mocks missed — BullMQ rejects custom job ids containing `:` — fixed by flattening the jobId (delivery-log `dedupKey` unchanged). Only the real WhatsApp API call remains external (console provider in tests); the webhook path is covered by the HTTP e2e suite.
+
+## Close-out hardening
+
+- `GET /metrics` gated behind the platform api-key (`/health` + `/ready` stay public).
+- `Setting` audited via `attachHistoryHooks` → `setting_history` (rate changes are attributable).
+- Cron overdue thresholds are settings (`reconcileOverdueMinutes`, `inactivityOverdueHours`), seeded 45/26.
 
 ## Deferrals (per §4)
 
