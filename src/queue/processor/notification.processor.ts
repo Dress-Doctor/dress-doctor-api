@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { NotificationService } from 'src/helper/service/notification.service';
+import { maskRecipients, variableKeys } from 'src/helper/pii';
 import { SendNotificationDto } from 'src/schema/notification/notification.dto';
 import { Queues } from '../queue.dto';
 
@@ -17,50 +18,32 @@ export class NotificationProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job<SendNotificationDto>) {
-    const log = this.appUtilService.getLogText({
-      STATUS: 'PROCESSING',
-      JOB_NAME: job.name,
-      LAN: job.data.language,
-      CHANNEL: job.data.otpChannel,
-      FROM: JSON.stringify(job.data.from),
-      TEMPLATE_NAME: job.data.templateName,
-      VARIABLES: JSON.stringify(job.data.variables),
-      RECIPIENTS: JSON.stringify(job.data.recipients),
+  // Job payloads carry OTP codes and phone numbers in variables/recipients —
+  // stage logs print variable keys and masked addresses only (§12).
+  private stageLog(status: string, data: SendNotificationDto) {
+    return this.appUtilService.getLogText({
+      STATUS: status,
+      LAN: data.language,
+      CHANNEL: data.otpChannel,
+      TEMPLATE_NAME: data.templateName,
+      VARIABLE_KEYS: variableKeys(data.variables),
+      RECIPIENTS: maskRecipients(data.recipients),
     });
+  }
 
-    this.logger.log(log);
+  async process(job: Job<SendNotificationDto>) {
+    this.logger.log(this.stageLog('PROCESSING', job.data));
     await this.notificationService.send(job.data);
   }
 
   @OnWorkerEvent('failed')
   onFailed(job: Job<SendNotificationDto>, err: Error) {
-    const log = this.appUtilService.getLogText({
-      STATUS: 'FAILED',
-      JOB_NAME: job.name,
-      LAN: job.data.language,
-      CHANNEL: job.data.otpChannel,
-      FROM: JSON.stringify(job.data.from),
-      TEMPLATE_NAME: job.data.templateName,
-      VARIABLES: JSON.stringify(job.data.variables),
-      RECIPIENTS: JSON.stringify(job.data.recipients),
-    });
-    this.logger.error(log);
+    this.logger.error(this.stageLog('FAILED', job.data));
     this.logger.error(err.message, err.stack);
   }
 
   @OnWorkerEvent('completed')
   onCompleted(job: Job<SendNotificationDto>) {
-    const log = this.appUtilService.getLogText({
-      STATUS: 'SEND',
-      JOB_NAME: job.name,
-      LAN: job.data.language,
-      CHANNEL: job.data.otpChannel,
-      FROM: JSON.stringify(job.data.from),
-      TEMPLATE_NAME: job.data.templateName,
-      VARIABLES: JSON.stringify(job.data.variables),
-      RECIPIENTS: JSON.stringify(job.data.recipients),
-    });
-    this.logger.log(log);
+    this.logger.log(this.stageLog('SEND', job.data));
   }
 }

@@ -23,6 +23,7 @@ import {
 } from 'src/schema/notification/notification.dto';
 import { Notification } from 'src/schema/notification/notification.schema';
 import { AppUtilService } from './app-util.service';
+import { maskRecipients, variableKeys } from '../pii';
 import { WhatsAppProvider } from './whatsapp.provider';
 import { User } from 'src/schema/user/user.schema';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -199,6 +200,7 @@ export class NotificationService implements OnModuleInit {
       await this.notificationModel.create({
         userId: user?._id,
         sentAt: new Date(),
+        followUpId: data.followUpId,
         providerMessageId,
         title: data.templateName,
         language: data.language,
@@ -230,14 +232,15 @@ export class NotificationService implements OnModuleInit {
 
   async addToQueue(data: SendNotificationDto) {
     await this.validate(data);
+    // Variables/recipients carry OTP codes and phone numbers — log keys and
+    // masked addresses only (§12: never log OTPs or PII).
     const log = this.appUtilService.getLogText({
       STATUS: 'SUBMITTED',
       QUEUE_NAME: Queues.notification,
       LAN: data.language,
-      FROM: JSON.stringify(data.from),
       TEMPLATE_NAME: data.templateName,
-      VARIABLES: JSON.stringify(data.variables),
-      RECIPIENTS: JSON.stringify(data.recipients),
+      VARIABLE_KEYS: variableKeys(data.variables),
+      RECIPIENTS: maskRecipients(data.recipients),
     });
     this.logger.log(log);
     await this.notificationsQueue.add(QueueProcessor.notification, data);
