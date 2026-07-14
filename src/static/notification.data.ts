@@ -42,4 +42,49 @@ export default [
       'totalOrders',
     ],
   },
+
+  // Transactional customer messages (§2.5) — WhatsApp primary, email fallback.
+  // Idempotent per (order,status) / (payment) via dedupKey.
+  {
+    channel: OTPChannelEnum.WHATSAPP,
+    templateName: NotificationTemplateNameEnum.ORDER_READY,
+    titleFr: 'Commande prête',
+    titleEn: 'Order ready',
+    variables: ['firstName', 'orderCode'],
+  },
+  {
+    channel: OTPChannelEnum.EMAIL,
+    templateName: NotificationTemplateNameEnum.ORDER_READY,
+    titleFr: 'Votre commande {orderCode} est prête',
+    titleEn: 'Your order {orderCode} is ready',
+    variables: ['firstName', 'orderCode', 'year'],
+  },
+  {
+    channel: OTPChannelEnum.WHATSAPP,
+    templateName: NotificationTemplateNameEnum.ORDER_DELIVERED,
+    titleFr: 'Commande livrée',
+    titleEn: 'Order delivered',
+    variables: ['firstName', 'orderCode'],
+  },
+  {
+    channel: OTPChannelEnum.EMAIL,
+    templateName: NotificationTemplateNameEnum.ORDER_DELIVERED,
+    titleFr: 'Votre commande {orderCode} a été livrée',
+    titleEn: 'Your order {orderCode} has been delivered',
+    variables: ['firstName', 'orderCode', 'year'],
+  },
+  {
+    channel: OTPChannelEnum.WHATSAPP,
+    templateName: NotificationTemplateNameEnum.PAYMENT_RECEIPT,
+    titleFr: 'Reçu de paiement',
+    titleEn: 'Payment receipt',
+    variables: ['firstName', 'orderCode', 'amount', 'balance'],
+  },
+  {
+    channel: OTPChannelEnum.EMAIL,
+    templateName: NotificationTemplateNameEnum.PAYMENT_RECEIPT,
+    titleFr: 'Reçu de paiement — commande {orderCode}',
+    titleEn: 'Payment receipt — order {orderCode}',
+    variables: ['firstName', 'orderCode', 'amount', 'balance', 'year'],
+  },
 ];

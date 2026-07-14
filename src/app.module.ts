@@ -31,6 +31,7 @@ import { PricingModule } from './api/pricing/pricing.module';
 import { OrderModule } from './api/order/order.module';
 import { PaymentModule } from './api/payment/payment.module';
 import { FollowUpModule } from './api/follow-up/follow-up.module';
+import { EventsModule } from './events/events.module';
 import { BullModule } from '@nestjs/bullmq';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { QueueProcessorModule } from './queue/queue-processor.module';
@@ -55,6 +56,7 @@ import { envValidationSchema } from './config/env.validation';
     OrderModule,
     PaymentModule,
     FollowUpModule,
+    EventsModule,
     QueueProcessorModule,
     ConfigModule.forRoot({
       isGlobal: true,

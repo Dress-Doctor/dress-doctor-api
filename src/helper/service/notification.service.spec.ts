@@ -31,6 +31,8 @@ describe('NotificationService (WhatsApp dispatch)', () => {
     recipients: [{ name: 'Ada', address: '237690000000' }],
   };
 
+  let queue: { add: jest.Mock };
+
   beforeEach(() => {
     notificationModel = { create: jest.fn().mockResolvedValue({}) };
     templateModel = { findOne: jest.fn().mockResolvedValue(waTemplate) };
@@ -42,15 +44,19 @@ describe('NotificationService (WhatsApp dispatch)', () => {
         .fn()
         .mockResolvedValue({ providerMessageId: 'wamid.1', response: {} }),
     };
+    queue = { add: jest.fn().mockResolvedValue({}) };
 
     service = new NotificationService(
       notificationModel as never,
       templateModel as never,
       {} as never, // i18n
-      { renderTemplate: (s: string) => s } as never, // appUtilService
+      {
+        renderTemplate: (s: string) => s,
+        getLogText: () => '',
+      } as never, // appUtilService
       userModel as never,
       whatsappProvider as never,
-      {} as never, // queue
+      queue as never,
     );
   });
 
@@ -71,5 +77,35 @@ describe('NotificationService (WhatsApp dispatch)', () => {
         status: NotificationStatusEnum.SEND,
       }),
     );
+  });
+
+  it('writes the dedupKey into the delivery log when present', async () => {
+    await service.send({ ...data, dedupKey: 'payment-receipt:abc' });
+
+    expect(notificationModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ dedupKey: 'payment-receipt:abc' }),
+    );
+  });
+
+  describe('addToQueue', () => {
+    it('uses the dedupKey as the BullMQ jobId (enqueue-level idempotency)', async () => {
+      await service.addToQueue({ ...data, dedupKey: 'order-status:o1:READY' });
+
+      expect(queue.add).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ dedupKey: 'order-status:o1:READY' }),
+        { jobId: 'order-status:o1:READY' },
+      );
+    });
+
+    it('enqueues without a jobId when there is no dedupKey', async () => {
+      await service.addToQueue(data);
+
+      expect(queue.add).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ templateName: data.templateName }),
+        undefined,
+      );
+    });
   });
 });
