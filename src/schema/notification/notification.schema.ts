@@ -32,6 +32,21 @@ export class Notification extends Document<Types.ObjectId> {
 
   @Prop({ required: false })
   providerResponse: string;
+
+  // Provider message id — the key the inbound status webhook matches on to flip
+  // this row to DELIVERED/READ/FAILED.
+  @Prop({ required: false })
+  providerMessageId?: string;
+
+  @Prop({ required: false })
+  deliveredAt?: Date;
+
+  @Prop({ required: false })
+  readAt?: Date;
+
+  @Prop({ required: false })
+  failedAt?: Date;
 }
 
 export const NotificationSchema = SchemaFactory.createForClass(Notification);
+NotificationSchema.index({ providerMessageId: 1 });

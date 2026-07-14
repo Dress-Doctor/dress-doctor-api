@@ -10,6 +10,7 @@ import { AuthService } from './auth.service';
 import { CaslAbilityService } from 'src/helper/casl/casl-ability.service';
 import { OtpService } from 'src/helper/service/otp.service';
 import { NotificationService } from 'src/helper/service/notification.service';
+import { WhatsAppProvider } from 'src/helper/service/whatsapp.provider';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { QueueProducerModule } from 'src/queue/queue-producer.module';
 
@@ -39,6 +40,7 @@ import { QueueProducerModule } from 'src/queue/queue-producer.module';
     AppUtilService,
     CaslAbilityService,
     NotificationService,
+    WhatsAppProvider,
     CodeGeneratorService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],

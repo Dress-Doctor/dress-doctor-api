@@ -23,6 +23,7 @@ import {
 } from 'src/schema/notification/notification.dto';
 import { Notification } from 'src/schema/notification/notification.schema';
 import { AppUtilService } from './app-util.service';
+import { WhatsAppProvider } from './whatsapp.provider';
 import { User } from 'src/schema/user/user.schema';
 import { InjectQueue } from '@nestjs/bullmq';
 import { QueueProcessor, Queues } from 'src/queue/queue.dto';
@@ -46,6 +47,8 @@ export class NotificationService implements OnModuleInit {
     private readonly i18n: I18nService,
     private readonly appUtilService: AppUtilService,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+
+    private readonly whatsappProvider: WhatsAppProvider,
 
     @InjectQueue(Queues.notification) private notificationsQueue: Queue,
   ) {}
@@ -172,6 +175,42 @@ export class NotificationService implements OnModuleInit {
     }
   }
 
+  /**
+   * Dispatch over WhatsApp Business Cloud API (approved template) and write the
+   * delivery log with the provider message id — the key the status webhook later
+   * matches on. Recipient address is the whatsappPhone.
+   */
+  private async sendWhatsApp(data: SendEmailDto) {
+    const template = await this.getTemplate(
+      data.templateName,
+      OTPChannelEnum.WHATSAPP,
+    );
+
+    for (const recipient of data.recipients) {
+      const to = recipient.address;
+      const { providerMessageId, response } = await this.whatsappProvider.send({
+        to,
+        templateName: template.templateName,
+        language: data.language,
+        variables: data.variables ?? {},
+      });
+
+      const user = await this.userModel.findOne({ whatsappPhone: to });
+      await this.notificationModel.create({
+        userId: user?._id,
+        sentAt: new Date(),
+        providerMessageId,
+        title: data.templateName,
+        language: data.language,
+        channel: OTPChannelEnum.WHATSAPP,
+        variables: data.variables,
+        body: JSON.stringify(data.variables),
+        status: NotificationStatusEnum.SEND,
+        providerResponse: JSON.stringify(response),
+      });
+    }
+  }
+
   async send(data: SendNotificationDto) {
     const template = await this.validate(data);
 
@@ -180,12 +219,13 @@ export class NotificationService implements OnModuleInit {
         await this.sendEmail(data as SendEmailDto);
         break;
 
+      case OTPChannelEnum.WHATSAPP:
+        await this.sendWhatsApp(data as SendEmailDto);
+        break;
+
       default:
         break;
     }
-    // if (template.channel === NotificationChannelEnum.EMAIL) {
-    //   await this.sendEmail(data as SendEmailDto);
-    // }
   }
 
   async addToQueue(data: SendNotificationDto) {

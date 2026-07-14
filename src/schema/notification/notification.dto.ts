@@ -5,6 +5,7 @@ export enum NotificationStatusEnum {
   SEND = 'SEND',
   FAILED = 'FAILED',
   DELIVERED = 'DELIVERED',
+  READ = 'READ',
 }
 
 export enum LanguageEum {
