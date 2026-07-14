@@ -166,6 +166,7 @@ export class NotificationService implements OnModuleInit {
           language: data.language,
           channel: template.channel,
           variables: data.variables,
+          dedupKey: data.dedupKey,
           body: JSON.stringify(options.html),
           status: NotificationStatusEnum.SEND,
           providerResponse: JSON.stringify(result),
@@ -201,6 +202,7 @@ export class NotificationService implements OnModuleInit {
         userId: user?._id,
         sentAt: new Date(),
         followUpId: data.followUpId,
+        dedupKey: data.dedupKey,
         providerMessageId,
         title: data.templateName,
         language: data.language,
@@ -243,6 +245,14 @@ export class NotificationService implements OnModuleInit {
       RECIPIENTS: maskRecipients(data.recipients),
     });
     this.logger.log(log);
-    await this.notificationsQueue.add(QueueProcessor.notification, data);
+    // dedupKey as the BullMQ jobId: a duplicate event re-enqueueing the same
+    // transactional message is dropped by BullMQ while the first job is still
+    // queued/retained — the first idempotency layer (§2.5); the unique
+    // delivery-log index is the durable second one.
+    await this.notificationsQueue.add(
+      QueueProcessor.notification,
+      data,
+      data.dedupKey ? { jobId: data.dedupKey } : undefined,
+    );
   }
 }

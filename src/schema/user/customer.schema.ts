@@ -45,6 +45,11 @@ export class Customer extends Document<Types.ObjectId> {
 
   @Prop({ required: true, default: () => new Date() })
   registeredAt: Date;
+
+  // Transactional messages (§2.5): order READY/DELIVERED + payment receipts.
+  // Default on — customers can opt out; the listener checks before enqueueing.
+  @Prop({ required: true, default: true })
+  notificationsOptIn: boolean;
 }
 
 export const CustomerSchema = SchemaFactory.createForClass(Customer);

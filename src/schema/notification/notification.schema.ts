@@ -50,7 +50,14 @@ export class Notification extends Document<Types.ObjectId> {
   // Inactivity alerts only: the follow-up row this delivery belongs to.
   @Prop({ required: false, type: Types.ObjectId })
   followUpId?: Types.ObjectId;
+
+  // Transactional messages only (§2.5): idempotency key, e.g.
+  // order-status:<orderId>:READY or payment-receipt:<paymentId>. Unique so the
+  // same customer can never be messaged twice for the same event.
+  @Prop({ required: false })
+  dedupKey?: string;
 }
 
 export const NotificationSchema = SchemaFactory.createForClass(Notification);
 NotificationSchema.index({ providerMessageId: 1 });
+NotificationSchema.index({ dedupKey: 1 }, { unique: true, sparse: true });

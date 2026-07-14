@@ -23,6 +23,11 @@ export type SendEmailDto = {
   // Set on inactivity alerts — links the delivery-log row back to the
   // follow-up so "who was contacted, when, did they respond" is one join.
   followUpId?: string;
+  // Idempotency key for transactional messages (§2.5): one send ever per
+  // (order,status) / (payment). Doubles as the BullMQ jobId so a duplicate
+  // event can't even enqueue twice, and is unique-indexed on the delivery log
+  // so a re-emitted event later is skipped by an exists-check.
+  dedupKey?: string;
 };
 
 export type SendNotificationDto = {
@@ -38,4 +43,7 @@ export type GetHTMLDto = {
 export enum NotificationTemplateNameEnum {
   LOGIN_VERIFICATION_CODE = 'login_verification_code',
   INACTIVE_CUSTOMER_ALERT = 'inactive_customer_alert',
+  ORDER_READY = 'order_ready',
+  ORDER_DELIVERED = 'order_delivered',
+  PAYMENT_RECEIPT = 'payment_receipt',
 }
