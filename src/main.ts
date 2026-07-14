@@ -10,6 +10,8 @@ import { FileLoggerService } from './helper/service/file-logger.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
+    // rawBody so the WhatsApp status webhook can verify its HMAC signature.
+    rawBody: true,
     logger: new FileLoggerService({
       filePrefix: 'api-',
       prefix: 'Dress Doctor',
