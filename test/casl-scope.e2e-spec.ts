@@ -41,8 +41,14 @@ describe('CASL office scoping + transactions (replica-set Mongo)', () => {
     await mongoose.connect(replset.getUri(), { dbName: 'test' });
     orderModel = mongoose.model<Order>('order', OrderSchema);
 
-    orderA = await orderModel.create({ ...baseFields(officeA), orderCode: 'OR-A' });
-    orderB = await orderModel.create({ ...baseFields(officeB), orderCode: 'OR-B' });
+    orderA = await orderModel.create({
+      ...baseFields(officeA),
+      orderCode: 'OR-A',
+    });
+    orderB = await orderModel.create({
+      ...baseFields(officeB),
+      orderCode: 'OR-B',
+    });
   });
 
   afterAll(async () => {
