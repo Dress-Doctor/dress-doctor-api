@@ -182,7 +182,7 @@ export class OrderService {
         totalAmount,
         promoCodeId: pricing.promoCodeId ?? null,
         subscriptionId: pricing.subscriptionId ?? null,
-        quotaConsumedKg: pricing.quotaConsumedKg,
+        quotaConsumed: pricing.quotaConsumed,
         balanceDue: Math.max(0, totalAmount - order.amountPaid),
       },
       { context: { changedBy }, returnDocument: 'after' } as never,
@@ -191,15 +191,15 @@ export class OrderService {
 
   /**
    * Apply the one-time side effects of confirming an order: decrement the
-   * subscription's remainingQuota by the snapshotted quotaConsumedKg and record
+   * subscription's remainingQuota by the snapshotted quotaConsumed and record
    * the promo redemption. Runs exactly once because the transition guard only
    * permits DRAFT→CONFIRMED (a confirmed order can't be re-confirmed).
    */
   private async finalizeOnConfirm(order: Order) {
-    if (order.subscriptionId && order.quotaConsumedKg > 0) {
+    if (order.subscriptionId && order.quotaConsumed > 0) {
       await this.subscriptionModel.updateOne(
         { _id: order.subscriptionId },
-        { $inc: { remainingQuota: -order.quotaConsumedKg } },
+        { $inc: { remainingQuota: -order.quotaConsumed } },
       );
     }
 

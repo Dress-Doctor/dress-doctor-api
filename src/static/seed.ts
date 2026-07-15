@@ -10,6 +10,11 @@ import {
   RewardRuleTypeEnum,
   RewardTierMetricEnum,
 } from 'src/schema/reward/reward.dto';
+import {
+  BillingCycleEnum,
+  OveragePolicyEnum,
+  QuotaTypeEnum,
+} from 'src/schema/subscription/subscription.dto';
 
 const crud = (subject: SubjectEnum) => [
   { subject, action: PermissionActionEnum.CREATE },
@@ -251,6 +256,8 @@ export default {
     ...crud(SubjectEnum.RewardRule),
     ...crud(SubjectEnum.RewardTier),
     ...crud(SubjectEnum.RewardLedger),
+    ...crud(SubjectEnum.Subscription),
+    ...crud(SubjectEnum.SubscriptionPlan),
   ],
 
   // RolePermission mappings for the internal/staff roles — external
@@ -381,6 +388,26 @@ export default {
           subject: SubjectEnum.RewardTier,
           action: PermissionActionEnum.READ,
         },
+        // Subscriptions: own enrolment lifecycle + plan catalog reads.
+        {
+          subject: SubjectEnum.Subscription,
+          action: PermissionActionEnum.READ,
+          conditions: { customerId: '$self' },
+        },
+        {
+          subject: SubjectEnum.Subscription,
+          action: PermissionActionEnum.CREATE,
+          conditions: { customerId: '$self' },
+        },
+        {
+          subject: SubjectEnum.Subscription,
+          action: PermissionActionEnum.UPDATE,
+          conditions: { customerId: '$self' },
+        },
+        {
+          subject: SubjectEnum.SubscriptionPlan,
+          action: PermissionActionEnum.READ,
+        },
       ],
     },
     {
@@ -426,6 +453,84 @@ export default {
       criteria: { everyNthOrder: 5, points: 500 },
       description:
         'Every 5th paid order earns a 500-point bonus (free-wash equivalent)',
+    },
+  ],
+
+  // Plan catalog (§2.2) — the blueprint's reference tiers as DATA. All plans
+  // include free Douala pickup/delivery; quarterly (≈10% off) variants are a
+  // data add, not a deploy. KG-variant quotas are placeholder economics.
+  subscriptionPlans: [
+    {
+      planName: 'Basic',
+      description: '40 pieces per month',
+      price: 20000,
+      billingCycle: BillingCycleEnum.MONTHLY,
+      quotaType: QuotaTypeEnum.PIECES,
+      quotaAmount: 40,
+      overagePolicy: OveragePolicyEnum.PER_UNIT,
+      includedAllowances: [],
+      rolloverPeriods: 1,
+    },
+    {
+      planName: 'Standard',
+      description: '100 pieces per month + 4 bedsheets + 3 kg curtains',
+      price: 40000,
+      billingCycle: BillingCycleEnum.MONTHLY,
+      quotaType: QuotaTypeEnum.PIECES,
+      quotaAmount: 100,
+      overagePolicy: OveragePolicyEnum.PER_UNIT,
+      includedAllowances: [
+        { category: 'bedsheets', unit: 'pieces', amount: 4 },
+        { category: 'curtains', unit: 'kg', amount: 3 },
+      ],
+      rolloverPeriods: 1,
+    },
+    {
+      planName: 'Premium',
+      description: '200 pieces per month + 8 bedsheets + 6 kg curtains',
+      price: 65000,
+      billingCycle: BillingCycleEnum.MONTHLY,
+      quotaType: QuotaTypeEnum.PIECES,
+      quotaAmount: 200,
+      overagePolicy: OveragePolicyEnum.PER_UNIT,
+      includedAllowances: [
+        { category: 'bedsheets', unit: 'pieces', amount: 8 },
+        { category: 'curtains', unit: 'kg', amount: 6 },
+      ],
+      rolloverPeriods: 1,
+    },
+    {
+      planName: 'Basic KG',
+      description: '20 kg per month',
+      price: 20000,
+      billingCycle: BillingCycleEnum.MONTHLY,
+      quotaType: QuotaTypeEnum.WEIGHT_KG,
+      quotaAmount: 20,
+      overagePolicy: OveragePolicyEnum.PER_UNIT,
+      includedAllowances: [],
+      rolloverPeriods: 1,
+    },
+    {
+      planName: 'Standard KG',
+      description: '50 kg per month',
+      price: 40000,
+      billingCycle: BillingCycleEnum.MONTHLY,
+      quotaType: QuotaTypeEnum.WEIGHT_KG,
+      quotaAmount: 50,
+      overagePolicy: OveragePolicyEnum.PER_UNIT,
+      includedAllowances: [],
+      rolloverPeriods: 1,
+    },
+    {
+      planName: 'Premium KG',
+      description: '100 kg per month',
+      price: 65000,
+      billingCycle: BillingCycleEnum.MONTHLY,
+      quotaType: QuotaTypeEnum.WEIGHT_KG,
+      quotaAmount: 100,
+      overagePolicy: OveragePolicyEnum.PER_UNIT,
+      includedAllowances: [],
+      rolloverPeriods: 1,
     },
   ],
 

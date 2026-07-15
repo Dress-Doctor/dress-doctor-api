@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "koma-client",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "/Users/ejaralive/Documents/ejara/koma-analytics-client"
+      ],
+      "port": 5173
+    }
+  ]
+}

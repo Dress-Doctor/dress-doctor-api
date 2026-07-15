@@ -21,7 +21,10 @@ import { PromoCode } from 'src/schema/promo/promo-code.schema';
 import { PromoCodeUsage } from 'src/schema/promo/promo-code-usage.schema';
 import { Setting, SettingKeys } from 'src/schema/settings/settings.schema';
 import { Subscription } from 'src/schema/subscription/subscription.schema';
-import { SubscriptionStatusEnum } from 'src/schema/subscription/subscription.dto';
+import {
+  QuotaTypeEnum,
+  SubscriptionStatusEnum,
+} from 'src/schema/subscription/subscription.dto';
 import { CreatePriceDto } from './dto/create-price.dto';
 import { FindPriceDto } from './dto/find-price.dto';
 import { QuoteDto } from './dto/quote.dto';
@@ -45,7 +48,7 @@ export interface OrderPricing {
   promoCodeId: Types.ObjectId | null;
   // Subscription bookkeeping for order creation to apply in its transaction.
   subscriptionId: Types.ObjectId | null;
-  quotaConsumedKg: number;
+  quotaConsumed: number;
 }
 
 @Injectable()
@@ -147,7 +150,7 @@ export class PricingService {
 
   /**
    * Server-authoritative order pricing, branched by pricing model. Read-only —
-   * the caller (order creation) applies the returned quotaConsumedKg /
+   * the caller (order creation) applies the returned quotaConsumed /
    * promoCodeId writes inside its own transaction. Both `/pricing/quote` and
    * order intake go through here so estimate and authoritative price agree.
    */
@@ -161,7 +164,7 @@ export class PricingService {
     let subtotal = 0;
     let currencyId: Types.ObjectId | null = null;
     let subscriptionId: Types.ObjectId | null = null;
-    let quotaConsumedKg = 0;
+    let quotaConsumed = 0;
 
     switch (data.pricingModel) {
       case PricingModelEnum.PER_PIECE: {
@@ -216,11 +219,44 @@ export class PricingService {
             message: 'The customer has no active subscription',
           });
         }
+        subscriptionId = sub._id;
+
+        if (sub.quotaType === QuotaTypeEnum.PIECES) {
+          // PER_UNIT pieces overage (§2.2): the first remainingQuota pieces
+          // are covered; each EXCESS piece is billed at its standard
+          // pay-per-piece catalog price. Customer-favourable: the PRICIEST
+          // pieces are covered first, so the billed remainder is the
+          // cheapest. Lines stay 0-priced QC rows (like Per KG) — the
+          // overage lands on the order subtotal.
+          const unitPrices: number[] = [];
+          for (const line of data.items ?? []) {
+            const price = await this.resolvePrice(
+              new Types.ObjectId(line.itemId),
+              new Types.ObjectId(line.serviceTypeId),
+              officeId,
+            );
+            currencyId = price.currencyId;
+            for (let i = 0; i < line.quantity; i++) {
+              unitPrices.push(price.unitPrice);
+            }
+          }
+          unitPrices.sort((a, b) => b - a);
+
+          const pieces = unitPrices.length;
+          const covered = Math.min(pieces, sub.remainingQuota);
+          quotaConsumed = covered;
+          subtotal = unitPrices
+            .slice(covered)
+            .reduce((sum, unitPrice) => sum + unitPrice, 0);
+          lines = this.qcLines(data.items);
+          break;
+        }
+
+        // WEIGHT_KG plans: overage kg × the configurable overageRate.
         const overageRate = await this.getRate(SettingKeys.overageRate);
-        quotaConsumedKg = Math.min(weight, sub.remainingQuota);
+        quotaConsumed = Math.min(weight, sub.remainingQuota);
         const overage = Math.max(0, weight - sub.remainingQuota);
         subtotal = overage * overageRate;
-        subscriptionId = sub._id;
         lines = this.qcLines(data.items);
         break;
       }
@@ -260,7 +296,7 @@ export class PricingService {
       currencyId,
       promoCodeId,
       subscriptionId,
-      quotaConsumedKg,
+      quotaConsumed,
     };
   }
 

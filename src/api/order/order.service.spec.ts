@@ -63,7 +63,7 @@ describe('OrderService', () => {
     orderCode: 'OR-TEST',
     pickupRequestId: undefined,
     customerId: new Types.ObjectId(),
-    quotaConsumedKg: 0,
+    quotaConsumed: 0,
     promoDiscount: 0,
     orderStatusId: { orderStatusName: status },
     ...extra,
@@ -227,7 +227,7 @@ describe('OrderService', () => {
       const promoCodeId = new Types.ObjectId();
       setOrder(OrderStatusEnum.DRAFT, {
         subscriptionId,
-        quotaConsumedKg: 5,
+        quotaConsumed: 5,
         promoCodeId,
         promoDiscount: 500,
       });
@@ -250,7 +250,7 @@ describe('OrderService', () => {
     it('does not touch quota/usage on a non-confirm transition', async () => {
       setOrder(OrderStatusEnum.RECEIVED, {
         subscriptionId: new Types.ObjectId(),
-        quotaConsumedKg: 5,
+        quotaConsumed: 5,
       });
 
       await service.washOrder('507f1f77bcf86cd799439011');
@@ -271,7 +271,7 @@ describe('OrderService', () => {
       currencyId: new Types.ObjectId(),
       promoCodeId: null,
       subscriptionId: null,
-      quotaConsumedKg: 0,
+      quotaConsumed: 0,
     };
 
     beforeEach(() => {
@@ -330,7 +330,7 @@ describe('OrderService', () => {
     it('rejects re-confirming an already CONFIRMED order (no double finalize)', async () => {
       setOrder(OrderStatusEnum.CONFIRMED, {
         subscriptionId: new Types.ObjectId(),
-        quotaConsumedKg: 5,
+        quotaConsumed: 5,
       });
 
       await expect(

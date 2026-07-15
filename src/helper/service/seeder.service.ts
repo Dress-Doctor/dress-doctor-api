@@ -37,6 +37,7 @@ import { ServiceType } from 'src/schema/catalog/service-type.schema';
 import { Setting, SettingKeys } from 'src/schema/settings/settings.schema';
 import { RewardRule } from 'src/schema/reward/reward-rule.schema';
 import { RewardTier } from 'src/schema/reward/reward-tier.schema';
+import { SubscriptionPlan } from 'src/schema/subscription/subscription-plan.schema';
 import { Service } from 'src/schema/catalog/service.schema';
 import { SubCategory } from 'src/schema/catalog/sub-category.schema';
 import currencyData from 'src/static/currency.data';
@@ -122,6 +123,9 @@ export class SeederService {
 
     @InjectModel(RewardTier.name)
     private readonly rewardTierModel: Model<RewardTier>,
+
+    @InjectModel(SubscriptionPlan.name)
+    private readonly subscriptionPlanModel: Model<SubscriptionPlan>,
   ) {}
 
   private async seedUserType() {
@@ -818,9 +822,26 @@ export class SeederService {
     );
   }
 
+  /** Plan catalog as data (§2.2) — $setOnInsert so admin edits survive. */
+  private async seedSubscriptionPlans() {
+    await this.subscriptionPlanModel.bulkWrite(
+      seed.subscriptionPlans.map((plan) => ({
+        updateOne: {
+          filter: { planName: plan.planName },
+          update: { $setOnInsert: plan },
+          upsert: true,
+        },
+      })),
+    );
+    this.logger.log(
+      `🌱 Done seeding ${seed.subscriptionPlans.length} subscription plans`,
+    );
+  }
+
   async run(): Promise<void> {
     await this.seedSettings();
     await this.seedRewards();
+    await this.seedSubscriptionPlans();
     await this.seedUserType();
     await this.seedOfficeType();
     await this.seedPickupStatus();

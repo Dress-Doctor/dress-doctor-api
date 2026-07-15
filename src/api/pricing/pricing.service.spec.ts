@@ -164,7 +164,7 @@ describe('PricingService', () => {
         totalWeightKg: 8,
       } as QuoteDto);
       expect(res.subtotal).toBe(3000);
-      expect(res.quotaConsumedKg).toBe(5);
+      expect(res.quotaConsumed).toBe(5);
       expect(res.subscriptionId).not.toBeNull();
     });
 
@@ -179,7 +179,7 @@ describe('PricingService', () => {
         totalWeightKg: 8,
       } as QuoteDto);
       expect(res.subtotal).toBe(0);
-      expect(res.quotaConsumedKg).toBe(8);
+      expect(res.quotaConsumed).toBe(8);
     });
 
     it('rejects with NO_ACTIVE_SUBSCRIPTION when none is active', async () => {
@@ -191,6 +191,99 @@ describe('PricingService', () => {
           totalWeightKg: 8,
         } as QuoteDto),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('SUBSCRIPTION — PIECES / PER_UNIT overage (§2.2)', () => {
+    const piecesSub = (remainingQuota: number) => ({
+      _id: new Types.ObjectId(),
+      quotaType: 'PIECES',
+      overagePolicy: 'PER_UNIT',
+      remainingQuota,
+    });
+
+    // Three items at distinct catalog prices, keyed by itemId.
+    const shirt = oid(); // 500
+    const dress = oid(); // 2000
+    const suit = oid(); // 3000
+    const priceBook: Record<string, number> = {
+      [shirt]: 500,
+      [dress]: 2000,
+      [suit]: 3000,
+    };
+    const usePriceBook = () =>
+      setResolver((q) => ({
+        unitPrice: priceBook[(q.itemId as Types.ObjectId).toString()],
+        currencyId,
+      }));
+
+    it('covers the PRICIEST pieces first and bills the excess at catalog price', async () => {
+      usePriceBook();
+      subscriptionModel.findOne.mockResolvedValue(piecesSub(3));
+
+      // 5 pieces: suit(3000), dress(2000), shirt×3(500). Quota 3 covers
+      // suit + dress + one shirt; excess = 2 shirts → 1000 XAF.
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.SUBSCRIPTION,
+        customerId: oid(),
+        items: [
+          line({ itemId: shirt, quantity: 3 }),
+          line({ itemId: suit, quantity: 1 }),
+          line({ itemId: dress, quantity: 1 }),
+        ],
+      } as QuoteDto);
+
+      expect(res.subtotal).toBe(1000);
+      expect(res.quotaConsumed).toBe(3);
+      expect(res.subscriptionId).not.toBeNull();
+      // QC lines stay 0-priced — the overage lands on the subtotal.
+      expect(res.lines.every((l) => l.unitPrice === 0)).toBe(true);
+    });
+
+    it('is free when the piece count fits the remaining quota', async () => {
+      usePriceBook();
+      subscriptionModel.findOne.mockResolvedValue(piecesSub(10));
+
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.SUBSCRIPTION,
+        customerId: oid(),
+        items: [line({ itemId: dress, quantity: 4 })],
+      } as QuoteDto);
+
+      expect(res.subtotal).toBe(0);
+      expect(res.quotaConsumed).toBe(4);
+    });
+
+    it('with zero quota left, every piece bills at catalog price', async () => {
+      usePriceBook();
+      subscriptionModel.findOne.mockResolvedValue(piecesSub(0));
+
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.SUBSCRIPTION,
+        customerId: oid(),
+        items: [
+          line({ itemId: suit, quantity: 1 }),
+          line({ itemId: shirt, quantity: 2 }),
+        ],
+      } as QuoteDto);
+
+      expect(res.subtotal).toBe(3000 + 500 * 2);
+      expect(res.quotaConsumed).toBe(0);
+    });
+
+    it('quota consumption is a snapshot only — pricing never writes the subscription', async () => {
+      usePriceBook();
+      const sub = piecesSub(3);
+      subscriptionModel.findOne.mockResolvedValue(sub);
+
+      await service.priceOrder({
+        pricingModel: PricingModelEnum.SUBSCRIPTION,
+        customerId: oid(),
+        items: [line({ itemId: dress, quantity: 5 })],
+      } as QuoteDto);
+
+      // remainingQuota untouched: the decrement happens once, at confirm.
+      expect(sub.remainingQuota).toBe(3);
     });
   });
 

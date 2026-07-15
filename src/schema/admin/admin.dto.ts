@@ -89,6 +89,10 @@ export enum SubjectEnum {
   RewardRule = 'RewardRule',
   RewardTier = 'RewardTier',
   RewardLedger = 'RewardLedger',
+
+  // subscriptions
+  Subscription = 'Subscription',
+  SubscriptionPlan = 'SubscriptionPlan',
 }
 
 export enum RoleEnum {

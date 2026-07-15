@@ -82,7 +82,7 @@ export class Order extends Document<Types.ObjectId> {
 
   // Snapshot of quota this order will consume; applied once at confirm.
   @Prop({ required: true, default: 0 })
-  quotaConsumedKg: number;
+  quotaConsumed: number;
 
   @Prop({ required: true, default: 0 })
   totalAmount: number;
