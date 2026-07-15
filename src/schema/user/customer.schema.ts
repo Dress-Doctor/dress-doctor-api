@@ -43,6 +43,15 @@ export class Customer extends Document<Types.ObjectId> {
   @Prop({ required: true, default: 0 })
   totalSpend: number;
 
+  // Cached Σ(reward_ledger.points) — recomputed from the ledger inside the
+  // same transaction as every ledger write (§10). Never hand-set.
+  @Prop({ required: true, default: 0 })
+  rewardPoints: number;
+
+  // Cached tier, recomputed by the accrual job from totalSpend/totalOrders.
+  @Prop({ required: false, type: Types.ObjectId, ref: 'RewardTier' })
+  rewardTierId?: Types.ObjectId;
+
   @Prop({ required: true, default: () => new Date() })
   registeredAt: Date;
 

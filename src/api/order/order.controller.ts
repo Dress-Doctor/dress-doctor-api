@@ -44,7 +44,7 @@ import { FindAllOrderWithItemsEntity } from './entities/find-all-order-with-item
 import { OrderService } from './order.service';
 
 @ApiHeader(xApiKey)
-@Controller('order')
+@Controller('orders')
 @ApiHeader(xApiSecret)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')

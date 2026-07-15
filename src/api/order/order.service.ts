@@ -12,7 +12,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
-import { scopeFilter } from 'src/helper/casl/casl-scope';
+import { scopeFilter, scopePermitsCustomer } from 'src/helper/casl/casl-scope';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { Currency } from 'src/schema/catalog/currency.schema';
@@ -164,6 +164,14 @@ export class OrderService {
     );
 
     const combinedDiscount = pricing.manualDiscount + pricing.promoDiscount;
+    // Reward redemption is applied transactionally by the redeem path and is
+    // NOT a pricing input — preserve it on top of the fresh snapshot (floored
+    // at 0 if a draft edit shrank the subtotal below the redeemed amount).
+    // ?? 0: pre-Phase-3 orders have no rewardDiscount field.
+    const totalAmount = Math.max(
+      0,
+      pricing.total - (order.rewardDiscount ?? 0),
+    );
     await this.orderModel.findOneAndUpdate(
       { _id: orderId },
       {
@@ -171,11 +179,11 @@ export class OrderService {
         manualDiscount: pricing.manualDiscount,
         promoDiscount: pricing.promoDiscount,
         discountAmount: combinedDiscount,
-        totalAmount: pricing.total,
+        totalAmount,
         promoCodeId: pricing.promoCodeId ?? null,
         subscriptionId: pricing.subscriptionId ?? null,
-        quotaConsumedKg: pricing.quotaConsumedKg,
-        balanceDue: Math.max(0, pricing.total - order.amountPaid),
+        quotaConsumed: pricing.quotaConsumed,
+        balanceDue: Math.max(0, totalAmount - order.amountPaid),
       },
       { context: { changedBy }, returnDocument: 'after' } as never,
     );
@@ -183,15 +191,15 @@ export class OrderService {
 
   /**
    * Apply the one-time side effects of confirming an order: decrement the
-   * subscription's remainingQuota by the snapshotted quotaConsumedKg and record
+   * subscription's remainingQuota by the snapshotted quotaConsumed and record
    * the promo redemption. Runs exactly once because the transition guard only
    * permits DRAFT→CONFIRMED (a confirmed order can't be re-confirmed).
    */
   private async finalizeOnConfirm(order: Order) {
-    if (order.subscriptionId && order.quotaConsumedKg > 0) {
+    if (order.subscriptionId && order.quotaConsumed > 0) {
       await this.subscriptionModel.updateOne(
         { _id: order.subscriptionId },
-        { $inc: { remainingQuota: -order.quotaConsumedKg } },
+        { $inc: { remainingQuota: -order.quotaConsumed } },
       );
     }
 
@@ -317,6 +325,7 @@ export class OrderService {
     const base = `[${platform}] ${phone}`;
 
     const customerId = new Types.ObjectId(data.customerId);
+    this.assertCreateScope(customerId, base);
     const customer = await this.userModel.findById(customerId);
     if (!customer) {
       this.logger.error(`${base} invalid customer id ${data.customerId}`);
@@ -417,6 +426,7 @@ export class OrderService {
     const base = `[${platform}] ${phone}`;
 
     const customerId = new Types.ObjectId(data.customerId);
+    this.assertCreateScope(customerId, base);
     const customer = await this.userModel.findById(customerId);
     if (!customer) {
       this.logger.error(`${base} invalid customer id ${data.customerId}`);
@@ -479,6 +489,30 @@ export class OrderService {
       `${base} has successfully created order for customer ${data.customerId}`,
     );
     return 'Order created successfully';
+  }
+
+  /**
+   * Creation-time self-scope (§2.3 booking): a customer's CREATE Order rule
+   * carries { customerId: '$self' } — they can only ever book for themselves,
+   * whatever customerId the client sends. Staff rules are unconditioned.
+   */
+  private assertCreateScope(customerId: Types.ObjectId, logBase: string) {
+    if (
+      !scopePermitsCustomer(
+        this.req.user.ability,
+        'CREATE',
+        'Order',
+        customerId,
+      )
+    ) {
+      this.logger.error(
+        `${logBase} tried to create an order for out-of-scope customer ${customerId.toString()}`,
+      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Customer not found',
+      });
+    }
   }
 
   /** PER_KG needs a positive weight (else it silently prices to 0). */

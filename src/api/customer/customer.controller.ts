@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Logger,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -17,7 +18,10 @@ import {
   ApiResponse,
   ApiSecurity,
 } from '@nestjs/swagger';
-import type { AppRequestWithUser } from 'src/dto/request-data.dto';
+import type {
+  AppRequestWithUser,
+  PaginationDto,
+} from 'src/dto/request-data.dto';
 import {
   ApiSuccessResponse,
   ApiSuccessResponseWithPagination,
@@ -27,6 +31,7 @@ import {
 import { CustomerService } from './customer.service';
 import { FindCustomerDto } from './dto/find-customer.dto';
 import { RegisterCustomerDto } from './dto/register-customer.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @Controller('customers')
 @ApiHeader(xApiKey)
@@ -88,5 +93,66 @@ export class CustomerController {
   @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
   async findOne(@Param('id') id: string) {
     return await this.customerService.findOne(id);
+  }
+
+  // -------- customer self-service sub-resources (§2.3, all self-scoped) ----
+
+  @Get(':id/orders')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Order history + live status (self-scoped)' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    type: ApiSuccessResponseWithPagination,
+  })
+  async findOrders(@Param('id') id: string, @Query() query: PaginationDto) {
+    return await this.customerService.findOrders(id, query);
+  }
+
+  @Get(':id/rewards')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Points balance, tier, progress + recent ledger (self-scoped)',
+  })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async findRewards(@Param('id') id: string) {
+    return await this.customerService.findRewards(id);
+  }
+
+  @Get(':id/referral')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Own referral code, shareable link + brought-in count',
+  })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async findReferral(@Param('id') id: string) {
+    return await this.customerService.findReferral(id);
+  }
+
+  @Get(':id/balance')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Outstanding balance + the orders carrying it (self-scoped)',
+  })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async findBalance(@Param('id') id: string) {
+    return await this.customerService.findBalance(id);
+  }
+
+  @Get(':id/subscription')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Live subscription view + plan (self-scoped)' })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async findSubscription(@Param('id') id: string) {
+    return await this.customerService.findSubscription(id);
+  }
+
+  @Patch(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Self-service profile edit (contact, language, opt-in)',
+  })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async updateProfile(@Param('id') id: string, @Body() data: UpdateProfileDto) {
+    return await this.customerService.updateProfile(id, data);
   }
 }

@@ -33,7 +33,7 @@ import { FindAllUserDto } from './dto/find-all-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserService } from './user.service';
 
-@Controller('user')
+@Controller('users')
 @ApiHeader(xApiKey)
 @ApiHeader(xApiSecret)
 @ApiSecurity('x-api-key')
@@ -43,7 +43,7 @@ export class UserController {
   private readonly logger = new Logger(UserController.name);
   constructor(private readonly userService: UserService) {}
 
-  @Post('new-user')
+  @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiBearerAuth('access-token')
   @ApiBody({ type: CreateUserDto })

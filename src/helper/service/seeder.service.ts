@@ -35,6 +35,9 @@ import { Currency } from 'src/schema/catalog/currency.schema';
 import { Item } from 'src/schema/catalog/item.schema';
 import { ServiceType } from 'src/schema/catalog/service-type.schema';
 import { Setting, SettingKeys } from 'src/schema/settings/settings.schema';
+import { RewardRule } from 'src/schema/reward/reward-rule.schema';
+import { RewardTier } from 'src/schema/reward/reward-tier.schema';
+import { SubscriptionPlan } from 'src/schema/subscription/subscription-plan.schema';
 import { Service } from 'src/schema/catalog/service.schema';
 import { SubCategory } from 'src/schema/catalog/sub-category.schema';
 import currencyData from 'src/static/currency.data';
@@ -114,6 +117,15 @@ export class SeederService {
 
     @InjectModel(ItemSubCategory.name)
     private readonly itemSubCategoryModel: Model<ItemSubCategory>,
+
+    @InjectModel(RewardRule.name)
+    private readonly rewardRuleModel: Model<RewardRule>,
+
+    @InjectModel(RewardTier.name)
+    private readonly rewardTierModel: Model<RewardTier>,
+
+    @InjectModel(SubscriptionPlan.name)
+    private readonly subscriptionPlanModel: Model<SubscriptionPlan>,
   ) {}
 
   private async seedUserType() {
@@ -768,6 +780,11 @@ export class SeederService {
         description:
           'Hours since last completed inactivity-scan before /metrics flags the cron overdue',
       },
+      {
+        key: SettingKeys.rewardPointValueXaf,
+        value: 1,
+        description: 'XAF discount value of one reward point at redemption',
+      },
     ];
     const operations = defaults.map((s) => ({
       updateOne: {
@@ -780,8 +797,51 @@ export class SeederService {
     this.logger.log(`🌱 Done seeding ${defaults.length} settings`);
   }
 
+  /** Rewards config as data (§2.1) — $setOnInsert so admin edits survive. */
+  private async seedRewards() {
+    await this.rewardRuleModel.bulkWrite(
+      seed.rewardRules.map((rule) => ({
+        updateOne: {
+          filter: { type: rule.type },
+          update: { $setOnInsert: rule },
+          upsert: true,
+        },
+      })),
+    );
+    await this.rewardTierModel.bulkWrite(
+      seed.rewardTiers.map((tier) => ({
+        updateOne: {
+          filter: { tierName: tier.tierName },
+          update: { $setOnInsert: tier },
+          upsert: true,
+        },
+      })),
+    );
+    this.logger.log(
+      `🌱 Done seeding ${seed.rewardRules.length} reward rules + ${seed.rewardTiers.length} tiers`,
+    );
+  }
+
+  /** Plan catalog as data (§2.2) — $setOnInsert so admin edits survive. */
+  private async seedSubscriptionPlans() {
+    await this.subscriptionPlanModel.bulkWrite(
+      seed.subscriptionPlans.map((plan) => ({
+        updateOne: {
+          filter: { planName: plan.planName },
+          update: { $setOnInsert: plan },
+          upsert: true,
+        },
+      })),
+    );
+    this.logger.log(
+      `🌱 Done seeding ${seed.subscriptionPlans.length} subscription plans`,
+    );
+  }
+
   async run(): Promise<void> {
     await this.seedSettings();
+    await this.seedRewards();
+    await this.seedSubscriptionPlans();
     await this.seedUserType();
     await this.seedOfficeType();
     await this.seedPickupStatus();

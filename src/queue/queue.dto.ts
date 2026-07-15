@@ -2,12 +2,19 @@ export enum Queues {
   notification = 'notification',
   inactivityScan = 'inactivity-scan',
   paymentReconcile = 'payment-reconcile',
+  rewardAccrual = 'reward-accrual',
 }
 
 export enum QueueProcessor {
   notification = `${Queues.notification}_processor`,
   inactivityScan = `${Queues.inactivityScan}_processor`,
   paymentReconcile = `${Queues.paymentReconcile}_processor`,
+  rewardAccrual = `${Queues.rewardAccrual}_processor`,
+}
+
+// order.paid → reward accrual job (one per order, idempotent end to end).
+export interface RewardAccrualJobData {
+  orderId: string;
 }
 
 // Job payload carried from cron -> queue -> processor. `jobRunId` links the

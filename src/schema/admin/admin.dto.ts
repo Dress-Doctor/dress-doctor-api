@@ -84,6 +84,15 @@ export enum SubjectEnum {
 
   // follow-up (customer-inactivity alerts)
   FollowUp = 'FollowUp',
+
+  // rewards & loyalty
+  RewardRule = 'RewardRule',
+  RewardTier = 'RewardTier',
+  RewardLedger = 'RewardLedger',
+
+  // subscriptions
+  Subscription = 'Subscription',
+  SubscriptionPlan = 'SubscriptionPlan',
 }
 
 export enum RoleEnum {

@@ -9,6 +9,9 @@ import { Customer } from 'src/schema/user/customer.schema';
 import { Referral } from 'src/schema/user/referral.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { User } from 'src/schema/user/user.schema';
+import { Order } from 'src/schema/order/order.schema';
+import { Subscription } from 'src/schema/subscription/subscription.schema';
+import { RewardService } from '../reward/reward.service';
 import { CustomerService, DEFAULT_INACTIVE_DAYS } from './customer.service';
 import { FindCustomerDto } from './dto/find-customer.dto';
 
@@ -91,6 +94,9 @@ describe('CustomerService', () => {
         { provide: getModelToken(UserType.name), useValue: userTypeModel },
         { provide: getModelToken(Customer.name), useValue: customerModel },
         { provide: getModelToken(Referral.name), useValue: referralModel },
+        { provide: getModelToken(Order.name), useValue: {} },
+        { provide: getModelToken(Subscription.name), useValue: {} },
+        { provide: RewardService, useValue: {} },
       ],
     }).compile();
 

@@ -58,3 +58,23 @@ export function scopeFilter(
   // null → at least one matching rule has no conditions → unrestricted.
   return castIds(query ?? {}) as Record<string, unknown>;
 }
+
+/**
+ * Creation-time scope check: there is no document to query yet, so decide
+ * whether the caller's (action, subject) rules permit acting for this
+ * customer id. Unrestricted staff → true; a customer's `$self` condition
+ * must mention the target id; fully denied → false.
+ */
+export function scopePermitsCustomer(
+  ability: MongoAbility<AppAbilityDto, ConditionsDto>,
+  action: CaslActionsDto,
+  subject: CaslSubjectsDto,
+  customerId: Types.ObjectId,
+): boolean {
+  const scope = scopeFilter(ability, action, subject);
+  if (Object.keys(scope).length === 0) return true;
+
+  const flat = JSON.stringify(scope);
+  if (flat.includes('"$in":[]')) return false;
+  return flat.includes(customerId.toString());
+}
