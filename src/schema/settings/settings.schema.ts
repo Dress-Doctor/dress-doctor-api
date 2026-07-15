@@ -39,4 +39,6 @@ export const SettingKeys = {
   overageRate: 'overageRate',
   inactiveDays: 'inactiveDays',
   followUpCooldownDays: 'followUpCooldownDays',
+  reconcileOverdueMinutes: 'reconcileOverdueMinutes',
+  inactivityOverdueHours: 'inactivityOverdueHours',
 } as const;

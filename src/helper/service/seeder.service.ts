@@ -756,6 +756,18 @@ export class SeederService {
         value: 7,
         description: 'Days before an unresolved inactivity alert can re-fire',
       },
+      {
+        key: SettingKeys.reconcileOverdueMinutes,
+        value: 45,
+        description:
+          'Minutes since last completed payment-reconcile before /metrics flags the cron overdue',
+      },
+      {
+        key: SettingKeys.inactivityOverdueHours,
+        value: 26,
+        description:
+          'Hours since last completed inactivity-scan before /metrics flags the cron overdue',
+      },
     ];
     const operations = defaults.map((s) => ({
       updateOne: {

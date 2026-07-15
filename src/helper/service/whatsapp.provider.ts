@@ -1,6 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { maskPhone } from '../pii';
+import { ProviderMetricsService } from '../metrics/provider-metrics.service';
+
+export const WHATSAPP_PROVIDER_NAME = 'whatsapp';
 
 export interface WhatsAppSendParams {
   to: string; // E.164 recipient
@@ -27,6 +30,12 @@ interface WhatsAppApiResponse {
 export class WhatsAppProvider {
   private readonly logger = new Logger(WhatsAppProvider.name);
 
+  // Optional so unit tests constructing the provider directly keep working;
+  // in the app the global MetricsModule always provides it.
+  constructor(
+    @Optional() private readonly providerMetrics?: ProviderMetricsService,
+  ) {}
+
   async send(params: WhatsAppSendParams): Promise<WhatsAppSendResult> {
     const apiUrl = process.env.WHATSAPP_API_URL;
     const token = process.env.WHATSAPP_TOKEN;
@@ -38,9 +47,35 @@ export class WhatsAppProvider {
         `WhatsApp not configured — console send to ${maskPhone(params.to)} ` +
           `template ${params.templateName} (${providerMessageId})`,
       );
+      // Console fallback is not a real provider call — not recorded.
       return { providerMessageId, response: { console: true } };
     }
 
+    const startedAt = Date.now();
+    try {
+      const result = await this.dispatch(apiUrl, token, phoneNumberId, params);
+      await this.providerMetrics?.recordCall(
+        WHATSAPP_PROVIDER_NAME,
+        Date.now() - startedAt,
+        true,
+      );
+      return result;
+    } catch (err) {
+      await this.providerMetrics?.recordCall(
+        WHATSAPP_PROVIDER_NAME,
+        Date.now() - startedAt,
+        false,
+      );
+      throw err;
+    }
+  }
+
+  private async dispatch(
+    apiUrl: string,
+    token: string,
+    phoneNumberId: string,
+    params: WhatsAppSendParams,
+  ): Promise<WhatsAppSendResult> {
     const body = {
       messaging_product: 'whatsapp',
       to: params.to,
