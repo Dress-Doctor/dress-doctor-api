@@ -4,6 +4,7 @@ import { AppUtilService } from 'src/helper/service/app-util.service';
 import { NotificationService } from 'src/helper/service/notification.service';
 import { WhatsAppProvider } from 'src/helper/service/whatsapp.provider';
 import { TransactionalMessageListener } from './transactional-message.listener';
+import { RewardAccrualListener } from './reward-accrual.listener';
 
 // Domain-event listeners (side effects off the lean write path). Lives in the
 // API process — that's where the domain events are emitted.
@@ -11,6 +12,7 @@ import { TransactionalMessageListener } from './transactional-message.listener';
   imports: [QueueProducerModule],
   providers: [
     TransactionalMessageListener,
+    RewardAccrualListener,
     NotificationService,
     WhatsAppProvider,
     AppUtilService,

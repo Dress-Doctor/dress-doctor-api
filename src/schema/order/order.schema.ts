@@ -60,6 +60,15 @@ export class Order extends Document<Types.ObjectId> {
   @Prop({ required: true, default: 0 })
   discountAmount: number;
 
+  // Reward-point redemption applied to this order (int XAF) + the points
+  // spent for it. Written only by the transactional redeem path (§10) —
+  // reprice() preserves it, never recomputes it.
+  @Prop({ required: true, default: 0 })
+  rewardDiscount: number;
+
+  @Prop({ required: true, default: 0 })
+  redeemedPoints: number;
+
   // The applied promo code (string) — kept so reprice re-runs the engine; its id
   // is resolved on the snapshot. Usage is recorded once, at confirm.
   @Prop({ required: false })

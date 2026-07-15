@@ -223,7 +223,9 @@ describe('HTTP contract (e2e)', () => {
 
       for (const step of ['confirm', 'received', 'washing', 'ready']) {
         await auth(
-          request(app.getHttpServer()).post(`/api/v1/orders/${orderId}/${step}`),
+          request(app.getHttpServer()).post(
+            `/api/v1/orders/${orderId}/${step}`,
+          ),
         ).expect(200);
       }
 
@@ -256,7 +258,9 @@ describe('HTTP contract (e2e)', () => {
       const key = 'e2e-idem-key-1';
       const pay = () =>
         auth(
-          request(app.getHttpServer()).post(`/api/v1/orders/${orderId}/payments`),
+          request(app.getHttpServer()).post(
+            `/api/v1/orders/${orderId}/payments`,
+          ),
         )
           .set('x-idempotency-key', key)
           .send({
@@ -341,7 +345,9 @@ describe('HTTP contract (e2e)', () => {
         paymentTypeName: 'PAYMENT',
       });
       await scoped(
-        request(app.getHttpServer()).post(`/api/v1/orders/${orderBId}/payments`),
+        request(app.getHttpServer()).post(
+          `/api/v1/orders/${orderBId}/payments`,
+        ),
       )
         .send({
           paymentMethodId: method._id.toString(),

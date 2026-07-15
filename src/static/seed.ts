@@ -6,6 +6,10 @@ import {
   SubjectEnum,
 } from 'src/schema/admin/admin.dto';
 import { OfficeTypeEnum } from 'src/schema/office/office.dto';
+import {
+  RewardRuleTypeEnum,
+  RewardTierMetricEnum,
+} from 'src/schema/reward/reward.dto';
 
 const crud = (subject: SubjectEnum) => [
   { subject, action: PermissionActionEnum.CREATE },
@@ -244,6 +248,9 @@ export default {
     ...readUpdate(SubjectEnum.Service),
     ...readUpdate(SubjectEnum.ServiceType),
     ...readUpdate(SubjectEnum.Currency),
+    ...crud(SubjectEnum.RewardRule),
+    ...crud(SubjectEnum.RewardTier),
+    ...crud(SubjectEnum.RewardLedger),
   ],
 
   // RolePermission mappings for the internal/staff roles — external
@@ -303,6 +310,13 @@ export default {
         ...crud(SubjectEnum.Order),
         ...crud(SubjectEnum.PickupRequest),
         ...readUpdate(SubjectEnum.FollowUp),
+        // Customers are not office-owned (§1), so reward reads are unscoped.
+        {
+          subject: SubjectEnum.RewardLedger,
+          action: PermissionActionEnum.READ,
+        },
+        { subject: SubjectEnum.RewardRule, action: PermissionActionEnum.READ },
+        { subject: SubjectEnum.RewardTier, action: PermissionActionEnum.READ },
       ],
     },
     {
@@ -347,6 +361,26 @@ export default {
           action: PermissionActionEnum.READ,
           conditions: { customerId: '$self' },
         },
+        // Rewards: own ledger reads + own redemption; rules/tiers are
+        // customer-visible config (no conditions).
+        {
+          subject: SubjectEnum.RewardLedger,
+          action: PermissionActionEnum.READ,
+          conditions: { customerId: '$self' },
+        },
+        {
+          subject: SubjectEnum.RewardLedger,
+          action: PermissionActionEnum.CREATE,
+          conditions: { customerId: '$self' },
+        },
+        {
+          subject: SubjectEnum.RewardRule,
+          action: PermissionActionEnum.READ,
+        },
+        {
+          subject: SubjectEnum.RewardTier,
+          action: PermissionActionEnum.READ,
+        },
       ],
     },
     {
@@ -378,4 +412,48 @@ export default {
     description: 'Created by the system by default',
     scope: [PlatformEnum.WEB, PlatformEnum.MOBILE, PlatformEnum.MICRO_SERVICE],
   },
+
+  // Rewards engine defaults (§2.1) — placeholder economics, tuned as DATA
+  // (PUT /rewards/rules|tiers), never a deploy. $setOnInsert on re-seed.
+  rewardRules: [
+    {
+      type: RewardRuleTypeEnum.ACCRUAL,
+      criteria: { per: 100, points: 1 },
+      description: '1 point per 100 XAF paid',
+    },
+    {
+      type: RewardRuleTypeEnum.MILESTONE,
+      criteria: { everyNthOrder: 5, points: 500 },
+      description:
+        'Every 5th paid order earns a 500-point bonus (free-wash equivalent)',
+    },
+  ],
+
+  rewardTiers: [
+    {
+      tierName: 'Standard',
+      metric: RewardTierMetricEnum.SPEND,
+      threshold: 0,
+      rank: 0,
+      perk: { description: 'Base tier' },
+    },
+    {
+      tierName: 'Silver',
+      metric: RewardTierMetricEnum.SPEND,
+      threshold: 100000,
+      rank: 1,
+      perk: { description: 'Priority pickup', priorityPickup: true },
+    },
+    {
+      tierName: 'Gold',
+      metric: RewardTierMetricEnum.SPEND,
+      threshold: 500000,
+      rank: 2,
+      perk: {
+        description: 'Priority pickup + 5% off',
+        priorityPickup: true,
+        discountPercent: 5,
+      },
+    },
+  ],
 };

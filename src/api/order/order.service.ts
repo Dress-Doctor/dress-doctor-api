@@ -164,6 +164,14 @@ export class OrderService {
     );
 
     const combinedDiscount = pricing.manualDiscount + pricing.promoDiscount;
+    // Reward redemption is applied transactionally by the redeem path and is
+    // NOT a pricing input — preserve it on top of the fresh snapshot (floored
+    // at 0 if a draft edit shrank the subtotal below the redeemed amount).
+    // ?? 0: pre-Phase-3 orders have no rewardDiscount field.
+    const totalAmount = Math.max(
+      0,
+      pricing.total - (order.rewardDiscount ?? 0),
+    );
     await this.orderModel.findOneAndUpdate(
       { _id: orderId },
       {
@@ -171,11 +179,11 @@ export class OrderService {
         manualDiscount: pricing.manualDiscount,
         promoDiscount: pricing.promoDiscount,
         discountAmount: combinedDiscount,
-        totalAmount: pricing.total,
+        totalAmount,
         promoCodeId: pricing.promoCodeId ?? null,
         subscriptionId: pricing.subscriptionId ?? null,
         quotaConsumedKg: pricing.quotaConsumedKg,
-        balanceDue: Math.max(0, pricing.total - order.amountPaid),
+        balanceDue: Math.max(0, totalAmount - order.amountPaid),
       },
       { context: { changedBy }, returnDocument: 'after' } as never,
     );

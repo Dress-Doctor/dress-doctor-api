@@ -12,6 +12,8 @@ import { FailedJobsService } from 'src/helper/service/failed-jobs.service';
 import { RedisModule } from 'src/helper/redis/redis.module';
 import { PaymentReconcileService } from 'src/api/payment/payment-reconcile.service';
 import { InactivityScanService } from 'src/api/follow-up/inactivity-scan.service';
+import { RewardAccrualService } from 'src/api/reward/reward-accrual.service';
+import { RewardAccrualProcessor } from './processor/reward-accrual.processor';
 
 @Module({
   imports: [QueueProducerModule, RedisModule],
@@ -19,6 +21,8 @@ import { InactivityScanService } from 'src/api/follow-up/inactivity-scan.service
     NotificationProcessor,
     InactivityScanProcessor,
     PaymentReconcileProcessor,
+    RewardAccrualProcessor,
+    RewardAccrualService,
     ScheduledJobRunner,
     AppUtilService,
     NotificationService,

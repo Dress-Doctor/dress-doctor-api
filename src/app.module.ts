@@ -31,6 +31,7 @@ import { PricingModule } from './api/pricing/pricing.module';
 import { OrderModule } from './api/order/order.module';
 import { PaymentModule } from './api/payment/payment.module';
 import { FollowUpModule } from './api/follow-up/follow-up.module';
+import { RewardModule } from './api/reward/reward.module';
 import { EventsModule } from './events/events.module';
 import { MetricsModule } from './helper/metrics/metrics.module';
 import { BullModule } from '@nestjs/bullmq';
@@ -57,6 +58,7 @@ import { envValidationSchema } from './config/env.validation';
     OrderModule,
     PaymentModule,
     FollowUpModule,
+    RewardModule,
     EventsModule,
     MetricsModule,
     QueueProcessorModule,

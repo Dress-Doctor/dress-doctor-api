@@ -41,4 +41,5 @@ export const SettingKeys = {
   followUpCooldownDays: 'followUpCooldownDays',
   reconcileOverdueMinutes: 'reconcileOverdueMinutes',
   inactivityOverdueHours: 'inactivityOverdueHours',
+  rewardPointValueXaf: 'rewardPointValueXaf',
 } as const;

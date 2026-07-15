@@ -78,8 +78,9 @@ describe('OTP login over HTTP (e2e)', () => {
     // plaintext OTP (hashed at rest) and keeps the login flow off SMTP/WhatsApp.
     jest
       .spyOn(NotificationService.prototype, 'addToQueue')
-      .mockImplementation(async function (payload: unknown) {
+      .mockImplementation((payload: unknown) => {
         outbox.push(payload as (typeof outbox)[number]);
+        return Promise.resolve();
       });
 
     const moduleRef = await Test.createTestingModule({
