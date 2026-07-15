@@ -408,6 +408,58 @@ export default {
           subject: SubjectEnum.SubscriptionPlan,
           action: PermissionActionEnum.READ,
         },
+        // Booking (§2.3): create/edit OWN draft orders from the portal. The
+        // engine prices server-side; item rows scope through the parent
+        // order's { customerId: '$self' } query filter.
+        {
+          subject: SubjectEnum.Order,
+          action: PermissionActionEnum.CREATE,
+          conditions: { customerId: '$self' },
+        },
+        {
+          subject: SubjectEnum.Order,
+          action: PermissionActionEnum.UPDATE,
+          conditions: { customerId: '$self' },
+        },
+        {
+          subject: SubjectEnum.OrderItem,
+          action: PermissionActionEnum.CREATE,
+        },
+        {
+          subject: SubjectEnum.OrderItem,
+          action: PermissionActionEnum.UPDATE,
+        },
+        {
+          subject: SubjectEnum.OrderItem,
+          action: PermissionActionEnum.DELETE,
+        },
+        // Own profile edits (contact, whatsappPhone, language, opt-in).
+        {
+          subject: SubjectEnum.Customer,
+          action: PermissionActionEnum.UPDATE,
+          conditions: { userId: '$self' },
+        },
+        // Catalog/taxonomy reads the portal needs (quote, booking, statuses).
+        { subject: SubjectEnum.Item, action: PermissionActionEnum.READ },
+        { subject: SubjectEnum.Service, action: PermissionActionEnum.READ },
+        { subject: SubjectEnum.Category, action: PermissionActionEnum.READ },
+        {
+          subject: SubjectEnum.SubCategory,
+          action: PermissionActionEnum.READ,
+        },
+        {
+          subject: SubjectEnum.ServiceType,
+          action: PermissionActionEnum.READ,
+        },
+        { subject: SubjectEnum.Currency, action: PermissionActionEnum.READ },
+        {
+          subject: SubjectEnum.OrderStatus,
+          action: PermissionActionEnum.READ,
+        },
+        {
+          subject: SubjectEnum.PaymentMethod,
+          action: PermissionActionEnum.READ,
+        },
       ],
     },
     {

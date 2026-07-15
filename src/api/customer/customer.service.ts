@@ -21,8 +21,16 @@ import { Referral } from 'src/schema/user/referral.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { UserTypeEum } from 'src/schema/user/user.dto';
 import { User } from 'src/schema/user/user.schema';
+import { Order } from 'src/schema/order/order.schema';
+import { OrderStatus } from 'src/schema/order/order-status.schema';
+import { Subscription } from 'src/schema/subscription/subscription.schema';
+import { SubscriptionPlan } from 'src/schema/subscription/subscription-plan.schema';
+import { SubscriptionStatusEnum } from 'src/schema/subscription/subscription.dto';
+import { type PaginationDto } from 'src/dto/request-data.dto';
+import { RewardService } from '../reward/reward.service';
 import { FindCustomerDto } from './dto/find-customer.dto';
 import { RegisterCustomerDto } from './dto/register-customer.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 // Canonical "inactive" threshold until the settings collection lands (§19).
 export const DEFAULT_INACTIVE_DAYS = 14;
@@ -39,6 +47,10 @@ export class CustomerService {
     @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
     @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
     @InjectModel(Referral.name) private readonly referralModel: Model<Referral>,
+    @InjectModel(Order.name) private readonly orderModel: Model<Order>,
+    @InjectModel(Subscription.name)
+    private readonly subscriptionModel: Model<Subscription>,
+    private readonly rewardService: RewardService,
   ) {}
 
   private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
@@ -261,5 +273,171 @@ export class CustomerService {
       });
     }
     return customer;
+  }
+
+  // ------------------------------------------------ self-service (§2.3)
+  // All by-id reads below resolve the customer through the caller's READ
+  // Customer scope first ({ userId: '$self' } for customers), so a foreign
+  // customer id is a plain 404 — the cross-customer IDOR test rides on this.
+
+  /** Scoped profile fetch for the sub-resource views (action-specific). */
+  private async findScopedCustomer(
+    id: string,
+    action: CaslActionsDto,
+  ): Promise<Customer> {
+    const scope = scopeFilter(this.req.user.ability, action, 'Customer');
+    const customer = await this.customerModel.findOne({
+      _id: new Types.ObjectId(id),
+      ...scope,
+    });
+    if (!customer) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Customer not found',
+      });
+    }
+    return customer;
+  }
+
+  /** Order history + live status for one customer (paginated). */
+  async findOrders(id: string, { page, size, ...query }: PaginationDto) {
+    this.can('READ', 'Customer');
+    this.can('READ', 'Order');
+    const customer = await this.findScopedCustomer(id, 'READ');
+
+    const orderScope = scopeFilter(this.req.user.ability, 'READ', 'Order');
+    const match = { customerId: customer.userId, ...orderScope };
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(
+      query.sort ?? 'createdAt:desc',
+    );
+    const total = await this.orderModel.countDocuments(match);
+    const data = await this.orderModel
+      .find(match)
+      .sort(sort)
+      .skip(skip)
+      .limit(size)
+      .populate({ model: OrderStatus.name, path: 'orderStatusId' });
+
+    const totalPages = Math.ceil(total / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+    return { total, data, nextPage };
+  }
+
+  /** Balance/tier/progress/recent ledger — delegated to the rewards engine. */
+  async findRewards(id: string) {
+    this.can('READ', 'Customer');
+    const customer = await this.findScopedCustomer(id, 'READ');
+    return this.rewardService.rewardsSummaryFor(customer.userId);
+  }
+
+  /** Own referral code + shareable link + brought-in count. */
+  async findReferral(id: string) {
+    this.can('READ', 'Customer');
+    const customer = await this.findScopedCustomer(id, 'READ');
+
+    const referredCount = await this.referralModel.countDocuments({
+      referrerId: customer.userId,
+    });
+
+    return {
+      referralCode: customer.referralCode,
+      // Portal origin from env (same var the office-link flow uses).
+      referralLink: `${process.env.DD_WEB_URL ?? ''}/r/${customer.referralCode}`,
+      referredCount,
+    };
+  }
+
+  /** Outstanding balance + exactly which orders carry it. */
+  async findBalance(id: string) {
+    this.can('READ', 'Customer');
+    this.can('READ', 'Order');
+    const customer = await this.findScopedCustomer(id, 'READ');
+
+    const orderScope = scopeFilter(this.req.user.ability, 'READ', 'Order');
+    const owing = await this.orderModel
+      .find({
+        customerId: customer.userId,
+        balanceDue: { $gt: 0 },
+        ...orderScope,
+      })
+      .sort({ balanceDue: -1, createdAt: 1 })
+      .select('orderCode totalAmount amountPaid balanceDue paymentStatus');
+
+    const outstanding = owing.reduce((sum, o) => sum + o.balanceDue, 0);
+    return { outstanding, orders: owing };
+  }
+
+  /** The customer's live subscription view (plan populated), if any. */
+  async findSubscription(id: string) {
+    this.can('READ', 'Customer');
+    const customer = await this.findScopedCustomer(id, 'READ');
+
+    const subscription = await this.subscriptionModel
+      .findOne({
+        customerId: customer.userId,
+        status: {
+          $in: [SubscriptionStatusEnum.ACTIVE, SubscriptionStatusEnum.PAUSED],
+        },
+      })
+      .populate({ model: SubscriptionPlan.name, path: 'planId' });
+
+    return { subscription };
+  }
+
+  /**
+   * Self-service profile edit (§2.3): contact/preferences only. Splits the
+   * write across the User (whatsappPhone/email/preferredLanguage) and the
+   * Customer profile (pickupAddress/notificationsOptIn); both audited.
+   */
+  async updateProfile(id: string, data: UpdateProfileDto) {
+    this.can('UPDATE', 'Customer');
+    const customer = await this.findScopedCustomer(id, 'UPDATE');
+    const changedBy = new Types.ObjectId(this.req.user.userId);
+
+    if (data.email) {
+      const emailTaken = await this.userModel.exists({
+        email: data.email,
+        _id: { $ne: customer.userId },
+      });
+      if (emailTaken) {
+        throw new ConflictException({
+          code: 'CONFLICT',
+          message: 'The provided email has been taken',
+        });
+      }
+    }
+
+    const userUpdate: Record<string, unknown> = {};
+    if (data.whatsappPhone !== undefined)
+      userUpdate.whatsappPhone = data.whatsappPhone;
+    if (data.email !== undefined) userUpdate.email = data.email;
+    if (data.preferredLanguage !== undefined)
+      userUpdate.preferredLanguage = data.preferredLanguage;
+
+    const profileUpdate: Record<string, unknown> = {};
+    if (data.pickupAddress !== undefined)
+      profileUpdate.pickupAddress = data.pickupAddress;
+    if (data.notificationsOptIn !== undefined)
+      profileUpdate.notificationsOptIn = data.notificationsOptIn;
+
+    if (Object.keys(userUpdate).length > 0) {
+      await this.userModel.findOneAndUpdate(
+        { _id: customer.userId },
+        userUpdate,
+        { context: { changedBy } } as never,
+      );
+    }
+    if (Object.keys(profileUpdate).length > 0) {
+      await this.customerModel.findOneAndUpdate(
+        { _id: customer._id },
+        profileUpdate,
+        { context: { changedBy } } as never,
+      );
+    }
+
+    this.logger.log(`profile updated for customer ${customer.customerCode}`);
+    return 'Profile updated successfully';
   }
 }

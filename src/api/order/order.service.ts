@@ -12,7 +12,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
-import { scopeFilter } from 'src/helper/casl/casl-scope';
+import { scopeFilter, scopePermitsCustomer } from 'src/helper/casl/casl-scope';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { Currency } from 'src/schema/catalog/currency.schema';
@@ -325,6 +325,7 @@ export class OrderService {
     const base = `[${platform}] ${phone}`;
 
     const customerId = new Types.ObjectId(data.customerId);
+    this.assertCreateScope(customerId, base);
     const customer = await this.userModel.findById(customerId);
     if (!customer) {
       this.logger.error(`${base} invalid customer id ${data.customerId}`);
@@ -425,6 +426,7 @@ export class OrderService {
     const base = `[${platform}] ${phone}`;
 
     const customerId = new Types.ObjectId(data.customerId);
+    this.assertCreateScope(customerId, base);
     const customer = await this.userModel.findById(customerId);
     if (!customer) {
       this.logger.error(`${base} invalid customer id ${data.customerId}`);
@@ -487,6 +489,30 @@ export class OrderService {
       `${base} has successfully created order for customer ${data.customerId}`,
     );
     return 'Order created successfully';
+  }
+
+  /**
+   * Creation-time self-scope (§2.3 booking): a customer's CREATE Order rule
+   * carries { customerId: '$self' } — they can only ever book for themselves,
+   * whatever customerId the client sends. Staff rules are unconditioned.
+   */
+  private assertCreateScope(customerId: Types.ObjectId, logBase: string) {
+    if (
+      !scopePermitsCustomer(
+        this.req.user.ability,
+        'CREATE',
+        'Order',
+        customerId,
+      )
+    ) {
+      this.logger.error(
+        `${logBase} tried to create an order for out-of-scope customer ${customerId.toString()}`,
+      );
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Customer not found',
+      });
+    }
   }
 
   /** PER_KG needs a positive weight (else it silently prices to 0). */

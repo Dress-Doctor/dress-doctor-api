@@ -13,7 +13,7 @@ import {
   type AppRequestWithUser,
   type PaginationDto,
 } from 'src/dto/request-data.dto';
-import { scopeFilter } from 'src/helper/casl/casl-scope';
+import { scopeFilter, scopePermitsCustomer } from 'src/helper/casl/casl-scope';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { SubscriptionPlan } from 'src/schema/subscription/subscription-plan.schema';
@@ -110,9 +110,10 @@ export class SubscriptionService {
     const targetCustomerId = new Types.ObjectId(data.customerId ?? userId);
 
     // Self-scope on create: no document to query yet, so check the candidate
-    // row against the caller's CREATE conditions via the scope filter shape.
-    const scope = scopeFilter(ability, 'CREATE', 'Subscription');
-    if (!this.matchesCustomerScope(scope, targetCustomerId)) {
+    // row against the caller's CREATE conditions.
+    if (
+      !scopePermitsCustomer(ability, 'CREATE', 'Subscription', targetCustomerId)
+    ) {
       throw new NotFoundException({
         code: 'NOT_FOUND',
         message: 'Customer not found',
@@ -174,20 +175,6 @@ export class SubscriptionService {
       `customer ${targetCustomerId.toString()} subscribed to ${plan.planName}`,
     );
     return doc;
-  }
-
-  /** True when the caller's scope filter permits this customerId. */
-  private matchesCustomerScope(
-    scope: Record<string, unknown>,
-    customerId: Types.ObjectId,
-  ): boolean {
-    // Unrestricted (staff) → {}.
-    if (Object.keys(scope).length === 0) return true;
-    // Denied → { _id: { $in: [] } }.
-    const flat = JSON.stringify(scope);
-    if (flat.includes('"$in":[]')) return false;
-    // Conditional → the rules mention the caller's own customerId.
-    return flat.includes(customerId.toString());
   }
 
   /** Scoped by-id fetch: out-of-scope ids simply aren't found (no leak). */
