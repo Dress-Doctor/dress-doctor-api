@@ -128,7 +128,7 @@ describe('HTTP contract (e2e)', () => {
 
   it('rejects a request with no api-key (gate 1) with the error envelope', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/v1/order')
+      .get('/api/v1/orders')
       .expect(401);
 
     expect(res.body.success).toBe(false);
@@ -138,7 +138,7 @@ describe('HTTP contract (e2e)', () => {
 
   it('with a valid api-key but no JWT, fails at gate 2 (guard ordering)', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/v1/order')
+      .get('/api/v1/orders')
       .set(apiHeaders)
       .expect(401);
 
@@ -147,7 +147,7 @@ describe('HTTP contract (e2e)', () => {
 
   it('an authenticated admin gets the success envelope + pagination', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/v1/order')
+      .get('/api/v1/orders')
       .set(apiHeaders)
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
@@ -198,7 +198,7 @@ describe('HTTP contract (e2e)', () => {
 
     it('creates → items → confirm → ready → partial payment → flagged', async () => {
       // PER_KG so the price is weight × perKgRate (no catalog Price row needed).
-      await auth(request(app.getHttpServer()).post('/api/v1/order'))
+      await auth(request(app.getHttpServer()).post('/api/v1/orders'))
         .send({
           customerId,
           currencyId,
@@ -216,20 +216,20 @@ describe('HTTP contract (e2e)', () => {
 
       // A garment row (QC), then walk the lifecycle to READY.
       await auth(
-        request(app.getHttpServer()).post(`/api/v1/order/${orderId}/items`),
+        request(app.getHttpServer()).post(`/api/v1/orders/${orderId}/items`),
       )
         .send({ itemId, serviceTypeId, quantity: 1 })
         .expect(201);
 
       for (const step of ['confirm', 'received', 'washing', 'ready']) {
         await auth(
-          request(app.getHttpServer()).post(`/api/v1/order/${orderId}/${step}`),
+          request(app.getHttpServer()).post(`/api/v1/orders/${orderId}/${step}`),
         ).expect(200);
       }
 
       // Partial payment on a READY order → flagged, PARTIAL.
       await auth(
-        request(app.getHttpServer()).post(`/api/v1/order/${orderId}/payment`),
+        request(app.getHttpServer()).post(`/api/v1/orders/${orderId}/payments`),
       )
         .send({
           paymentMethodId: methodId,
@@ -244,7 +244,7 @@ describe('HTTP contract (e2e)', () => {
       expect(flagged.amountPaid).toBe(2000);
 
       const res = await auth(
-        request(app.getHttpServer()).get('/api/v1/order/flagged'),
+        request(app.getHttpServer()).get('/api/v1/orders/flagged'),
       ).expect(200);
       expect(res.body.success).toBe(true);
       expect(
@@ -256,7 +256,7 @@ describe('HTTP contract (e2e)', () => {
       const key = 'e2e-idem-key-1';
       const pay = () =>
         auth(
-          request(app.getHttpServer()).post(`/api/v1/order/${orderId}/payment`),
+          request(app.getHttpServer()).post(`/api/v1/orders/${orderId}/payments`),
         )
           .set('x-idempotency-key', key)
           .send({
@@ -329,7 +329,7 @@ describe('HTTP contract (e2e)', () => {
 
     it("office-A staff cannot PATCH office B's order (404, not a leak)", async () => {
       await scoped(
-        request(app.getHttpServer()).patch(`/api/v1/order/${orderBId}`),
+        request(app.getHttpServer()).patch(`/api/v1/orders/${orderBId}`),
       )
         .send({ totalWeightKg: 3 })
         .expect(404);
@@ -341,7 +341,7 @@ describe('HTTP contract (e2e)', () => {
         paymentTypeName: 'PAYMENT',
       });
       await scoped(
-        request(app.getHttpServer()).post(`/api/v1/order/${orderBId}/payment`),
+        request(app.getHttpServer()).post(`/api/v1/orders/${orderBId}/payments`),
       )
         .send({
           paymentMethodId: method._id.toString(),

@@ -38,7 +38,7 @@ export class PaymentController {
   private logger = new Logger(PaymentController.name);
   constructor(private readonly paymentService: PaymentService) {}
 
-  @Get('payment')
+  @Get('payments')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all payments for an order' })
   @ApiResponse({ status: HttpStatus.OK, type: PaymentListResponseEntity })
@@ -54,7 +54,7 @@ export class PaymentController {
     return await this.paymentService.findAll(query);
   }
 
-  @Post('order/:orderId/payment')
+  @Post('orders/:orderId/payments')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a payment for an order' })
   @ApiResponse({ status: HttpStatus.CREATED, type: PaymentResponseEntity })

@@ -34,7 +34,7 @@ import { SchedulePickupEntity } from './entities/pickup.entity';
 import { PickupService } from './pickup.service';
 
 @ApiHeader(xApiKey)
-@Controller('pickup')
+@Controller('pickups')
 @ApiHeader(xApiSecret)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
@@ -44,7 +44,7 @@ export class PickupController {
   constructor(private readonly pickupService: PickupService) {}
 
   @Public()
-  @Post('schedule')
+  @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiCreatedResponse({ type: SchedulePickupEntity })
   @ApiOperation({ summary: 'Used to schedule a pickup' })
