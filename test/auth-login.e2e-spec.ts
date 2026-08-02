@@ -44,6 +44,7 @@ describe('OTP login over HTTP (e2e)', () => {
   const CUSTOMER_PHONE = '655000001';
   const CUSTOMER_WHATSAPP = '237655000001';
   const STAFF_PHONE = '677000001';
+  const STAFF_EMAIL = 'otp.staff@dressdoctor.io';
   const STAFF_PASSWORD = 'Staff@12345';
 
   beforeAll(async () => {
@@ -177,8 +178,9 @@ describe('OTP login over HTTP (e2e)', () => {
     let refreshToken: string;
 
     it('initiate-login issues an OTP addressed to whatsappPhone', async () => {
+      // Phone identifier → WhatsApp OTP inferred.
       const res = await post('/api/v1/auth/initiate-login')
-        .send({ phone: CUSTOMER_PHONE, otpChannel: 'WhatsApp' })
+        .send({ identifier: CUSTOMER_PHONE })
         .expect(201);
 
       expect(res.body.success).toBe(true);
@@ -245,7 +247,7 @@ describe('OTP login over HTTP (e2e)', () => {
     it('rejects a staff login with no password — no OTP is issued', async () => {
       const before = outbox.length;
       const res = await post('/api/v1/auth/initiate-login')
-        .send({ phone: STAFF_PHONE, otpChannel: 'Email' })
+        .send({ identifier: STAFF_EMAIL })
         .expect(401);
 
       expect(res.body.success).toBe(false);
@@ -255,32 +257,25 @@ describe('OTP login over HTTP (e2e)', () => {
     it('rejects a wrong password — no OTP is issued', async () => {
       const before = outbox.length;
       await post('/api/v1/auth/initiate-login')
-        .send({
-          phone: STAFF_PHONE,
-          password: 'Wrong@12345',
-          otpChannel: 'Email',
-        })
+        .send({ identifier: STAFF_EMAIL, password: 'Wrong@12345' })
         .expect(401);
 
       expect(outbox.length).toBe(before);
     });
 
     it('correct password issues an OTP to the staff email, and the code completes login', async () => {
+      // Email identifier → email OTP inferred; staff still 2FA (password first).
       const res = await post('/api/v1/auth/initiate-login')
-        .send({
-          phone: STAFF_PHONE,
-          password: STAFF_PASSWORD,
-          otpChannel: 'Email',
-        })
+        .send({ identifier: STAFF_EMAIL, password: STAFF_PASSWORD })
         .expect(201);
 
       const otpRef = res.body.data.otpRef;
       const sent = outbox[outbox.length - 1];
       expect(sent.otpChannel).toBe('Email');
-      expect(sent.recipients[0].address).toBe('otp.staff@dressdoctor.io');
+      expect(sent.recipients[0].address).toBe(STAFF_EMAIL);
 
       const complete = await post('/api/v1/auth/complete-login')
-        .send({ identifier: STAFF_PHONE, otpRef, code: lastOtpCode() })
+        .send({ identifier: STAFF_EMAIL, otpRef, code: lastOtpCode() })
         .expect(200);
 
       expect(complete.body.data.accessToken).toBeDefined();
@@ -294,9 +289,9 @@ describe('OTP login over HTTP (e2e)', () => {
     });
   });
 
-  it('login for an unknown phone fails with INVALID_CREDENTIALS semantics (401)', async () => {
+  it('login for an unknown identifier fails with INVALID_CREDENTIALS semantics (401)', async () => {
     const res = await post('/api/v1/auth/initiate-login')
-      .send({ phone: '699999999', otpChannel: 'WhatsApp' })
+      .send({ identifier: '699999999' })
       .expect(401);
 
     expect(res.body.success).toBe(false);
