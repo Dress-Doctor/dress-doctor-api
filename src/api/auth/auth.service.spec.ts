@@ -104,8 +104,7 @@ describe('AuthService', () => {
       mockFindOne(buildUser({ userTypeId: { userTypeName: CUSTOMER } }));
 
       const res = await service.initiateLogin({
-        phone: '698765294',
-        otpChannel: OTPChannelEnum.WHATSAPP,
+        identifier: '698765294',
       });
 
       expect(codeService.verifyHash).not.toHaveBeenCalled();
@@ -127,8 +126,7 @@ describe('AuthService', () => {
       );
 
       await service.initiateLogin({
-        phone: '698765294',
-        otpChannel: OTPChannelEnum.WHATSAPP,
+        identifier: '698765294',
       });
 
       expect(notificationService.addToQueue).toHaveBeenCalledWith(
@@ -142,10 +140,7 @@ describe('AuthService', () => {
     it('routes an email OTP to email', async () => {
       mockFindOne(buildUser());
 
-      await service.initiateLogin({
-        phone: '698765294',
-        otpChannel: OTPChannelEnum.EMAIL,
-      });
+      await service.initiateLogin({ identifier: 'ada@example.com' });
 
       expect(notificationService.addToQueue).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -161,8 +156,7 @@ describe('AuthService', () => {
       mockFindOne(buildUser());
 
       await service.initiateLogin({
-        phone: '698765294',
-        otpChannel: OTPChannelEnum.WHATSAPP,
+        identifier: '698765294',
       });
 
       for (const call of logSpy.mock.calls) {
@@ -176,8 +170,7 @@ describe('AuthService', () => {
 
       await expect(
         service.initiateLogin({
-          phone: '698765294',
-          otpChannel: OTPChannelEnum.WHATSAPP,
+          identifier: '698765294',
           password: 'wrong',
         }),
       ).rejects.toThrow(UnauthorizedException);
@@ -189,10 +182,7 @@ describe('AuthService', () => {
       mockFindOne(buildUser({ userTypeId: { userTypeName: STAFF } }));
 
       await expect(
-        service.initiateLogin({
-          phone: '698765294',
-          otpChannel: OTPChannelEnum.WHATSAPP,
-        }),
+        service.initiateLogin({ identifier: '698765294' }),
       ).rejects.toThrow(UnauthorizedException);
       expect(otpService.requestOtp).not.toHaveBeenCalled();
     });
@@ -202,8 +192,7 @@ describe('AuthService', () => {
       codeService.verifyHash.mockResolvedValue(true);
 
       await service.initiateLogin({
-        phone: '698765294',
-        otpChannel: OTPChannelEnum.WHATSAPP,
+        identifier: '698765294',
         password: 'right',
       });
 
@@ -214,10 +203,7 @@ describe('AuthService', () => {
       mockFindOne(buildUser({ isActive: false }));
 
       await expect(
-        service.initiateLogin({
-          phone: '698765294',
-          otpChannel: OTPChannelEnum.WHATSAPP,
-        }),
+        service.initiateLogin({ identifier: '698765294' }),
       ).rejects.toThrow(ForbiddenException);
     });
 
@@ -225,10 +211,7 @@ describe('AuthService', () => {
       mockFindOne(null);
 
       await expect(
-        service.initiateLogin({
-          phone: '000000000',
-          otpChannel: OTPChannelEnum.WHATSAPP,
-        }),
+        service.initiateLogin({ identifier: '000000000' }),
       ).rejects.toThrow(UnauthorizedException);
     });
 
@@ -236,10 +219,7 @@ describe('AuthService', () => {
       mockFindOne(buildUser({ whatsappPhone: undefined }));
 
       await expect(
-        service.initiateLogin({
-          phone: '698765294',
-          otpChannel: OTPChannelEnum.WHATSAPP,
-        }),
+        service.initiateLogin({ identifier: '698765294' }),
       ).rejects.toThrow(UnauthorizedException);
     });
   });

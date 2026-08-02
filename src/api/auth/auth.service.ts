@@ -154,18 +154,30 @@ export class AuthService {
     };
   }
 
+  /**
+   * Resolve a login identifier (phone or email) to the user lookup query and the
+   * OTP channel it implies: an email logs in over email, a phone over WhatsApp.
+   */
+  private resolveLoginIdentity(identifier: string): {
+    channel: OTPChannelEnum;
+    query: Record<string, string>;
+  } {
+    return identifier.includes('@')
+      ? { channel: OTPChannelEnum.EMAIL, query: { email: identifier } }
+      : { channel: OTPChannelEnum.WHATSAPP, query: { phone: identifier } };
+  }
+
   async initiateLogin(data: InitiateLoginDto) {
     const platform = this.req.data.platform;
+    const { channel, query } = this.resolveLoginIdentity(data.identifier);
 
-    const foundedUser = await this.userModel
-      .findOne({ phone: data.phone })
-      .populate<{
-        userTypeId: UserType;
-      }>({ model: UserType.name, path: 'userTypeId' });
+    const foundedUser = await this.userModel.findOne(query).populate<{
+      userTypeId: UserType;
+    }>({ model: UserType.name, path: 'userTypeId' });
 
     if (!foundedUser) {
       this.logger.warn(
-        `[${platform}] login for unknown phone ${maskPhone(data.phone)}`,
+        `[${platform}] login for unknown identifier ${maskPhone(data.identifier)}`,
       );
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
@@ -175,7 +187,7 @@ export class AuthService {
 
     if (!foundedUser.isActive) {
       this.logger.warn(
-        `[${platform}] login for deactivated account ${maskPhone(data.phone)}`,
+        `[${platform}] login for deactivated account ${maskPhone(data.identifier)}`,
       );
       throw new ForbiddenException({
         code: 'ACCOUNT_INACTIVE',
@@ -190,7 +202,7 @@ export class AuthService {
     if (!isCustomer) {
       if (!data.password) {
         this.logger.warn(
-          `[${platform}] staff ${maskPhone(data.phone)} sent no password`,
+          `[${platform}] staff ${maskPhone(data.identifier)} sent no password`,
         );
         throw new UnauthorizedException({
           code: 'INVALID_CREDENTIALS',
@@ -204,7 +216,7 @@ export class AuthService {
       );
       if (!isValid) {
         this.logger.warn(
-          `[${platform}] wrong password for ${maskPhone(data.phone)}`,
+          `[${platform}] wrong password for ${maskPhone(data.identifier)}`,
         );
         throw new UnauthorizedException({
           code: 'INVALID_CREDENTIALS',
@@ -213,21 +225,19 @@ export class AuthService {
       }
     }
 
-    return await this.issueLoginOtp(foundedUser, data.otpChannel);
+    return await this.issueLoginOtp(foundedUser, channel);
   }
 
   async completeLogin(data: CompleteLoginDto) {
     const platform = this.req.data.platform;
+    const { query } = this.resolveLoginIdentity(data.identifier);
 
-    const foundedUser = await this.userModel
-      .findOne({ phone: data.identifier })
-      .populate<{ userTypeId: UserType }>({
-        model: UserType.name,
-        path: 'userTypeId',
-      });
+    const foundedUser = await this.userModel.findOne(query).populate<{
+      userTypeId: UserType;
+    }>({ model: UserType.name, path: 'userTypeId' });
     if (!foundedUser) {
       this.logger.warn(
-        `[${platform}] verify for unknown phone ${maskPhone(data.identifier)}`,
+        `[${platform}] verify for unknown identifier ${maskPhone(data.identifier)}`,
       );
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
@@ -235,7 +245,13 @@ export class AuthService {
       });
     }
 
-    await this.otpService.verifyOtp(data);
+    // OTP is keyed by the user's phone (issueLoginOtp), regardless of whether the
+    // caller logged in with a phone or an email — verify against that.
+    await this.otpService.verifyOtp({
+      code: data.code,
+      otpRef: data.otpRef,
+      identifier: foundedUser.phone,
+    });
     const userType = foundedUser.userTypeId?.userTypeName ?? '';
     const { accessToken, refreshToken } = await this.issueTokens(
       foundedUser,

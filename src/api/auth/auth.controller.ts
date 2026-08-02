@@ -21,6 +21,7 @@ import { Public } from 'src/helper/decorator/public.decorator';
 import { AuthService } from './auth.service';
 import { CompleteLoginDto, InitiateLoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh.dto';
+import { maskPhone } from 'src/helper/pii';
 import {
   CompleteLoginEntity,
   InitiateLoginEntity,
@@ -43,7 +44,9 @@ export class AuthController {
   async initiateLogin(@Body() data: InitiateLoginDto, @Req() req: AppRequest) {
     const platform = req.data.platform;
 
-    this.logger.log(`[${platform}] ${data.phone} is trying to login`);
+    this.logger.log(
+      `[${platform}] ${maskPhone(data.identifier)} is trying to login`,
+    );
     return await this.authService.initiateLogin(data);
   }
 
@@ -57,7 +60,7 @@ export class AuthController {
 
     // Do not log `data` — it carries the OTP code (CLAUDE.md §12).
     this.logger.log(
-      `[${platform}] ${data.identifier} is trying to verify their otp`,
+      `[${platform}] ${maskPhone(data.identifier)} is trying to verify their otp`,
     );
 
     return await this.authService.completeLogin(data);
