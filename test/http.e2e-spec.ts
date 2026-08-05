@@ -324,6 +324,8 @@ describe('HTTP contract (e2e)', () => {
         pricingModel: 'PER_KG',
         estimatedDeliveryDate: new Date(),
         orderStatusId: draft._id,
+        createdBy: new Types.ObjectId(),
+        pickedUpBy: new Types.ObjectId(),
       });
       orderBId = orderB._id.toString();
     });

@@ -28,6 +28,8 @@ describe('CASL office scoping + transactions (replica-set Mongo)', () => {
     currencyId: new Types.ObjectId(),
     orderStatusId: new Types.ObjectId(),
     estimatedDeliveryDate: new Date(),
+    createdBy: new Types.ObjectId(),
+    pickedUpBy: new Types.ObjectId(),
   });
 
   const officeAbility = (officeId: Types.ObjectId) => {

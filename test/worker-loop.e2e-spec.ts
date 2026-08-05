@@ -121,6 +121,8 @@ describe('Worker loop (e2e)', () => {
       flagged: true, // drifted
       estimatedDeliveryDate: new Date(),
       orderStatusId: ready._id,
+      createdBy: userId,
+      pickedUpBy: userId,
     });
     await model('Payment').create({
       orderId: order._id,

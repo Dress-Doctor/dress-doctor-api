@@ -42,6 +42,7 @@ describe('OrderService', () => {
     updateOne: jest.Mock;
     countDocuments: jest.Mock;
     find: jest.Mock;
+    aggregate: jest.Mock;
   };
   let orderItemModel: {
     countDocuments: jest.Mock;
@@ -86,6 +87,7 @@ describe('OrderService', () => {
       updateOne: jest.fn().mockResolvedValue({}),
       countDocuments: jest.fn().mockResolvedValue(2),
       find: jest.fn(),
+      aggregate: jest.fn(),
     };
     orderItemModel = {
       countDocuments: jest.fn().mockResolvedValue(1),
@@ -109,7 +111,12 @@ describe('OrderService', () => {
       providers: [
         OrderService,
         { provide: CodeGeneratorService, useValue: {} },
-        { provide: AppUtilService, useValue: {} },
+        {
+          provide: AppUtilService,
+          useValue: {
+            parseSortParam: jest.fn().mockReturnValue({ receivedAt: -1 }),
+          },
+        },
         { provide: PricingService, useValue: pricingService },
         {
           provide: REQUEST,
@@ -356,6 +363,109 @@ describe('OrderService', () => {
       expect(sort).toHaveBeenCalledWith({ balanceDue: -1, createdAt: 1 });
       expect(res.total).toBe(2);
       expect(res.data).toHaveLength(1);
+    });
+  });
+
+  describe('findAll', () => {
+    it('returns paginated orders with a per-status breakdown', async () => {
+      orderModel.aggregate
+        .mockResolvedValueOnce([{ total: 2 }]) // count
+        .mockResolvedValueOnce([
+          { _id: 'READY', count: 1 },
+          { _id: 'DELIVERED', count: 1 },
+          { _id: null, count: 3 }, // null bucket only bumps `all`
+        ])
+        .mockResolvedValueOnce([{ orderCode: 'OR-1' }, { orderCode: 'OR-2' }]);
+
+      const res = await service.findAll({ page: 1, size: 20 } as never);
+
+      expect(res.total).toBe(2);
+      expect(res.data).toHaveLength(2);
+      expect(res.byOrderStatus.ready).toBe(1);
+      expect(res.byOrderStatus.delivered).toBe(1);
+      expect(res.byOrderStatus.all).toBe(5);
+      expect(res.nextPage).toBeNull();
+      expect(orderModel.aggregate).toHaveBeenCalledTimes(3);
+    });
+
+    it('resolves the orderStatus name filter and applies keyword + dates', async () => {
+      orderStatusModel.findOne.mockReturnValueOnce({
+        select: () => ({
+          lean: () => Promise.resolve({ _id: new Types.ObjectId() }),
+        }),
+      });
+      orderModel.aggregate
+        .mockResolvedValueOnce([]) // count -> total 0
+        .mockResolvedValueOnce([]) // byOrderStatus
+        .mockResolvedValueOnce([]); // data
+
+      const res = await service.findAll({
+        page: 1,
+        size: 20,
+        keyword: 'ali.ce',
+        orderStatus: OrderStatusEnum.READY,
+        startDate: '2026-07-01',
+        endDate: '2026-08-01',
+      } as never);
+
+      expect(res.total).toBe(0);
+      expect(res.byOrderStatus.all).toBe(0);
+      expect(orderStatusModel.findOne).toHaveBeenCalledWith({
+        orderStatusName: OrderStatusEnum.READY,
+      });
+    });
+  });
+
+  describe('exportOrders', () => {
+    const row = {
+      orderCode: 'OR-1',
+      customerName: 'Alice Test',
+      customerPhone: '690',
+      office: 'DD 1',
+      status: 'READY',
+      paymentStatus: 'PAID',
+      receivedAt: '2026-07-01',
+      estimatedDeliveryDate: '2026-07-03',
+      deliveredAt: '',
+      totalAmount: 1700,
+      amountPaid: 1700,
+      balanceDue: 0,
+      createdBy: 'Mia M',
+      pickedUpBy: 'Mia M',
+      createdAt: '2026-07-01 10:00:00',
+      updatedAt: '2026-07-01 10:00:00',
+    };
+
+    it('builds a CSV download with a header and rows', async () => {
+      orderModel.aggregate.mockResolvedValue([row]);
+
+      const res = await service.exportOrders({
+        format: 'csv',
+        page: 1,
+        size: 20,
+      } as never);
+
+      expect(res.contentType).toBe('text/csv');
+      expect(res.filename).toMatch(/^orders-export-\d{8}\.csv$/);
+      const text = res.buffer.toString('utf8');
+      expect(text).toContain('Order Code');
+      expect(text).toContain('OR-1');
+      expect(text).toContain('Alice Test');
+    });
+
+    it('builds an Excel (xlsx) download', async () => {
+      orderModel.aggregate.mockResolvedValue([row]);
+
+      const res = await service.exportOrders({
+        format: 'excel',
+        page: 1,
+        size: 20,
+      } as never);
+
+      expect(res.contentType).toContain('spreadsheetml');
+      expect(res.filename).toMatch(/\.xlsx$/);
+      // XLSX is a zip archive — the first two bytes are the PK signature.
+      expect(res.buffer.subarray(0, 2).toString('utf8')).toBe('PK');
     });
   });
 });
