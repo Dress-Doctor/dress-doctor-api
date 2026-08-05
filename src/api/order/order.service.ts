@@ -9,7 +9,8 @@ import {
 import { REQUEST } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, PipelineStage, Types } from 'mongoose';
+import { Workbook } from 'exceljs';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { scopeFilter, scopePermitsCustomer } from 'src/helper/casl/casl-scope';
@@ -40,6 +41,7 @@ import {
 } from './dto/create-order.dto';
 import { UpdateOrderDraftDto } from './dto/update-order-draft.dto';
 import { FindOrderDto } from './dto/find-order.dto';
+import { ExportOrderDto, OrderExportFormatEnum } from './dto/export-order.dto';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { PickupStatusEnum } from 'src/schema/pickup/pickup.dto';
 import {
@@ -51,6 +53,64 @@ import {
   type OrderCreatedEvent,
   type OrderStatusChangedEvent,
 } from './order.events';
+
+/**
+ * Allow-list of non-sensitive User fields for any user joined into an order
+ * (customer, creator, pickup agent). passwordHash / any secret is never
+ * projected — never switch this to an exclusion projection.
+ */
+const SAFE_USER_PROJECTION = {
+  firstName: 1,
+  lastName: 1,
+  phone: 1,
+  whatsappPhone: 1,
+  email: 1,
+  gender: 1,
+  preferredLanguage: 1,
+  isActive: 1,
+  userTypeId: 1,
+} as const;
+
+// One flat row per order for the CSV/Excel export.
+interface OrderExportRow {
+  orderCode: string;
+  customerName: string;
+  customerPhone: string;
+  office: string;
+  status: string;
+  paymentStatus: string;
+  receivedAt: Date | null;
+  estimatedDeliveryDate: Date | null;
+  deliveredAt: Date | null;
+  totalAmount: number;
+  amountPaid: number;
+  balanceDue: number;
+  createdBy: string;
+  pickedUpBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Column order + headers, shared by both CSV and Excel so the two formats stay
+// identical. `key` maps to a field on OrderExportRow.
+const ORDER_EXPORT_COLUMNS: { header: string; key: keyof OrderExportRow }[] = [
+  { header: 'Order Code', key: 'orderCode' },
+  { header: 'Customer', key: 'customerName' },
+  { header: 'Phone', key: 'customerPhone' },
+  { header: 'Office', key: 'office' },
+  { header: 'Status', key: 'status' },
+  { header: 'Payment Status', key: 'paymentStatus' },
+  { header: 'Received At', key: 'receivedAt' },
+  { header: 'Estimated Delivery', key: 'estimatedDeliveryDate' },
+  { header: 'Delivered At', key: 'deliveredAt' },
+  { header: 'Total Amount', key: 'totalAmount' },
+  { header: 'Amount Paid', key: 'amountPaid' },
+  { header: 'Balance Due', key: 'balanceDue' },
+  { header: 'Created By', key: 'createdBy' },
+  { header: 'Picked Up By', key: 'pickedUpBy' },
+  { header: 'Created At', key: 'createdAt' },
+  { header: 'Updated At', key: 'updatedAt' },
+];
 
 /**
  * Legal next-states per status. Any transition not listed here is rejected with
@@ -391,6 +451,11 @@ export class OrderService {
     }
 
     const userId = new Types.ObjectId(this.req.user.userId);
+    const pickedUpBy = await this.resolvePickedUpBy(
+      data.pickedUpBy,
+      userId,
+      base,
+    );
     const created = (await this.orderModel.findOneAndUpdate(
       { customerId: customerId, pickupRequestId: pickupRequestId },
       {
@@ -401,6 +466,8 @@ export class OrderService {
         officeId: this.req.data.officeId,
         orderStatusId: orderStatus._id,
         orderCode: await this.codeService.generateOrderReference(),
+        createdBy: userId,
+        pickedUpBy,
       },
       {
         context: { changedBy: userId },
@@ -465,6 +532,11 @@ export class OrderService {
     }
 
     const userId = new Types.ObjectId(this.req.user.userId);
+    const pickedUpBy = await this.resolvePickedUpBy(
+      data.pickedUpBy,
+      userId,
+      base,
+    );
     const created = (await this.orderModel.findOneAndUpdate(
       { customerId, orderStatusId: orderStatus._id },
       {
@@ -474,6 +546,8 @@ export class OrderService {
         officeId: this.req.data.officeId,
         orderStatusId: orderStatus._id,
         orderCode: await this.codeService.generateOrderReference(),
+        createdBy: userId,
+        pickedUpBy,
       },
       {
         context: { changedBy: userId },
@@ -515,6 +589,28 @@ export class OrderService {
     }
   }
 
+  /**
+   * Resolve the pickup agent. Optional at creation — defaults to the creator
+   * when omitted; when supplied it must reference a real user.
+   */
+  private async resolvePickedUpBy(
+    pickedUpBy: string | undefined,
+    fallback: Types.ObjectId,
+    logBase: string,
+  ): Promise<Types.ObjectId> {
+    if (!pickedUpBy) return fallback;
+    const id = new Types.ObjectId(pickedUpBy);
+    const exists = await this.userModel.exists({ _id: id });
+    if (!exists) {
+      this.logger.error(`${logBase} invalid pickedUpBy ${pickedUpBy}`);
+      throw new BadRequestException({
+        code: 'INVALID_PICKUP_AGENT',
+        message: 'Invalid pickup agent (pickedUpBy) user id',
+      });
+    }
+    return id;
+  }
+
   /** PER_KG needs a positive weight (else it silently prices to 0). */
   private assertWeightForModel(model: PricingModelEnum, weight?: number) {
     if (model === PricingModelEnum.PER_KG && (!weight || weight <= 0)) {
@@ -525,13 +621,14 @@ export class OrderService {
     }
   }
 
-  async findAll({ page, size, ...query }: FindOrderDto) {
-    this.can('READ', 'Order');
-
-    const platform = this.req.data.platform;
-    const { phone } = this.req.user;
-    const logBase = `[${platform}] ${phone}`;
-
+  // Builds the shared aggregation filter stages from the query params so the
+  // list, its counts, and the CSV/Excel export all match on the exact same set.
+  // `filterStages` covers customer/office joins + date window + keyword; the
+  // status filter is returned separately (`statusStages`) so the per-status
+  // breakdown can span every status while the list still narrows to one.
+  private async buildOrderFilterStages(
+    query: Omit<FindOrderDto, 'page' | 'size' | 'sort'>,
+  ): Promise<{ filterStages: PipelineStage[]; statusStages: PipelineStage[] }> {
     const whereClause: Record<string, unknown> = {};
     const customerId = query.customerId;
     if (customerId) whereClause['customerId'] = new Types.ObjectId(customerId);
@@ -540,23 +637,189 @@ export class OrderService {
     if (pickupRequestId)
       whereClause['pickupRequestId'] = new Types.ObjectId(pickupRequestId);
 
-    const orderStatusId = query.orderStatusId;
-    if (orderStatusId)
-      whereClause['orderStatusId'] = new Types.ObjectId(orderStatusId);
+    // Filter by status name (not id): resolve the name to its id. Kept OUT of
+    // whereClause so the byOrderStatus breakdown can span every status (the
+    // status filter only narrows the list + total, not the facet counts).
+    // An unknown name yields a non-existent id so the list comes back empty.
+    const statusStages: PipelineStage[] = [];
+    if (query.orderStatus) {
+      const status = await this.orderStatusModel
+        .findOne({ orderStatusName: query.orderStatus })
+        .select('_id')
+        .lean();
+      statusStages.push({
+        $match: { orderStatusId: status?._id ?? new Types.ObjectId() },
+      });
+    }
 
     const orderCode = query.orderCode;
     if (orderCode) whereClause['orderCode'] = orderCode;
 
+    // Received-date window. Both bounds are optional; with neither we default
+    // to the last 30 days so the list never does an unbounded scan.
+    const now = new Date();
+    const startDate = query.startDate
+      ? new Date(query.startDate)
+      : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const endDate = query.endDate ? new Date(query.endDate) : now;
+    whereClause['receivedAt'] = { $gte: startDate, $lte: endDate };
+
     // Auto-scope: office staff see their office's orders; a customer sees only
     // their own (via the seeded CASL conditions), enforced as a query filter.
     const scope = scopeFilter(this.req.user.ability, 'READ', 'Order');
-    const match = { ...whereClause, ...scope };
+    const baseMatch = { ...whereClause, ...scope };
+
+    // Customer join runs BEFORE the keyword filter so free-text can match the
+    // customer's phone/name too. Allow-list projection — passwordHash / any
+    // secret is never returned; never switch to an exclusion projection.
+    const customerLookup: PipelineStage[] = [
+      {
+        $lookup: {
+          from: 'user',
+          localField: 'customerId',
+          foreignField: '_id',
+          as: 'customer',
+          pipeline: [{ $project: SAFE_USER_PROJECTION }],
+        },
+      },
+      { $unwind: { path: '$customer', preserveNullAndEmptyArrays: true } },
+    ];
+
+    // Office join also runs before the keyword filter so free-text can match
+    // the office name/code. Allow-list projection — the signedLink carries an
+    // HMAC and must never be exposed here.
+    const officeLookup: PipelineStage[] = [
+      {
+        $lookup: {
+          as: 'office',
+          from: 'office',
+          foreignField: '_id',
+          localField: 'officeId',
+          pipeline: [
+            {
+              $project: {
+                officeTypeId: 1,
+                officeName: 1,
+                officeCode: 1,
+                slug: 1,
+                address: 1,
+                city: 1,
+                region: 1,
+                isActive: 1,
+              },
+            },
+          ],
+        },
+      },
+      { $unwind: { path: '$office', preserveNullAndEmptyArrays: true } },
+    ];
+
+    // Filter stages shared by the count and the data query so paging is exact.
+    const filterStages: PipelineStage[] = [
+      { $match: baseMatch },
+      ...customerLookup,
+      ...officeLookup,
+    ];
+
+    if (query.keyword?.trim()) {
+      const escaped = query.keyword
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rx = new RegExp(escaped, 'i');
+      filterStages.push({
+        $match: {
+          $or: [
+            { orderCode: rx },
+            { 'customer.phone': rx },
+            { 'customer.whatsappPhone': rx },
+            { 'customer.firstName': rx },
+            { 'customer.lastName': rx },
+            { 'office.officeName': rx },
+            { 'office.officeCode': rx },
+            // Full "first last" name search.
+            {
+              $expr: {
+                $regexMatch: {
+                  input: {
+                    $concat: [
+                      { $ifNull: ['$customer.firstName', ''] },
+                      ' ',
+                      { $ifNull: ['$customer.lastName', ''] },
+                    ],
+                  },
+                  regex: escaped,
+                  options: 'i',
+                },
+              },
+            },
+          ],
+        },
+      });
+    }
+
+    return { filterStages, statusStages };
+  }
+
+  async findAll({ page, size, ...query }: FindOrderDto) {
+    this.can('READ', 'Order');
+
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+    const logBase = `[${platform}] ${phone}`;
+
+    const { filterStages, statusStages } =
+      await this.buildOrderFilterStages(query);
 
     const skip = (page - 1) * size;
     const sort = this.appUtilService.parseSortParam(query.sort);
-    const total = await this.orderModel.countDocuments(match);
+
+    const countResult = await this.orderModel.aggregate<{ total: number }>([
+      ...filterStages,
+      ...statusStages,
+      { $count: 'total' },
+    ]);
+    const total = countResult[0]?.total ?? 0;
+
+    // Per-status breakdown over the same filters (date range / keyword /
+    // customer / office scope) but WITHOUT the status filter, so every bucket
+    // stays meaningful. `all` is the sum across statuses.
+    const statusCounts = await this.orderModel.aggregate<{
+      _id: string | null;
+      count: number;
+    }>([
+      ...filterStages,
+      {
+        $lookup: {
+          as: 'os',
+          from: 'order_status',
+          localField: 'orderStatusId',
+          foreignField: '_id',
+          pipeline: [{ $project: { orderStatusName: 1 } }],
+        },
+      },
+      { $unwind: { path: '$os', preserveNullAndEmptyArrays: true } },
+      { $group: { _id: '$os.orderStatusName', count: { $sum: 1 } } },
+    ]);
+
+    const byOrderStatus: Record<string, number> = {
+      all: 0,
+      draft: 0,
+      confirmed: 0,
+      received: 0,
+      washing: 0,
+      ready: 0,
+      delivered: 0,
+      cancelled: 0,
+    };
+    for (const row of statusCounts) {
+      const key = row._id?.toLowerCase();
+      if (key && key in byOrderStatus) byOrderStatus[key] += row.count;
+      byOrderStatus.all += row.count;
+    }
+
     const data = await this.orderModel.aggregate([
-      { $match: match },
+      ...filterStages,
+      ...statusStages,
       { $sort: sort },
       { $skip: skip },
       { $limit: size },
@@ -570,6 +833,55 @@ export class OrderService {
         },
       },
       { $unwind: { path: '$orderStatus', preserveNullAndEmptyArrays: true } },
+
+      // Attach the order's currency — only the useful display fields.
+      {
+        $lookup: {
+          as: 'currency',
+          from: 'currency',
+          foreignField: '_id',
+          localField: 'currencyId',
+          pipeline: [
+            {
+              $project: {
+                isoCode: 1,
+                name: 1,
+                symbol: 1,
+                numericCode: 1,
+                decimalPlaces: 1,
+              },
+            },
+          ],
+        },
+      },
+      { $unwind: { path: '$currency', preserveNullAndEmptyArrays: true } },
+
+      // The order's creator and pickup agent (both Users). Same allow-list as
+      // the customer — passwordHash / any secret is never returned.
+      {
+        $lookup: {
+          as: 'createdByUser',
+          from: 'user',
+          foreignField: '_id',
+          localField: 'createdBy',
+          pipeline: [{ $project: SAFE_USER_PROJECTION }],
+        },
+      },
+      { $unwind: { path: '$createdByUser', preserveNullAndEmptyArrays: true } },
+
+      {
+        $lookup: {
+          as: 'pickedUpByUser',
+          from: 'user',
+          foreignField: '_id',
+          localField: 'pickedUpBy',
+          pipeline: [{ $project: SAFE_USER_PROJECTION }],
+        },
+      },
+      {
+        $unwind: { path: '$pickedUpByUser', preserveNullAndEmptyArrays: true },
+      },
+
       {
         $lookup: {
           from: 'order_item',
@@ -646,7 +958,195 @@ export class OrderService {
     const nextPage = page < totalPages ? page + 1 : null;
 
     this.logger.log(`${logBase} has successfully retrieve all items`);
-    return { total, data, nextPage };
+    return { total, byOrderStatus, data, nextPage };
+  }
+
+  // Export the filtered orders (same params as findAll, no pagination) as a
+  // CSV or Excel file. Returns the raw bytes + filename + content-type; the
+  // controller streams them as an attachment.
+  async exportOrders({ format, ...query }: ExportOrderDto): Promise<{
+    buffer: Buffer;
+    filename: string;
+    contentType: string;
+  }> {
+    // Bulk export is gated on its own EXPORT action (not READ) so it can be
+    // restricted to reporting/oversight roles. The rows are still office/self
+    // scoped by buildOrderFilterStages via the READ conditions.
+    this.can('EXPORT', 'Order');
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+    const logBase = `[${platform}] ${phone}`;
+
+    const { filterStages, statusStages } =
+      await this.buildOrderFilterStages(query);
+
+    const rows = await this.orderModel.aggregate<OrderExportRow>([
+      ...filterStages,
+      ...statusStages,
+      {
+        $lookup: {
+          as: 'orderStatus',
+          from: 'order_status',
+          localField: 'orderStatusId',
+          foreignField: '_id',
+          pipeline: [{ $project: { orderStatusName: 1 } }],
+        },
+      },
+      { $unwind: { path: '$orderStatus', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          as: 'createdByUser',
+          from: 'user',
+          localField: 'createdBy',
+          foreignField: '_id',
+          pipeline: [{ $project: { firstName: 1, lastName: 1 } }],
+        },
+      },
+      { $unwind: { path: '$createdByUser', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          as: 'pickedUpByUser',
+          from: 'user',
+          localField: 'pickedUpBy',
+          foreignField: '_id',
+          pipeline: [{ $project: { firstName: 1, lastName: 1 } }],
+        },
+      },
+      {
+        $unwind: { path: '$pickedUpByUser', preserveNullAndEmptyArrays: true },
+      },
+      { $sort: { receivedAt: -1 } },
+      {
+        $project: {
+          _id: 0,
+          orderCode: 1,
+          customerName: {
+            $trim: {
+              input: {
+                $concat: [
+                  { $ifNull: ['$customer.firstName', ''] },
+                  ' ',
+                  { $ifNull: ['$customer.lastName', ''] },
+                ],
+              },
+            },
+          },
+          customerPhone: { $ifNull: ['$customer.phone', ''] },
+          office: { $ifNull: ['$office.officeName', ''] },
+          status: { $ifNull: ['$orderStatus.orderStatusName', ''] },
+          paymentStatus: { $ifNull: ['$paymentStatus', ''] },
+          receivedAt: { $ifNull: ['$receivedAt', null] },
+          estimatedDeliveryDate: { $ifNull: ['$estimatedDeliveryDate', null] },
+          deliveredAt: { $ifNull: ['$deliveredAt', null] },
+          totalAmount: { $ifNull: ['$totalAmount', 0] },
+          amountPaid: { $ifNull: ['$amountPaid', 0] },
+          balanceDue: { $ifNull: ['$balanceDue', 0] },
+          createdBy: {
+            $trim: {
+              input: {
+                $concat: [
+                  { $ifNull: ['$createdByUser.firstName', ''] },
+                  ' ',
+                  { $ifNull: ['$createdByUser.lastName', ''] },
+                ],
+              },
+            },
+          },
+          pickedUpBy: {
+            $trim: {
+              input: {
+                $concat: [
+                  { $ifNull: ['$pickedUpByUser.firstName', ''] },
+                  ' ',
+                  { $ifNull: ['$pickedUpByUser.lastName', ''] },
+                ],
+              },
+            },
+          },
+          // System audit timestamps — full precision (date + time), unlike the
+          // business date columns which are day-granular.
+          createdAt: {
+            $dateToString: {
+              date: '$createdAt',
+              format: '%Y-%m-%d %H:%M:%S',
+              onNull: '',
+            },
+          },
+          updatedAt: {
+            $dateToString: {
+              date: '$updatedAt',
+              format: '%Y-%m-%d %H:%M:%S',
+              onNull: '',
+            },
+          },
+        },
+      },
+    ]);
+
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    let result: { buffer: Buffer; filename: string; contentType: string };
+    if (format === OrderExportFormatEnum.EXCEL) {
+      result = {
+        buffer: await this.buildOrdersExcel(rows),
+        filename: `orders-export-${stamp}.xlsx`,
+        contentType:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      };
+    } else {
+      result = {
+        buffer: this.buildOrdersCsv(rows),
+        filename: `orders-export-${stamp}.csv`,
+        contentType: 'text/csv',
+      };
+    }
+
+    this.logger.log(`${logBase} exported ${rows.length} orders as ${format}`);
+    return result;
+  }
+
+  // Renders one export cell: dates as YYYY-MM-DD, null/undefined as empty.
+  private formatExportCell(
+    value: OrderExportRow[keyof OrderExportRow],
+  ): string {
+    if (value === null || value === undefined) return '';
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    return String(value);
+  }
+
+  private buildOrdersCsv(rows: OrderExportRow[]): Buffer {
+    // RFC-4180 escaping: wrap in quotes and double any embedded quote.
+    const escape = (value: string): string => `"${value.replace(/"/g, '""')}"`;
+    const lines = [
+      ORDER_EXPORT_COLUMNS.map((c) => escape(c.header)).join(','),
+      ...rows.map((row) =>
+        ORDER_EXPORT_COLUMNS.map((c) =>
+          escape(this.formatExportCell(row[c.key])),
+        ).join(','),
+      ),
+    ];
+    // Leading BOM so Excel opens UTF-8 (accented names) correctly.
+    return Buffer.from('﻿' + lines.join('\r\n'), 'utf8');
+  }
+
+  private async buildOrdersExcel(rows: OrderExportRow[]): Promise<Buffer> {
+    const workbook = new Workbook();
+    const sheet = workbook.addWorksheet('Orders');
+    sheet.columns = ORDER_EXPORT_COLUMNS.map((c) => ({
+      header: c.header,
+      key: c.key,
+      width: 18,
+    }));
+    sheet.getRow(1).font = { bold: true };
+    for (const row of rows) {
+      sheet.addRow(
+        ORDER_EXPORT_COLUMNS.reduce<Record<string, string>>((acc, c) => {
+          acc[c.key] = this.formatExportCell(row[c.key]);
+          return acc;
+        }, {}),
+      );
+    }
+    const arrayBuffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(arrayBuffer);
   }
 
   async createOrderItem(orderId: string, data: CreateOrderItemDto) {
@@ -923,11 +1423,17 @@ export class OrderService {
     }
 
     const userId = new Types.ObjectId(this.req.user.userId);
-    await this.orderModel.findOneAndUpdate(
-      { _id: order._id },
-      { orderStatusId: targetStatus._id },
-      { context: { changedBy: userId }, returnDocument: 'after' } as never,
-    );
+    const statusUpdate: Record<string, unknown> = {
+      orderStatusId: targetStatus._id,
+    };
+    // Stamp the actual delivery date once, on entry into DELIVERED.
+    if (target === OrderStatusEnum.DELIVERED) {
+      statusUpdate.deliveredAt = new Date();
+    }
+    await this.orderModel.findOneAndUpdate({ _id: order._id }, statusUpdate, {
+      context: { changedBy: userId },
+      returnDocument: 'after',
+    } as never);
 
     // One-time confirm side effects (quota decrement + promo usage). Safe from
     // double-application: the guard only permits DRAFT→CONFIRMED once.

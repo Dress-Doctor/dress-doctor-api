@@ -233,6 +233,9 @@ export default {
       action: PermissionActionEnum.MANAGE,
     },
     ...crud(SubjectEnum.Order),
+    // Bulk CSV/Excel export of orders — gated separately from READ so it can be
+    // granted to reporting/oversight roles only.
+    { subject: SubjectEnum.Order, action: PermissionActionEnum.EXPORT },
     ...crud(SubjectEnum.OrderItem),
     ...crud(SubjectEnum.Payment),
     ...crud(SubjectEnum.PickupRequest),
@@ -277,6 +280,7 @@ export default {
       scope: ScopeEnum.OFFICE,
       permissions: [
         ...crud(SubjectEnum.Order),
+        { subject: SubjectEnum.Order, action: PermissionActionEnum.EXPORT },
         ...crud(SubjectEnum.Payment),
         ...crud(SubjectEnum.PickupRequest),
         ...crud(SubjectEnum.Customer),
@@ -333,6 +337,10 @@ export default {
         ...crud(SubjectEnum.Payment),
         ...readUpdate(SubjectEnum.PaymentType),
         ...readUpdate(SubjectEnum.PaymentMethod),
+        // Order exports for financial reconciliation (read is implied by export
+        // in the service, which also reads the list to build the file).
+        { subject: SubjectEnum.Order, action: PermissionActionEnum.READ },
+        { subject: SubjectEnum.Order, action: PermissionActionEnum.EXPORT },
       ],
     },
     {

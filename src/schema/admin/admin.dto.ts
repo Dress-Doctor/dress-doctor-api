@@ -20,6 +20,7 @@ export enum PermissionActionEnum {
   MANAGE = 'manage',
   UNLOCK = 'UNLOCK',
   CONFIRM = 'CONFIRM',
+  EXPORT = 'EXPORT',
 }
 
 export enum ScopeEnum {

@@ -106,8 +106,30 @@ export class Order extends Document<Types.ObjectId> {
   @Prop({ required: true, default: false })
   flagged: boolean;
 
+  // Business date the laundry was physically received from the customer.
+  // Entered by whoever creates the order (may differ from the system
+  // `createdAt`); defaults to creation time when not supplied. Drives the
+  // orders list date-range filter and turnaround statistics.
+  @Prop({ required: true, default: () => new Date() })
+  receivedAt: Date;
+
   @Prop({ required: true })
   estimatedDeliveryDate: Date;
+
+  // Business date the finished laundry was actually delivered — stamped once,
+  // on the transition into DELIVERED. Null until then. estimatedDeliveryDate
+  // vs deliveredAt gives the on-time / turnaround metric.
+  @Prop({ required: false })
+  deliveredAt?: Date;
+
+  // The user who created the order (staff/system) — set automatically.
+  @Prop({ required: true, type: Types.ObjectId, ref: User.name })
+  createdBy: Types.ObjectId;
+
+  // The agent/staff who physically picked up the customer's laundry. Optional
+  // at creation; defaults to createdBy when not supplied.
+  @Prop({ required: true, type: Types.ObjectId, ref: User.name })
+  pickedUpBy: Types.ObjectId;
 
   @Prop({ required: true, type: Types.ObjectId, ref: OrderStatus.name })
   orderStatusId: Types.ObjectId;
@@ -117,6 +139,8 @@ export const OrderSchema = SchemaFactory.createForClass(Order);
 // The flagged view sorts by outstanding balance then age.
 OrderSchema.index({ flagged: 1, balanceDue: -1, createdAt: 1 });
 OrderSchema.index({ officeId: 1, createdAt: -1 });
+// The orders list filters/sorts by the business receipt date.
+OrderSchema.index({ officeId: 1, receivedAt: -1 });
 OrderSchema.index(
   { pickupRequestId: 1, customerId: 1 },
   {

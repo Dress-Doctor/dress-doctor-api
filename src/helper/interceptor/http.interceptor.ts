@@ -3,6 +3,7 @@ import {
   ExecutionContext,
   Injectable,
   NestInterceptor,
+  StreamableFile,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { Observable } from 'rxjs';
@@ -35,7 +36,10 @@ export class HTTPResponseInterceptor implements NestInterceptor {
         response.removeHeader('X-Powered-By');
       }),
 
-      map((data: HTTPResponse | string) => {
+      map((data: HTTPResponse | string | StreamableFile) => {
+        // File downloads bypass the JSON envelope — stream the bytes as-is.
+        if (data instanceof StreamableFile) return data;
+
         const timestamp = new Date().toISOString();
         if (typeof data === 'string') {
           return { success: true, message: data, statusCode, timestamp };

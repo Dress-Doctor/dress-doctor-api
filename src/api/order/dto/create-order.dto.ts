@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
+  IsDate,
   IsDefined,
   IsEnum,
   IsInt,
@@ -22,6 +23,15 @@ export class CreateOrderDto {
   @IsDefined({ message: 'CurrencyId is required' })
   @IsMongoId({ message: 'Invalid currencyId' })
   currencyId: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'User id of the agent who picked up the laundry (defaults to the creator)',
+  })
+  @IsOptional()
+  @IsMongoId({ message: 'Invalid pickedUpBy' })
+  pickedUpBy?: string;
 
   @ApiProperty({ required: true, enum: PricingModelEnum })
   @IsDefined({ message: 'pricingModel is required' })
@@ -80,6 +90,20 @@ export class CreateOrderDto {
   // @IsNumber({}, { message: 'TotalAmount must be a number' })
   // @Min(0, { message: 'TotalAmount cannot be negative' })
   // totalAmount: number;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Business date the laundry was received (defaults to now if omitted)',
+    example: new Date().toISOString(),
+  })
+  @IsOptional()
+  @Transform(
+    ({ value }): Date =>
+      typeof value === 'string' ? new Date(value) : (value as Date),
+  )
+  @IsDate({ message: 'receivedAt must be a valid date' })
+  receivedAt?: Date;
 
   @ApiProperty({
     required: true,

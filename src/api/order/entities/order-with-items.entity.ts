@@ -1,5 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { OrderCurrencyEntity } from './order-currency.entity';
+import { OrderCustomerEntity } from './order-customer.entity';
 import { OrderItemEntity } from './order-item.entity';
+import { OrderOfficeEntity } from './order-office.entity';
 
 export class OrderWithItemsEntity {
   @ApiProperty({ example: '64b8c9f1e4b0a2d3c4f5g6h' })
@@ -8,8 +11,20 @@ export class OrderWithItemsEntity {
   @ApiProperty({ example: '64b8c9f1e4b0a2d3c4f5g6h' })
   customerId: string;
 
+  @ApiProperty({ type: OrderCustomerEntity })
+  customer: OrderCustomerEntity;
+
   @ApiProperty({ example: '64b8c9f1e4b0a2d3c4f5g6h' })
   currencyId: string;
+
+  @ApiProperty({ type: OrderCurrencyEntity })
+  currency: OrderCurrencyEntity;
+
+  @ApiProperty({ example: '64b8c9f1e4b0a2d3c4f5g6h', required: false })
+  officeId?: string;
+
+  @ApiProperty({ type: OrderOfficeEntity, required: false })
+  office?: OrderOfficeEntity;
 
   @ApiProperty({ example: '64b8c9f1e4b0a2d3c4f5g6h' })
   pickupRequestId: string;
@@ -29,8 +44,39 @@ export class OrderWithItemsEntity {
   @ApiProperty({ example: 0 })
   totalAmount: number;
 
+  @ApiProperty({
+    example: '2026-03-08T00:00:00.000Z',
+    description: 'Business date the laundry was received',
+  })
+  receivedAt: string;
+
   @ApiProperty({ example: '2026-03-10T00:00:00.000Z' })
   estimatedDeliveryDate: string;
+
+  @ApiProperty({
+    required: false,
+    example: '2026-03-11T00:00:00.000Z',
+    description: 'Actual delivery date (set on DELIVERED); null until then',
+  })
+  deliveredAt?: string;
+
+  @ApiProperty({
+    example: '64b8c9f1e4b0a2d3c4f5g6h',
+    description: 'User who created the order',
+  })
+  createdBy: string;
+
+  @ApiProperty({ type: OrderCustomerEntity })
+  createdByUser: OrderCustomerEntity;
+
+  @ApiProperty({
+    example: '64b8c9f1e4b0a2d3c4f5g6h',
+    description: 'Agent who picked up the laundry (defaults to createdBy)',
+  })
+  pickedUpBy: string;
+
+  @ApiProperty({ type: OrderCustomerEntity })
+  pickedUpByUser: OrderCustomerEntity;
 
   @ApiProperty({ example: '64b8c9f1e4b0a2d3c4f5g6h' })
   orderStatusId: string;

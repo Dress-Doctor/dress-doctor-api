@@ -12,14 +12,18 @@ import {
   Put,
   Query,
   Req,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiHeader,
   ApiOperation,
+  ApiProduces,
   ApiResponse,
   ApiSecurity,
 } from '@nestjs/swagger';
+import { type Response } from 'express';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { ApiSuccessResponse, xApiKey, xApiSecret } from 'src/dto/swagger.dto';
 import {
@@ -34,6 +38,7 @@ import {
   CreateOrderDto,
   CreateOrderWithPickupDto,
 } from './dto/create-order.dto';
+import { ExportOrderDto } from './dto/export-order.dto';
 import { FindOrderDto } from './dto/find-order.dto';
 import { UpdateOrderDraftDto } from './dto/update-order-draft.dto';
 import {
@@ -67,6 +72,34 @@ export class OrderController {
       `[${platform}] ${phone} is fetching orders with query ${JSON.stringify(query)}`,
     );
     return await this.orderService.findAll(query);
+  }
+
+  @Get('export')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Export filtered orders as a CSV or Excel download',
+  })
+  @ApiProduces(
+    'text/csv',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  )
+  async exportOrders(
+    @Query() query: ExportOrderDto,
+    @Req() req: AppRequestWithUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { platform } = req.data;
+    this.logger.log(
+      `[${platform}] ${req.user.phone} is exporting orders as ${query.format}`,
+    );
+    const { buffer, filename, contentType } =
+      await this.orderService.exportOrders(query);
+    res.set({
+      'Content-Type': contentType,
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': buffer.length.toString(),
+    });
+    return new StreamableFile(buffer);
   }
 
   @Get('flagged')

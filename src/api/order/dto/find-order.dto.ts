@@ -1,6 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsMongoId, IsOptional, IsString } from 'class-validator';
+import {
+  IsDateString,
+  IsEnum,
+  IsMongoId,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 import { PaginationDto } from 'src/dto/request-data.dto';
+import { OrderStatusEnum } from 'src/schema/order/order.dto';
 
 export class FindOrderDto extends PaginationDto {
   @ApiProperty({
@@ -11,6 +18,35 @@ export class FindOrderDto extends PaginationDto {
   @IsOptional()
   @IsString()
   orderCode?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Free-text search across order code, customer phone and customer name',
+    example: 'Alice',
+  })
+  @IsOptional()
+  @IsString()
+  keyword?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Start of the receivedAt range (ISO). Defaults to 30 days ago.',
+    example: '2026-07-01',
+  })
+  @IsOptional()
+  @IsDateString({}, { message: 'startDate must be an ISO date' })
+  startDate?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'End of the receivedAt range (ISO). Defaults to now.',
+    example: '2026-08-05',
+  })
+  @IsOptional()
+  @IsDateString({}, { message: 'endDate must be an ISO date' })
+  endDate?: string;
 
   @ApiProperty({
     required: false,
@@ -32,10 +68,11 @@ export class FindOrderDto extends PaginationDto {
 
   @ApiProperty({
     required: false,
-    description: 'Filter by order status id',
-    example: '64b8c9f1e4b0a2d3c4f5g6h',
+    enum: OrderStatusEnum,
+    description: 'Filter by order status name',
+    example: OrderStatusEnum.READY,
   })
   @IsOptional()
-  @IsMongoId({ message: 'Invalid orderStatusId' })
-  orderStatusId?: string;
+  @IsEnum(OrderStatusEnum, { message: 'Invalid orderStatus' })
+  orderStatus?: OrderStatusEnum;
 }
