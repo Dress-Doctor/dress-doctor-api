@@ -51,6 +51,20 @@ export class AuthController {
   }
 
   @Public()
+  @Post('resend-otp')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Re-send a login OTP for a pending login' })
+  @ApiResponse({ type: InitiateLoginEntity, status: HttpStatus.CREATED })
+  async resendOtp(@Body() data: InitiateLoginDto, @Req() req: AppRequest) {
+    const platform = req.data.platform;
+
+    this.logger.log(
+      `[${platform}] ${maskPhone(data.identifier)} requested a new otp`,
+    );
+    return await this.authService.resendOtp(data);
+  }
+
+  @Public()
   @Post('complete-login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Used to complete login' })

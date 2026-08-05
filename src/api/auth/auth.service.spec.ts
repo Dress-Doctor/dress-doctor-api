@@ -224,6 +224,41 @@ describe('AuthService', () => {
     });
   });
 
+  describe('resendOtp', () => {
+    it('customer: re-issues an OTP without a password', async () => {
+      mockFindOne(buildUser({ userTypeId: { userTypeName: CUSTOMER } }));
+
+      const res = await service.resendOtp({ identifier: '698765294' });
+
+      expect(codeService.verifyHash).not.toHaveBeenCalled();
+      expect(otpService.requestOtp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          identifier: '698765294',
+          channel: OTPChannelEnum.WHATSAPP,
+        }),
+      );
+      expect(res.otpRef).toBe('otp-ref');
+    });
+
+    it('staff: still requires a valid password to re-issue', async () => {
+      mockFindOne(buildUser({ userTypeId: { userTypeName: STAFF } }));
+      codeService.verifyHash.mockResolvedValue(false);
+
+      await expect(
+        service.resendOtp({ identifier: '698765294', password: 'wrong' }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(otpService.requestOtp).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown user with INVALID_CREDENTIALS', async () => {
+      mockFindOne(null);
+
+      await expect(
+        service.resendOtp({ identifier: '000000000' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
   describe('completeLogin', () => {
     it('verifies the OTP then issues an access + refresh pair', async () => {
       mockFindOne(buildUser());

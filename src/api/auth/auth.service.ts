@@ -167,7 +167,12 @@ export class AuthService {
       : { channel: OTPChannelEnum.WHATSAPP, query: { phone: identifier } };
   }
 
-  async initiateLogin(data: InitiateLoginDto) {
+  /**
+   * Resolve a login identifier to an authenticated user + its OTP channel:
+   * verify the account exists and is active, and (for staff) that the password
+   * is valid. Shared by initiate-login and resend-otp so both gate identically.
+   */
+  private async authenticateForOtp(data: InitiateLoginDto) {
     const platform = this.req.data.platform;
     const { channel, query } = this.resolveLoginIdentity(data.identifier);
 
@@ -225,7 +230,23 @@ export class AuthService {
       }
     }
 
-    return await this.issueLoginOtp(foundedUser, channel);
+    return { user: foundedUser, channel };
+  }
+
+  async initiateLogin(data: InitiateLoginDto) {
+    const { user, channel } = await this.authenticateForOtp(data);
+    return await this.issueLoginOtp(user, channel);
+  }
+
+  /**
+   * Re-issue a fresh LOGIN OTP for an identifier that already passed
+   * initiate-login. Re-authenticates through the same gate (staff still need
+   * their password); per-identifier request cool-downs in OtpService throttle
+   * abuse. The previously issued code stays valid until it expires.
+   */
+  async resendOtp(data: InitiateLoginDto) {
+    const { user, channel } = await this.authenticateForOtp(data);
+    return await this.issueLoginOtp(user, channel);
   }
 
   async completeLogin(data: CompleteLoginDto) {
