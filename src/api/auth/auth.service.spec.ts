@@ -303,7 +303,7 @@ describe('AuthService', () => {
       refreshTokenModel.findOne.mockResolvedValue(stored);
       mockUserById();
 
-      const res = await service.refresh({ refreshToken: 'raw-token' });
+      const res = await service.refresh('raw-token');
 
       expect(res.accessToken).toBe('access.jwt');
       expect(typeof res.refreshToken).toBe('string');
@@ -317,9 +317,9 @@ describe('AuthService', () => {
       stored.revokedAt = new Date();
       refreshTokenModel.findOne.mockResolvedValue(stored);
 
-      await expect(
-        service.refresh({ refreshToken: 'raw-token' }),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.refresh('raw-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
 
       // Breach response: nuke all of the user's still-live refresh tokens.
       expect(refreshTokenModel.updateMany).toHaveBeenCalledTimes(1);
@@ -336,23 +336,23 @@ describe('AuthService', () => {
       stored.expiresAt = new Date(Date.now() - 1000);
       refreshTokenModel.findOne.mockResolvedValue(stored);
 
-      await expect(
-        service.refresh({ refreshToken: 'raw-token' }),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.refresh('raw-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('rejects an unknown token', async () => {
       refreshTokenModel.findOne.mockResolvedValue(null);
 
-      await expect(
-        service.refresh({ refreshToken: 'raw-token' }),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.refresh('raw-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
   });
 
   describe('logout', () => {
     it('revokes the presented refresh token', async () => {
-      await service.logout({ refreshToken: 'raw-token' });
+      await service.logout('raw-token');
       expect(refreshTokenModel.updateOne).toHaveBeenCalledTimes(1);
       const [filter, update] = refreshTokenModel.updateOne.mock.calls[0] as [
         { tokenHash: string; revokedAt: { $exists: boolean } },

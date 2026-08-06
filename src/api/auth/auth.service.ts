@@ -14,7 +14,6 @@ import { RefreshToken } from 'src/schema/user/refresh-token.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { User } from 'src/schema/user/user.schema';
 import { CompleteLoginDto, InitiateLoginDto } from './dto/login.dto';
-import { RefreshTokenDto } from './dto/refresh.dto';
 
 import { REQUEST } from '@nestjs/core';
 import appConfig from 'src/config/app-config';
@@ -291,9 +290,9 @@ export class AuthService {
    * token that was already rotated (revoked) is treated as a breach: the user's
    * entire live refresh-token chain is revoked so a stolen token can't be reused.
    */
-  async refresh(data: RefreshTokenDto) {
+  async refresh(refreshToken: string) {
     const platform = this.req.data.platform;
-    const tokenHash = this.hashRefreshToken(data.refreshToken);
+    const tokenHash = this.hashRefreshToken(refreshToken);
     const invalid = new UnauthorizedException({
       code: 'INVALID_REFRESH_TOKEN',
       message: 'Invalid or expired refresh token',
@@ -347,8 +346,8 @@ export class AuthService {
   }
 
   /** Revoke a single refresh token (idempotent — unknown tokens are a no-op). */
-  async logout(data: RefreshTokenDto) {
-    const tokenHash = this.hashRefreshToken(data.refreshToken);
+  async logout(refreshToken: string) {
+    const tokenHash = this.hashRefreshToken(refreshToken);
     await this.refreshTokenModel.updateOne(
       { tokenHash, revokedAt: { $exists: false } },
       { revokedAt: new Date() },

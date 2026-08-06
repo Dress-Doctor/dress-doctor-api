@@ -16,6 +16,7 @@ import { IS_PUBLIC_KEY } from 'src/helper/decorator/public.decorator';
 import { User } from 'src/schema/user/user.schema';
 import { JWTUserDto, UserRequestDto } from './dto/jwt.dto';
 import { CaslAbilityService } from 'src/helper/casl/casl-ability.service';
+import { readAccessCookie } from 'src/helper/auth-cookie';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -28,7 +29,15 @@ export class AuthGuard implements CanActivate {
     @InjectModel(User.name) private readonly userModel: Model<User>,
   ) {}
 
-  private extractTokenFromHeader(request: Request) {
+  /**
+   * Browser clients send the access token as an HttpOnly cookie; service and
+   * mobile clients send it as a Bearer header. The cookie wins when both are
+   * present — it is the one the browser cannot be tricked into forging.
+   */
+  private extractToken(request: Request) {
+    const cookieToken = readAccessCookie(request);
+    if (cookieToken) return cookieToken;
+
     const [type, token] = request.headers.authorization?.split(' ') ?? [];
     return type === 'Bearer' ? token : undefined;
   }
@@ -42,7 +51,7 @@ export class AuthGuard implements CanActivate {
     if (isPublic) return true;
 
     const request = context.switchToHttp().getRequest<AppRequest>();
-    const token = this.extractTokenFromHeader(request);
+    const token = this.extractToken(request);
     if (!token) {
       this.logger.error('No JWT token');
       throw new UnauthorizedException(constant.UNAUTHORIZED);
