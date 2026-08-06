@@ -145,9 +145,34 @@ export class UserService {
     const platform = this.req.data.platform;
     const { phone } = this.req.user;
 
-    let whereClause = {};
-    if (query.userTypeId)
-      whereClause = { userTypeId: new Types.ObjectId(query.userTypeId) };
+    const whereClause: Record<string, unknown> = {};
+    if (query.userType) {
+      // The taxonomy lives in the user_type collection, so the name is resolved
+      // to its id rather than matched against a hardcoded enum.
+      const userType = await this.userTypeModel.findOne({
+        userTypeName: query.userType.trim().toUpperCase(),
+      });
+      if (!userType) {
+        this.logger.error(
+          `[${platform}] ${phone} passed an invalid user type ${query.userType}`,
+        );
+        throw new BadRequestException({
+          code: 'INVALID_USER_TYPE',
+          message: 'Invalid user type',
+        });
+      }
+      whereClause.userTypeId = userType._id;
+    }
+    if (query.q) {
+      const rx = new RegExp(this.appUtilService.escapeRegex(query.q), 'i');
+      whereClause.$or = [
+        { firstName: rx },
+        { lastName: rx },
+        { email: rx },
+        { phone: rx },
+        { whatsappPhone: rx },
+      ];
+    }
 
     const skip = (page - 1) * size;
     const sort = this.appUtilService.parseSortParam(query.sort);

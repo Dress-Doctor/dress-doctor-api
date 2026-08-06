@@ -3,7 +3,6 @@ import { Type } from 'class-transformer';
 import {
   IsDefined,
   IsInt,
-  IsMongoId,
   IsOptional,
   IsString,
   Max,
@@ -46,11 +45,20 @@ export class FindAllUserDto {
 
   @ApiProperty({
     required: false,
-    example: '64b8c9f1e1d2c3a4b5f6g7h',
-    description:
-      'Specifies the criteria and direction for ordering the results',
+    example: 'CUSTOMER',
+    description: 'Filters by user type name (e.g. CUSTOMER, ADMIN, AFFILIATE)',
   })
   @IsOptional()
-  @IsMongoId({ message: 'userTypeId must be a valid MongoDB ObjectId' })
-  userTypeId?: string;
+  @IsString()
+  userType?: string;
+
+  @ApiProperty({
+    required: false,
+    example: 'jane',
+    description:
+      'Free-text search on first name, last name, email, phone or whatsapp phone',
+  })
+  @IsOptional()
+  @IsString()
+  q?: string;
 }
