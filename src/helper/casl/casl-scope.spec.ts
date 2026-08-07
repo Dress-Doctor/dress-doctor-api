@@ -1,7 +1,7 @@
 import { AbilityBuilder } from '@casl/ability';
 import { Types } from 'mongoose';
 import { AppAbility } from './casl.dto';
-import { scopeFilter } from './casl-scope';
+import { scopeFilter, scopePermitsCustomer } from './casl-scope';
 
 describe('scopeFilter', () => {
   it('returns {} when the caller has an unrestricted rule (e.g. GLOBAL)', () => {
@@ -54,5 +54,56 @@ describe('scopeFilter', () => {
     expect(scopeFilter(ability, 'READ', 'Payment')).toEqual({
       _id: { $in: [] },
     });
+  });
+});
+
+describe('scopePermitsCustomer', () => {
+  const customerId = new Types.ObjectId();
+
+  it('permits an unrestricted (GLOBAL) caller', () => {
+    const { can, build } = new AbilityBuilder(AppAbility);
+    can('CREATE', 'Order');
+
+    expect(scopePermitsCustomer(build(), 'CREATE', 'Order', customerId)).toBe(
+      true,
+    );
+  });
+
+  /**
+   * The regression this function was getting wrong: every OFFICE-scoped role
+   * carries `{ officeId: '$office' }`, which was read as a customer
+   * restriction and left Office/Factory Managers unable to create any order.
+   */
+  it('permits an office-scoped caller to act for any customer', () => {
+    const { can, build } = new AbilityBuilder(AppAbility);
+    can('CREATE', 'Order', {
+      officeId: new Types.ObjectId().toString(),
+    } as never);
+
+    expect(scopePermitsCustomer(build(), 'CREATE', 'Order', customerId)).toBe(
+      true,
+    );
+  });
+
+  it('holds a customer to their own id', () => {
+    const { can, build } = new AbilityBuilder(AppAbility);
+    can('CREATE', 'Order', { customerId: customerId.toString() } as never);
+    const ability = build();
+
+    expect(scopePermitsCustomer(ability, 'CREATE', 'Order', customerId)).toBe(
+      true,
+    );
+    expect(
+      scopePermitsCustomer(ability, 'CREATE', 'Order', new Types.ObjectId()),
+    ).toBe(false);
+  });
+
+  it('refuses a caller with no rule for the subject', () => {
+    const { can, build } = new AbilityBuilder(AppAbility);
+    can('CREATE', 'Order', { customerId: customerId.toString() } as never);
+
+    expect(scopePermitsCustomer(build(), 'CREATE', 'Payment', customerId)).toBe(
+      false,
+    );
   });
 });
