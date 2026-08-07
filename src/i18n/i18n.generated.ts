@@ -17,7 +17,6 @@ export type I18nTranslations = {
                 "helpText": string;
                 "ignoreMessage": string;
                 "footer": string;
-                "codeValidity": string;
             };
             "order_ready": {
                 "title": string;
