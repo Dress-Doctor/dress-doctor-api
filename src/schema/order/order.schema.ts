@@ -28,6 +28,14 @@ export class Order extends Document<Types.ObjectId> {
   @Prop({ required: true, unique: true })
   orderCode: string;
 
+  /**
+   * Anything specific the customer told us about this order — "no starch on
+   * the blue shirt", "collar stain", a delivery instruction. Free text on
+   * purpose: it is what the customer said, not a field we can enumerate.
+   */
+  @Prop({ required: false, trim: true, maxlength: 1000 })
+  note?: string;
+
   // Server-authoritative pricing model (§6-8); never a client price.
   @Prop({
     type: String,
@@ -47,6 +55,13 @@ export class Order extends Document<Types.ObjectId> {
   // subtotal (kept as orderAmount for continuity): Σ lineTotal | weight×rate | overage.
   @Prop({ required: true, default: 0 })
   orderAmount: number;
+
+  // The subtotal a human agreed at the counter, when one was given. It is an
+  // INPUT, not a result: reprice() feeds it back to the pricing engine as the
+  // subtotal, so adding a garment or editing the draft can't quietly reprice
+  // the order away from what the customer was told. Unset = engine prices it.
+  @Prop({ required: false })
+  manualOrderAmount?: number;
 
   // Staff ad-hoc discount (permissioned) — not a promo.
   @Prop({ required: true, default: 0 })

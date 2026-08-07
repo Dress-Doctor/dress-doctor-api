@@ -9,6 +9,7 @@ import { AppUtilService } from 'src/helper/service/app-util.service';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { Currency } from 'src/schema/catalog/currency.schema';
 import { Item } from 'src/schema/catalog/item.schema';
+import { OfficeUser } from 'src/schema/office/office-user.schema';
 import { Office } from 'src/schema/office/office.schema';
 import { OrderItem } from 'src/schema/order/order-item.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
@@ -151,6 +152,7 @@ describe('OrderService', () => {
           useValue: orderStatusModel,
         },
         { provide: getModelToken(Office.name), useValue: officeModel },
+        { provide: getModelToken(OfficeUser.name), useValue: {} },
         { provide: getModelToken(PickupRequest.name), useValue: {} },
         { provide: getModelToken(PickupStatus.name), useValue: {} },
         { provide: getModelToken(Customer.name), useValue: {} },
@@ -343,6 +345,38 @@ describe('OrderService', () => {
       expect(subscriptionModel.updateOne).not.toHaveBeenCalled();
       expect(promoUsageModel.create).not.toHaveBeenCalled();
       expect(promoCodeModel.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('feeds a stored agreed price back to the engine on every reprice', async () => {
+      orderModel.findById.mockResolvedValue({
+        _id: new Types.ObjectId(),
+        pricingModel: 'PER_KG',
+        customerId: new Types.ObjectId(),
+        totalWeightKg: 20.5,
+        manualOrderAmount: 5500.5,
+        manualDiscount: 0,
+        amountPaid: 0,
+      });
+
+      await service.updateOrderDraft('507f1f77bcf86cd799439011', {
+        totalWeightKg: 20.5,
+      });
+
+      expect(pricingService.priceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ orderAmount: 5500.5, totalWeightKg: 20.5 }),
+      );
+    });
+
+    it('clears the agreed price when the draft sends 0', async () => {
+      await service.updateOrderDraft('507f1f77bcf86cd799439011', {
+        orderAmount: 0,
+      });
+
+      const [, update] = orderModel.updateOne.mock.calls.at(-1) as [
+        unknown,
+        { $unset?: Record<string, unknown> },
+      ];
+      expect(update.$unset).toEqual({ manualOrderAmount: 1 });
     });
   });
 

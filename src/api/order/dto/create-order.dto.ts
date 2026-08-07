@@ -4,10 +4,11 @@ import {
   IsDate,
   IsDefined,
   IsEnum,
-  IsInt,
   IsMongoId,
+  IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
   MinDate,
 } from 'class-validator';
@@ -40,21 +41,49 @@ export class CreateOrderDto {
 
   @ApiProperty({
     required: false,
-    description: 'Total weight (kg) — required for PER_KG',
+    example: 20.5,
+    description:
+      'Total weight (kg) — required for PER_KG. Decimal: scales read 20.5, ' +
+      'not 20.',
   })
   @IsOptional()
   @Transform(({ value }) => Number(value))
-  @IsInt({ message: 'totalWeightKg must be an integer' })
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'totalWeightKg must be a number with at most 2 decimals' },
+  )
   @Min(0)
   totalWeightKg?: number;
 
   @ApiProperty({
     required: false,
+    example: 500.5,
+    description:
+      'Subtotal for this order, before discounts. Overrides what the pricing ' +
+      'engine would have computed and survives later reprices — send it only ' +
+      'when the counter agreed a price. Omit and the engine prices the order ' +
+      '(PER_KG: weight × the configured per-kg rate).',
+  })
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'orderAmount must be a number with at most 2 decimals' },
+  )
+  @Min(0, { message: 'orderAmount cannot be negative' })
+  orderAmount?: number;
+
+  @ApiProperty({
+    required: false,
+    example: 250.5,
     description: 'Staff ad-hoc discount (XAF), permissioned',
   })
   @IsOptional()
   @Transform(({ value }) => Number(value))
-  @IsInt({ message: 'manualDiscount must be an integer (XAF)' })
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'manualDiscount must be a number with at most 2 decimals' },
+  )
   @Min(0)
   manualDiscount?: number;
 
@@ -63,33 +92,32 @@ export class CreateOrderDto {
   @IsString()
   promoCode?: string;
 
-  // @ApiProperty({ required: false, description: 'Fee amount', example: 0 })
-  // @IsDefined({ message: 'fee is required' })
-  // @Transform(({ value }) => Number(value))
-  // @IsNumber({}, { message: 'Fee must be a number' })
-  // @Min(0, { message: 'Fee cannot be negative' })
-  // fee: number;
+  @ApiProperty({
+    required: false,
+    description:
+      'Anything specific the customer told us about this order — a stain, a ' +
+      'fabric warning, a delivery instruction.',
+    example: 'No starch on the blue shirt; collar stain on the white one.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000, { message: 'note cannot exceed 1000 characters' })
+  note?: string;
 
-  // @ApiProperty({ required: false, description: 'Order amount', example: 0 })
-  // @IsDefined({ message: 'orderAmount is required' })
-  // @Transform(({ value }) => Number(value))
-  // @IsNumber({}, { message: 'OrderAmount must be a number' })
-  // @Min(0, { message: 'OrderAmount cannot be negative' })
-  // orderAmount: number;
+  @ApiProperty({
+    required: false,
+    description:
+      'Office the order belongs to. Only global roles may set it; office ' +
+      'staff always book into their own office and a different id is ' +
+      'rejected. Defaults to the caller’s office.',
+  })
+  @IsOptional()
+  @IsMongoId({ message: 'Invalid officeId' })
+  officeId?: string;
 
-  // @ApiProperty({ required: false, description: 'Discount applied', example: 0 })
-  // @IsOptional()
-  // @Transform(({ value }) => Number(value))
-  // @IsNumber({}, { message: 'DiscountAmount must be a number' })
-  // @Min(0, { message: 'DiscountAmount cannot be negative' })
-  // discountAmount?: number;
-
-  // @ApiProperty({ required: false, description: 'Total amount', example: 0 })
-  // @IsDefined({ message: 'totalAmount is required' })
-  // @Transform(({ value }) => Number(value))
-  // @IsNumber({}, { message: 'TotalAmount must be a number' })
-  // @Min(0, { message: 'TotalAmount cannot be negative' })
-  // totalAmount: number;
+  // discountAmount/totalAmount/balanceDue stay computed (§2.3): they fall out
+  // of orderAmount minus the discounts, so accepting them would let a client
+  // state a total its own numbers contradict.
 
   @ApiProperty({
     required: false,

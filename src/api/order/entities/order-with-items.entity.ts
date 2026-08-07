@@ -32,6 +32,13 @@ export class OrderWithItemsEntity {
   @ApiProperty({ example: 'ORD-0001' })
   orderCode: string;
 
+  @ApiProperty({
+    required: false,
+    description: 'Anything specific the customer told us about this order',
+    example: 'No starch on the blue shirt; collar stain on the white one.',
+  })
+  note?: string;
+
   @ApiProperty({ example: 0 })
   fee: number;
 

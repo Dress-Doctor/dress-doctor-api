@@ -25,6 +25,7 @@ import {
   OrderStatusEnum,
   PricingModelEnum,
 } from 'src/schema/order/order.dto';
+import { OfficeUser } from 'src/schema/office/office-user.schema';
 import { Office } from 'src/schema/office/office.schema';
 import { Order } from 'src/schema/order/order.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
@@ -194,6 +195,9 @@ export class OrderService {
 
     @InjectModel(Office.name) private readonly officeModel: Model<Office>,
 
+    @InjectModel(OfficeUser.name)
+    private readonly officeUserModel: Model<OfficeUser>,
+
     @InjectModel(PickupRequest.name)
     private readonly pickupRequestModel: Model<PickupRequest>,
 
@@ -234,6 +238,9 @@ export class OrderService {
       officeId: this.req.data.officeId?.toString(),
       customerId: order.customerId.toString(),
       totalWeightKg: order.totalWeightKg,
+      // An agreed price outranks the rate card on every reprice, not just the
+      // first — otherwise the next item added would silently undo it.
+      orderAmount: order.manualOrderAmount,
       promoCode: order.promoCode,
       manualDiscount: order.manualDiscount,
       items: items.map((i) => ({
@@ -338,17 +345,43 @@ export class OrderService {
       });
     }
 
-    // manualDiscount is permissioned separately from ordinary edits.
+    // manualDiscount is permissioned separately from ordinary edits. So is a
+    // hand-set price: both move what the customer owes.
     if (data.manualDiscount !== undefined) this.can('UPDATE', 'Payment');
+    if (data.orderAmount !== undefined) this.can('UPDATE', 'Payment');
 
     const update: Record<string, unknown> = {};
+    const unset: Record<string, unknown> = {};
     if (data.totalWeightKg !== undefined)
       update.totalWeightKg = data.totalWeightKg;
+    // 0 hands pricing back to the engine — there is no "free order" reading to
+    // lose here, since FREE is a pricing model of its own.
+    if (data.orderAmount !== undefined) {
+      if (data.orderAmount > 0) update.manualOrderAmount = data.orderAmount;
+      else unset.manualOrderAmount = 1;
+    }
     if (data.manualDiscount !== undefined)
       update.manualDiscount = data.manualDiscount;
     if (data.promoCode !== undefined) update.promoCode = data.promoCode;
+    // An empty string clears it — the customer withdrawing an instruction is
+    // as real an edit as adding one. It has to be an explicit $unset:
+    // `note: undefined` is stripped from the update, so the old text survives.
+    if (data.note !== undefined) {
+      const note = data.note.trim();
+      if (note) update.note = note;
+      else unset.note = 1;
+    }
 
-    await this.orderModel.updateOne({ _id: id }, update);
+    await this.orderModel.updateOne(
+      { _id: id },
+      Object.keys(unset).length
+        ? // Mongo rejects an empty $set, so only include it when it has keys.
+          {
+            ...(Object.keys(update).length ? { $set: update } : {}),
+            $unset: unset,
+          }
+        : update,
+    );
     await this.reprice(id, changedBy);
     return 'Order updated successfully';
   }
@@ -497,7 +530,11 @@ export class OrderService {
         customerId,
         currencyId,
         pickupRequestId,
-        officeId: this.req.data.officeId,
+        // The posted amount is an input to pricing, not the priced result —
+        // reprice() writes `orderAmount` itself, right after this.
+        manualOrderAmount: data.orderAmount,
+        // After the spread, so the raw string from the DTO never survives.
+        officeId: await this.resolveOfficeId(data.officeId, base),
         orderStatusId: orderStatus._id,
         orderCode: await this.codeService.generateOrderReference(),
         createdBy: userId,
@@ -577,7 +614,11 @@ export class OrderService {
         ...data,
         customerId,
         currencyId,
-        officeId: this.req.data.officeId,
+        // The posted amount is an input to pricing, not the priced result —
+        // reprice() writes `orderAmount` itself, right after this.
+        manualOrderAmount: data.orderAmount,
+        // After the spread, so the raw string from the DTO never survives.
+        officeId: await this.resolveOfficeId(data.officeId, base),
         orderStatusId: orderStatus._id,
         orderCode: await this.codeService.generateOrderReference(),
         createdBy: userId,
@@ -643,6 +684,61 @@ export class OrderService {
       });
     }
     return id;
+  }
+
+  /**
+   * Which office an order being created belongs to.
+   *
+   * Omitted, it is the office the request is already operating in. Supplied, it
+   * has to be one the caller actually works at — staff can be posted to more
+   * than one office, so membership is read from `office_user` rather than
+   * inferred from the single office on the request. A global role (no office
+   * condition on its CREATE rules) may book anywhere.
+   *
+   * An office the caller has no posting to is refused rather than quietly
+   * rewritten to their own: filing the order somewhere other than the client
+   * was told is the worse of the two failures.
+   */
+  private async resolveOfficeId(
+    officeId: string | undefined,
+    logBase: string,
+  ): Promise<Types.ObjectId | undefined> {
+    const own = this.req.data.officeId;
+    if (!officeId) return own;
+
+    const requested = new Types.ObjectId(officeId);
+
+    const exists = await this.officeModel.exists({ _id: requested });
+    if (!exists) {
+      this.logger.error(`${logBase} invalid officeId ${officeId}`);
+      throw new BadRequestException({
+        code: 'INVALID_OFFICE',
+        message: 'Invalid office id',
+      });
+    }
+
+    if (own && requested.equals(own)) return requested;
+
+    // `{}` means no conditions at all — unrestricted, i.e. a GLOBAL role.
+    const scope = scopeFilter(this.req.user.ability, 'CREATE', 'Order');
+    if (Object.keys(scope).length === 0) return requested;
+
+    const posted = await this.officeUserModel.exists({
+      officeId: requested,
+      userId: new Types.ObjectId(this.req.user.userId),
+      isActive: true,
+    });
+    if (!posted) {
+      this.logger.error(
+        `${logBase} tried to create an order for office ${officeId} they are not posted to`,
+      );
+      throw new BadRequestException({
+        code: 'OFFICE_OUT_OF_SCOPE',
+        message: 'You do not have access to this office',
+      });
+    }
+
+    return requested;
   }
 
   /** PER_KG needs a positive weight (else it silently prices to 0). */

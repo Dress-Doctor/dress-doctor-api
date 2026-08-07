@@ -149,6 +149,53 @@ describe('PricingService', () => {
         expect.objectContaining({ key: SettingKeys.perKgRate }),
       );
     });
+
+    it('prices a fractional weight without float noise', async () => {
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_KG,
+        totalWeightKg: 20.1,
+      } as QuoteDto);
+      // 20.1 × 1000 is 20100.000000000004 in binary floating point.
+      expect(res.subtotal).toBe(20100);
+      expect(res.total).toBe(20100);
+    });
+  });
+
+  describe('agreed subtotal (orderAmount)', () => {
+    it('replaces the computed subtotal and still derives the total', async () => {
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_KG,
+        totalWeightKg: 7,
+        orderAmount: 5500.5,
+        manualDiscount: 500,
+      } as QuoteDto);
+      // The rate card says 7000; the counter said 5500.5.
+      expect(res.subtotal).toBe(5500.5);
+      expect(res.total).toBe(5000.5);
+    });
+
+    it('prices a promo against the agreed subtotal, not the rate card', async () => {
+      promoCodeModel.findOne.mockResolvedValue({
+        _id: new Types.ObjectId(),
+        promoCodeName: 'HALF',
+        isActive: true,
+        discountType: RewardTypeEnum.PERCENTAGE,
+        discountValue: 50,
+        minOrderValue: 0,
+        applicableServiceTypeIds: [],
+        perCustomerLimit: 0,
+        usedCount: 0,
+      });
+
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_KG,
+        totalWeightKg: 7,
+        orderAmount: 2000,
+        promoCode: 'HALF',
+      } as QuoteDto);
+      expect(res.promoDiscount).toBe(1000);
+      expect(res.total).toBe(1000);
+    });
   });
 
   describe('SUBSCRIPTION', () => {

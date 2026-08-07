@@ -6,6 +6,7 @@ import {
   IsEnum,
   IsInt,
   IsMongoId,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
@@ -55,10 +56,14 @@ export class QuoteDto {
 
   @ApiProperty({
     required: false,
+    example: 20.5,
     description: 'Total weight (kg) — required for PER_KG and SUBSCRIPTION',
   })
   @IsOptional()
-  @IsInt({ message: 'totalWeightKg must be an integer' })
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'totalWeightKg must be a number with at most 2 decimals' },
+  )
   @Min(0)
   totalWeightKg?: number;
 
@@ -69,10 +74,29 @@ export class QuoteDto {
 
   @ApiProperty({
     required: false,
+    example: 500.5,
+    description:
+      'Agreed subtotal. Supplied, it replaces the subtotal this engine would ' +
+      'have computed; discounts and the total are still derived from it.',
+  })
+  @IsOptional()
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'orderAmount must be a number with at most 2 decimals' },
+  )
+  @Min(0, { message: 'orderAmount cannot be negative' })
+  orderAmount?: number;
+
+  @ApiProperty({
+    required: false,
+    example: 250.5,
     description: 'Staff ad-hoc discount (XAF) — permissioned, not a promo',
   })
   @IsOptional()
-  @IsInt({ message: 'manualDiscount must be an integer (XAF)' })
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'manualDiscount must be a number with at most 2 decimals' },
+  )
   @Min(0)
   manualDiscount?: number;
 

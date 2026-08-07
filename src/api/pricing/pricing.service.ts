@@ -82,6 +82,15 @@ export class PricingService {
     }
   }
 
+  /**
+   * Round to 2 decimals. Weights are fractional (20.5 kg), so every amount
+   * derived from one carries binary-float noise — 20.1 × 1000 lands on
+   * 20100.000000000004 without this.
+   */
+  private round(amount: number): number {
+    return Math.round(amount * 100) / 100;
+  }
+
   /** Read a numeric setting (global row). Throws if the rate isn't seeded. */
   private async getRate(key: string): Promise<number> {
     const setting = await this.settingModel.findOne({ key, officeId: null });
@@ -198,7 +207,7 @@ export class PricingService {
           });
         }
         const perKgRate = await this.getRate(SettingKeys.perKgRate);
-        subtotal = weight * perKgRate;
+        subtotal = this.round(weight * perKgRate);
         lines = this.qcLines(data.items);
         break;
       }
@@ -256,7 +265,7 @@ export class PricingService {
         const overageRate = await this.getRate(SettingKeys.overageRate);
         quotaConsumed = Math.min(weight, sub.remainingQuota);
         const overage = Math.max(0, weight - sub.remainingQuota);
-        subtotal = overage * overageRate;
+        subtotal = this.round(overage * overageRate);
         lines = this.qcLines(data.items);
         break;
       }
@@ -267,6 +276,12 @@ export class PricingService {
         break;
       }
     }
+
+    // An agreed price replaces the computed subtotal — the counter, not the
+    // rate card, decided this one. Everything downstream (promo, discounts,
+    // total) is still derived here, so the numbers stay consistent with each
+    // other whichever way the subtotal was arrived at.
+    if (data.orderAmount !== undefined) subtotal = this.round(data.orderAmount);
 
     // Discounts: manual (staff) and promo (engine) both subtract; total floors
     // at 0 so an order can never go negative.
@@ -284,7 +299,9 @@ export class PricingService {
       promoCodeId = applied.promoCodeId;
     }
 
-    const total = Math.max(0, subtotal - manualDiscount - promoDiscount);
+    const total = this.round(
+      Math.max(0, subtotal - manualDiscount - promoDiscount),
+    );
 
     return {
       pricingModel: data.pricingModel,

@@ -280,6 +280,137 @@ describe('HTTP contract (e2e)', () => {
     });
   });
 
+  describe('order creation: note and office', () => {
+    let currencyId: string;
+    let customerTypeId: string;
+    let offices: Array<{ _id: Types.ObjectId }>;
+
+    /** One draft per customer is enforced, so every case needs its own. */
+    const newCustomer = async (phone: string) => {
+      const customer = await model('User').create({
+        firstName: 'Note',
+        lastName: 'Probe',
+        phone,
+        whatsappPhone: phone,
+        userTypeId: customerTypeId,
+      });
+      return customer._id.toString();
+    };
+
+    const body = (customerId: string) => ({
+      customerId,
+      currencyId,
+      pricingModel: 'PER_KG',
+      totalWeightKg: 3,
+      estimatedDeliveryDate: tomorrow(),
+    });
+
+    beforeAll(async () => {
+      currencyId = (
+        await model('Currency').findOne({ isoCode: 'XAF' })
+      )._id.toString();
+      customerTypeId = (
+        await model('UserType').findOne({ userTypeName: 'CUSTOMER' })
+      )._id.toString();
+      offices = await model('Office').find({}).limit(2);
+    });
+
+    it('stores the note the customer gave us', async () => {
+      const customerId = await newCustomer('644000001');
+      const note =
+        'No starch on the blue shirt; collar stain on the white one.';
+
+      await auth(request(app.getHttpServer()).post('/api/v1/orders'))
+        .send({ ...body(customerId), note })
+        .expect(201);
+
+      const order = await model('Order').findOne({
+        customerId: new Types.ObjectId(customerId),
+      });
+      expect(order.note).toBe(note);
+    });
+
+    it('leaves the note unset when none is given', async () => {
+      const customerId = await newCustomer('644000002');
+
+      await auth(request(app.getHttpServer()).post('/api/v1/orders'))
+        .send(body(customerId))
+        .expect(201);
+
+      const order = await model('Order').findOne({
+        customerId: new Types.ObjectId(customerId),
+      });
+      expect(order.note).toBeUndefined();
+    });
+
+    it('rejects a note longer than the column allows', async () => {
+      const customerId = await newCustomer('644000003');
+
+      await auth(request(app.getHttpServer()).post('/api/v1/orders'))
+        .send({ ...body(customerId), note: 'x'.repeat(1001) })
+        .expect(400);
+    });
+
+    it('books into the office a global role asks for', async () => {
+      const customerId = await newCustomer('644000004');
+      const target = offices[1]._id.toString();
+
+      await auth(request(app.getHttpServer()).post('/api/v1/orders'))
+        .send({ ...body(customerId), officeId: target })
+        .expect(201);
+
+      const order = await model('Order').findOne({
+        customerId: new Types.ObjectId(customerId),
+      });
+      expect(order.officeId.toString()).toBe(target);
+    });
+
+    it('updates the note on a draft, and clears it on an empty string', async () => {
+      const customerId = await newCustomer('644000006');
+
+      await auth(request(app.getHttpServer()).post('/api/v1/orders'))
+        .send({ ...body(customerId), note: 'Original instruction' })
+        .expect(201);
+
+      const created = await model('Order').findOne({
+        customerId: new Types.ObjectId(customerId),
+      });
+
+      await auth(
+        request(app.getHttpServer()).patch(`/api/v1/orders/${created._id}`),
+      )
+        .send({ note: 'Customer called back: no bleach' })
+        .expect(200);
+
+      let order = await model('Order').findById(created._id);
+      expect(order.note).toBe('Customer called back: no bleach');
+
+      await auth(
+        request(app.getHttpServer()).patch(`/api/v1/orders/${created._id}`),
+      )
+        .send({ note: '' })
+        .expect(200);
+
+      order = await model('Order').findById(created._id);
+      expect(order.note).toBeUndefined();
+    });
+
+    it('rejects an officeId that does not exist', async () => {
+      const customerId = await newCustomer('644000005');
+
+      const res = await auth(
+        request(app.getHttpServer()).post('/api/v1/orders'),
+      )
+        .send({
+          ...body(customerId),
+          officeId: new Types.ObjectId().toString(),
+        })
+        .expect(400);
+
+      expect(res.body.error?.code ?? res.body.code).toBe('INVALID_OFFICE');
+    });
+  });
+
   /**
    * The KPI numbers come out of an aggregation, so mocks prove nothing about
    * them — these run the real pipeline against Mongo.
@@ -558,6 +689,78 @@ describe('HTTP contract (e2e)', () => {
       )
         .send({ totalWeightKg: 3 })
         .expect(404);
+    });
+
+    /** A customer per case: one draft order per customer is enforced. */
+    const bookingCustomer = async (phone: string) => {
+      const customerType = await model('UserType').findOne({
+        userTypeName: 'CUSTOMER',
+      });
+      return model('User').create({
+        firstName: 'Scoped',
+        lastName: 'Booking',
+        phone,
+        whatsappPhone: phone,
+        userTypeId: customerType._id,
+      });
+    };
+
+    /** Returns the supertest Test itself, so callers can chain `.expect()`. */
+    const bookInto = (
+      customerId: string,
+      officeId: string,
+      currencyId: string,
+    ) =>
+      scoped(request(app.getHttpServer()).post('/api/v1/orders')).send({
+        customerId,
+        officeId,
+        currencyId,
+        pricingModel: 'PER_KG',
+        totalWeightKg: 2,
+        estimatedDeliveryDate: tomorrow(),
+      });
+
+    const xaf = async () =>
+      (await model('Currency').findOne({ isoCode: 'XAF' }))._id.toString();
+
+    it('office-A staff cannot book into an office they are not posted to', async () => {
+      const [, officeB] = await model('Office').find({}).limit(2);
+      const customer = await bookingCustomer('655000001');
+
+      const res = await bookInto(
+        customer._id.toString(),
+        officeB._id.toString(),
+        await xaf(),
+      ).expect(400);
+
+      expect(res.body.error?.code ?? res.body.code).toBe('OFFICE_OUT_OF_SCOPE');
+      // Refused outright — not quietly filed into their own office instead.
+      const order = await model('Order').findOne({ customerId: customer._id });
+      expect(order).toBeNull();
+    });
+
+    it('books into a second office once the staff member is posted there', async () => {
+      const [officeA, officeB] = await model('Office').find({}).limit(2);
+      const customer = await bookingCustomer('655000002');
+
+      // Same staff, now working out of both offices.
+      const staff = await model('User').findOne({ phone: '622222222' });
+      const role = await model('Role').findOne({ roleName: 'Office Manager' });
+      await model('OfficeUser').create({
+        userId: staff._id,
+        roleId: role._id,
+        officeId: officeB._id,
+      });
+
+      await bookInto(
+        customer._id.toString(),
+        officeB._id.toString(),
+        await xaf(),
+      ).expect(201);
+
+      const order = await model('Order').findOne({ customerId: customer._id });
+      expect(order.officeId.toString()).toBe(officeB._id.toString());
+      expect(order.officeId.toString()).not.toBe(officeA._id.toString());
     });
 
     it('office-A staff cannot pay an out-of-scope order (404)', async () => {
