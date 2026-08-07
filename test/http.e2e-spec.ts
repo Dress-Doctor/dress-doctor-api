@@ -280,6 +280,225 @@ describe('HTTP contract (e2e)', () => {
     });
   });
 
+  /**
+   * The KPI numbers come out of an aggregation, so mocks prove nothing about
+   * them — these run the real pipeline against Mongo.
+   *
+   * Every order here belongs to one customer named "Kpi", and the requests
+   * filter on that keyword, so counts stay exact no matter what other suites
+   * leave in the database.
+   */
+  describe('order KPIs (real aggregation)', () => {
+    const statusCounts: Record<string, number> = {
+      DRAFT: 2,
+      CONFIRMED: 2,
+      RECEIVED: 1,
+      WASHING: 1,
+      READY: 3,
+      DELIVERED: 4,
+      CANCELLED: 1,
+    };
+
+    // Fixed rather than random, so the pickedUpBy filter has something to name.
+    const agentId = new Types.ObjectId();
+    let officeCode: string;
+    let otherOfficeCode: string;
+
+    beforeAll(async () => {
+      const [office, otherOffice] = await model('Office').find({}).limit(2);
+      officeCode = office.officeCode;
+      otherOfficeCode = otherOffice.officeCode;
+      const currency = await model('Currency').findOne({ isoCode: 'XAF' });
+      const customerType = await model('UserType').findOne({
+        userTypeName: 'CUSTOMER',
+      });
+      const customer = await model('User').create({
+        firstName: 'Kpi',
+        lastName: 'Probe',
+        phone: '633333333',
+        whatsappPhone: '633333333',
+        userTypeId: customerType._id,
+      });
+
+      let n = 0;
+      for (const [name, count] of Object.entries(statusCounts)) {
+        const status = await model('OrderStatus').findOne({
+          orderStatusName: name,
+        });
+        for (let i = 0; i < count; i++) {
+          await model('Order').create({
+            customerId: customer._id,
+            currencyId: currency._id,
+            officeId: office._id,
+            orderCode: `OR-KPI-${n++}`,
+            pricingModel: 'PER_KG',
+            estimatedDeliveryDate: new Date(),
+            orderStatusId: status._id,
+            receivedAt: new Date(),
+            createdBy: new Types.ObjectId(),
+            pickedUpBy: agentId,
+          });
+        }
+      }
+    });
+
+    const kpis = (query = '') =>
+      auth(
+        request(app.getHttpServer()).get(
+          `/api/v1/orders/kpis?keyword=Kpi${query}`,
+        ),
+      ).expect(200);
+
+    it('returns the four headline figures over the filtered set', async () => {
+      const res = await kpis();
+      const data = res.body.data;
+
+      expect(res.body.success).toBe(true);
+      expect(data.totalOrders).toBe(14);
+      expect(data.inProgress).toBe(4); // 2 confirmed + 1 received + 1 washing
+      expect(data.readyForCollection).toBe(3);
+      // 4 delivered / (14 − 1 cancelled) = 30.8%
+      expect(data.completionBase).toBe(13);
+      expect(data.completionRate).toBe(30.8);
+    });
+
+    it('reconciles with the list endpoint on the same filters', async () => {
+      const [kpi, list] = await Promise.all([
+        kpis(),
+        auth(
+          request(app.getHttpServer()).get('/api/v1/orders?keyword=Kpi&size=1'),
+        ).expect(200),
+      ]);
+
+      // Same filters, same set — the cards and the table must never disagree.
+      expect(kpi.body.data.totalOrders).toBe(list.body.total);
+      // The list no longer carries a status breakdown; the KPI endpoint owns it.
+      expect(list.body.byOrderStatus).toBeUndefined();
+    });
+
+    const fullBreakdown = {
+      all: 14,
+      draft: 2,
+      confirmed: 2,
+      received: 1,
+      washing: 1,
+      ready: 3,
+      delivered: 4,
+      cancelled: 1,
+    };
+
+    it('narrows the headline figures on orderStatus', async () => {
+      const res = await kpis('&orderStatus=READY');
+
+      // Every param applies, so the set is the 3 READY orders and nothing else.
+      expect(res.body.data.totalOrders).toBe(3);
+      expect(res.body.data.readyForCollection).toBe(3);
+      expect(res.body.data.delivered).toBe(0);
+      expect(res.body.data.completionRate).toBe(0);
+    });
+
+    it('keeps the breakdown across every status on every response', async () => {
+      // Same numbers with the status filter on and off — this is what a tab
+      // strip reads, so selecting a tab must not erase the other tabs.
+      const [unfiltered, filtered] = await Promise.all([
+        kpis(),
+        kpis('&orderStatus=READY'),
+      ]);
+
+      expect(unfiltered.body.data.byOrderStatus).toEqual(fullBreakdown);
+      expect(filtered.body.data.byOrderStatus).toEqual(fullBreakdown);
+    });
+
+    it('narrows on paymentStatus, breakdown included', async () => {
+      // The fixtures are all UNPAID (nothing has been paid against them).
+      const [unpaid, paid] = await Promise.all([
+        kpis('&paymentStatus=UNPAID'),
+        kpis('&paymentStatus=PAID'),
+      ]);
+
+      expect(unpaid.body.data.totalOrders).toBe(14);
+      expect(unpaid.body.data.byOrderStatus).toEqual(fullBreakdown);
+
+      // A filter that matches nothing empties the breakdown too — it is not
+      // held back the way orderStatus is.
+      expect(paid.body.data.totalOrders).toBe(0);
+      expect(paid.body.data.byOrderStatus.all).toBe(0);
+    });
+
+    it('narrows the list on paymentStatus', async () => {
+      const res = await auth(
+        request(app.getHttpServer()).get(
+          '/api/v1/orders?keyword=Kpi&paymentStatus=PAID',
+        ),
+      ).expect(200);
+
+      expect(res.body.total).toBe(0);
+      expect(res.body.data).toHaveLength(0);
+    });
+
+    it('rejects an unknown paymentStatus', async () => {
+      await auth(
+        request(app.getHttpServer()).get('/api/v1/orders?paymentStatus=NOPE'),
+      ).expect(400);
+    });
+
+    it('narrows on pricingModel', async () => {
+      // The fixtures are all PER_KG.
+      const [perKg, perPiece] = await Promise.all([
+        kpis('&pricingModel=PER_KG'),
+        kpis('&pricingModel=PER_PIECE'),
+      ]);
+
+      expect(perKg.body.data.totalOrders).toBe(14);
+      expect(perPiece.body.data.totalOrders).toBe(0);
+    });
+
+    it('narrows on pickedUpBy', async () => {
+      const [mine, someoneElse] = await Promise.all([
+        kpis(`&pickedUpBy=${agentId.toString()}`),
+        kpis(`&pickedUpBy=${new Types.ObjectId().toString()}`),
+      ]);
+
+      expect(mine.body.data.totalOrders).toBe(14);
+      expect(someoneElse.body.data.totalOrders).toBe(0);
+    });
+
+    it('narrows on officeCode, case-insensitively', async () => {
+      const [own, lowercased, other, unknown] = await Promise.all([
+        kpis(`&officeCode=${officeCode}`),
+        kpis(`&officeCode=${officeCode.toLowerCase()}`),
+        kpis(`&officeCode=${otherOfficeCode}`),
+        kpis('&officeCode=NO-SUCH-OFFICE'),
+      ]);
+
+      expect(own.body.data.totalOrders).toBe(14);
+      expect(lowercased.body.data.totalOrders).toBe(14);
+      // Every fixture order belongs to the first office.
+      expect(other.body.data.totalOrders).toBe(0);
+      // An unknown code is an empty answer, not an error.
+      expect(unknown.body.data.totalOrders).toBe(0);
+    });
+
+    it('rejects an unknown pricingModel and a malformed pickedUpBy', async () => {
+      await auth(
+        request(app.getHttpServer()).get('/api/v1/orders?pricingModel=NOPE'),
+      ).expect(400);
+      await auth(
+        request(app.getHttpServer()).get('/api/v1/orders?pickedUpBy=not-an-id'),
+      ).expect(400);
+    });
+
+    it('narrows with the date window like the list does', async () => {
+      const past = new Date(Date.now() - 90 * 86_400_000).toISOString();
+      const res = await kpis(
+        `&startDate=${past}&endDate=${new Date(Date.now() - 60 * 86_400_000).toISOString()}`,
+      );
+
+      expect(res.body.data.totalOrders).toBe(0);
+      expect(res.body.data.completionRate).toBe(0);
+    });
+  });
+
   describe('by-id office scoping over HTTP', () => {
     let scopedToken: string;
     let orderBId: string;

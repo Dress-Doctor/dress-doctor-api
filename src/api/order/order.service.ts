@@ -25,6 +25,7 @@ import {
   OrderStatusEnum,
   PricingModelEnum,
 } from 'src/schema/order/order.dto';
+import { Office } from 'src/schema/office/office.schema';
 import { Order } from 'src/schema/order/order.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { User } from 'src/schema/user/user.schema';
@@ -53,6 +54,37 @@ import {
   type OrderCreatedEvent,
   type OrderStatusChangedEvent,
 } from './order.events';
+
+/** Order counts per status, plus `all` across every status. */
+export type OrderStatusCounts = {
+  all: number;
+  draft: number;
+  confirmed: number;
+  received: number;
+  washing: number;
+  ready: number;
+  delivered: number;
+  cancelled: number;
+};
+
+/** Headline figures for the orders dashboard, over the list's own filters. */
+export type OrderKpis = {
+  totalOrders: number;
+  inProgress: number;
+  readyForCollection: number;
+  delivered: number;
+  cancelled: number;
+  /** Orders that could have completed (all − cancelled) — the rate's divisor. */
+  completionBase: number;
+  /** Percentage, one decimal place. 0 when nothing could have completed. */
+  completionRate: number;
+  /**
+   * Counts across every status, over the filters minus `orderStatus` — so a
+   * status tab strip keeps its numbers whichever tab is selected. Unlike the
+   * figures above, this does not narrow when `orderStatus` is set.
+   */
+  byOrderStatus: OrderStatusCounts;
+};
 
 /**
  * Allow-list of non-sensitive User fields for any user joined into an order
@@ -159,6 +191,8 @@ export class OrderService {
 
     @InjectModel(OrderStatus.name)
     private readonly orderStatusModel: Model<OrderStatus>,
+
+    @InjectModel(Office.name) private readonly officeModel: Model<Office>,
 
     @InjectModel(PickupRequest.name)
     private readonly pickupRequestModel: Model<PickupRequest>,
@@ -622,10 +656,10 @@ export class OrderService {
   }
 
   // Builds the shared aggregation filter stages from the query params so the
-  // list, its counts, and the CSV/Excel export all match on the exact same set.
-  // `filterStages` covers customer/office joins + date window + keyword; the
-  // status filter is returned separately (`statusStages`) so the per-status
-  // breakdown can span every status while the list still narrows to one.
+  // list, the KPI counts, and the CSV/Excel export all match on the exact same
+  // set. `filterStages` covers customer/office joins + date window + keyword;
+  // the status filter is returned separately (`statusStages`) so a caller can
+  // take the filters without it — the KPI endpoint counts every status.
   private async buildOrderFilterStages(
     query: Omit<FindOrderDto, 'page' | 'size' | 'sort'>,
   ): Promise<{ filterStages: PipelineStage[]; statusStages: PipelineStage[] }> {
@@ -638,8 +672,8 @@ export class OrderService {
       whereClause['pickupRequestId'] = new Types.ObjectId(pickupRequestId);
 
     // Filter by status name (not id): resolve the name to its id. Kept OUT of
-    // whereClause so the byOrderStatus breakdown can span every status (the
-    // status filter only narrows the list + total, not the facet counts).
+    // whereClause so a caller that wants the filters minus the status — the
+    // KPI counts — can simply drop `statusStages`.
     // An unknown name yields a non-existent id so the list comes back empty.
     const statusStages: PipelineStage[] = [];
     if (query.orderStatus) {
@@ -655,6 +689,29 @@ export class OrderService {
     const orderCode = query.orderCode;
     if (orderCode) whereClause['orderCode'] = orderCode;
 
+    // A plain field match, unlike orderStatus: paymentStatus is stored on the
+    // order (computed from its payments), so there is no name to resolve. It
+    // stays in whereClause, which means it narrows the KPI breakdown too — it
+    // is one of the filters those counts are meant to describe.
+    if (query.paymentStatus) whereClause['paymentStatus'] = query.paymentStatus;
+
+    // Same story: both are stored on the order, so both are plain matches.
+    if (query.pricingModel) whereClause['pricingModel'] = query.pricingModel;
+    if (query.pickedUpBy)
+      whereClause['pickedUpBy'] = new Types.ObjectId(query.pickedUpBy);
+
+    // Office by human-readable code, resolved to its id so the match rides the
+    // officeId indexes. An unknown code yields an id that matches nothing,
+    // which is the same shape of answer as an office with no orders.
+    let officeIdFilter: Types.ObjectId | undefined;
+    if (query.officeCode) {
+      const office = await this.officeModel
+        .findOne({ officeCode: query.officeCode.trim().toUpperCase() })
+        .select('_id')
+        .lean();
+      officeIdFilter = office?._id ?? new Types.ObjectId();
+    }
+
     // Received-date window. Both bounds are optional; with neither we default
     // to the last 30 days so the list never does an unbounded scan.
     const now = new Date();
@@ -667,7 +724,13 @@ export class OrderService {
     // Auto-scope: office staff see their office's orders; a customer sees only
     // their own (via the seeded CASL conditions), enforced as a query filter.
     const scope = scopeFilter(this.req.user.ability, 'READ', 'Order');
-    const baseMatch = { ...whereClause, ...scope };
+    const baseMatch: Record<string, unknown> = { ...whereClause, ...scope };
+
+    // $and rather than another key on baseMatch: the scope may already pin
+    // officeId, and a spread would let one silently replace the other. A
+    // scoped user asking for someone else's office must get nothing back, not
+    // their own office's orders relabelled as the answer.
+    if (officeIdFilter) baseMatch.$and = [{ officeId: officeIdFilter }];
 
     // Customer join runs BEFORE the keyword filter so free-text can match the
     // customer's phone/name too. Allow-list projection — passwordHash / any
@@ -760,6 +823,109 @@ export class OrderService {
     return { filterStages, statusStages };
   }
 
+  /**
+   * Per-status counts over whatever pipeline stages the caller hands in, so
+   * the buckets always describe exactly the set those stages match.
+   *
+   * `all` sums every order matched, including any whose status row is missing
+   * — a count that skipped them would not reconcile with the list's own total.
+   */
+  private async countByStatus(
+    filterStages: PipelineStage[],
+  ): Promise<OrderStatusCounts> {
+    const statusCounts = await this.orderModel.aggregate<{
+      _id: string | null;
+      count: number;
+    }>([
+      ...filterStages,
+      {
+        $lookup: {
+          as: 'os',
+          from: 'order_status',
+          localField: 'orderStatusId',
+          foreignField: '_id',
+          pipeline: [{ $project: { orderStatusName: 1 } }],
+        },
+      },
+      { $unwind: { path: '$os', preserveNullAndEmptyArrays: true } },
+      { $group: { _id: '$os.orderStatusName', count: { $sum: 1 } } },
+    ]);
+
+    const byOrderStatus: OrderStatusCounts = {
+      all: 0,
+      draft: 0,
+      confirmed: 0,
+      received: 0,
+      washing: 0,
+      ready: 0,
+      delivered: 0,
+      cancelled: 0,
+    };
+    for (const row of statusCounts) {
+      const key = row._id?.toLowerCase();
+      if (key && key in byOrderStatus)
+        byOrderStatus[key as keyof OrderStatusCounts] += row.count;
+      byOrderStatus.all += row.count;
+    }
+
+    return byOrderStatus;
+  }
+
+  /**
+   * Headline numbers for the orders dashboard, over the exact same filters as
+   * the list — every param, `orderStatus` included — so the cards always
+   * describe the set the table is showing. Filter to READY and every figure
+   * but `readyForCollection` is 0, because nothing else is in that set.
+   *
+   * `byOrderStatus` is the one deliberate exception: it always spans every
+   * status, taking the filters minus `orderStatus`. It is what a status tab
+   * strip counts off, and a breakdown that collapsed to the selected tab could
+   * never tell you what the other tabs hold — you would lose the numbers the
+   * moment you used them.
+   */
+  async getOrderKpis(query: FindOrderDto): Promise<OrderKpis> {
+    this.can('READ', 'Order');
+
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+
+    const { filterStages, statusStages } =
+      await this.buildOrderFilterStages(query);
+
+    // Across every status: the tab counts.
+    const byOrderStatus = await this.countByStatus(filterStages);
+
+    // Narrowed by the status filter too: the cards. With no status filter the
+    // two sets are identical, so the second aggregation is skipped.
+    const scoped = statusStages.length
+      ? await this.countByStatus([...filterStages, ...statusStages])
+      : byOrderStatus;
+
+    // What is physically on the floor: taken in, being worked, not yet ready.
+    const inProgress = scoped.confirmed + scoped.received + scoped.washing;
+
+    // Cancelled orders never had a chance to complete, so counting them as
+    // failures would punish the rate for work that was called off.
+    const completionBase = scoped.all - scoped.cancelled;
+    const completionRate =
+      completionBase > 0
+        ? Math.round((scoped.delivered / completionBase) * 1000) / 10
+        : 0;
+
+    this.logger.log(`[${platform}] ${phone} has successfully retrieved kpis`);
+
+    return {
+      totalOrders: scoped.all,
+      inProgress,
+      readyForCollection: scoped.ready,
+      delivered: scoped.delivered,
+      cancelled: scoped.cancelled,
+      completionBase,
+      completionRate,
+      byOrderStatus,
+    };
+  }
+
   async findAll({ page, size, ...query }: FindOrderDto) {
     this.can('READ', 'Order');
 
@@ -779,43 +945,6 @@ export class OrderService {
       { $count: 'total' },
     ]);
     const total = countResult[0]?.total ?? 0;
-
-    // Per-status breakdown over the same filters (date range / keyword /
-    // customer / office scope) but WITHOUT the status filter, so every bucket
-    // stays meaningful. `all` is the sum across statuses.
-    const statusCounts = await this.orderModel.aggregate<{
-      _id: string | null;
-      count: number;
-    }>([
-      ...filterStages,
-      {
-        $lookup: {
-          as: 'os',
-          from: 'order_status',
-          localField: 'orderStatusId',
-          foreignField: '_id',
-          pipeline: [{ $project: { orderStatusName: 1 } }],
-        },
-      },
-      { $unwind: { path: '$os', preserveNullAndEmptyArrays: true } },
-      { $group: { _id: '$os.orderStatusName', count: { $sum: 1 } } },
-    ]);
-
-    const byOrderStatus: Record<string, number> = {
-      all: 0,
-      draft: 0,
-      confirmed: 0,
-      received: 0,
-      washing: 0,
-      ready: 0,
-      delivered: 0,
-      cancelled: 0,
-    };
-    for (const row of statusCounts) {
-      const key = row._id?.toLowerCase();
-      if (key && key in byOrderStatus) byOrderStatus[key] += row.count;
-      byOrderStatus.all += row.count;
-    }
 
     const data = await this.orderModel.aggregate([
       ...filterStages,
@@ -958,7 +1087,7 @@ export class OrderService {
     const nextPage = page < totalPages ? page + 1 : null;
 
     this.logger.log(`${logBase} has successfully retrieve all items`);
-    return { total, byOrderStatus, data, nextPage };
+    return { total, data, nextPage };
   }
 
   // Export the filtered orders (same params as findAll, no pagination) as a

@@ -141,6 +141,9 @@ OrderSchema.index({ flagged: 1, balanceDue: -1, createdAt: 1 });
 OrderSchema.index({ officeId: 1, createdAt: -1 });
 // The orders list filters/sorts by the business receipt date.
 OrderSchema.index({ officeId: 1, receivedAt: -1 });
+// Same list narrowed to one payment status — equality first, then the range
+// the date window scans and the list sorts on.
+OrderSchema.index({ officeId: 1, paymentStatus: 1, receivedAt: -1 });
 OrderSchema.index(
   { pickupRequestId: 1, customerId: 1 },
   {

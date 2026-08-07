@@ -46,6 +46,7 @@ import {
   UpdateOrderItemDto,
 } from './dto/update-order-item.dto';
 import { FindAllOrderWithItemsEntity } from './entities/find-all-order-with-items.entity';
+import { OrderKpiEntity } from './entities/order-kpi.entity';
 import { OrderService } from './order.service';
 
 @ApiHeader(xApiKey)
@@ -100,6 +101,30 @@ export class OrderController {
       'Content-Length': buffer.length.toString(),
     });
     return new StreamableFile(buffer);
+  }
+
+  @Get('kpis')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Headline order counts for the dashboard, over the list filters',
+    description:
+      'Takes the same query params as GET /orders and applies every one of ' +
+      'them, so the headline figures describe exactly the set the table is ' +
+      'showing (`page`, `size` and `sort` aside). The `byOrderStatus` ' +
+      'breakdown is the exception: it is always returned across every status, ' +
+      'over the same filters minus `orderStatus`, so a tab strip keeps its ' +
+      'counts whichever tab is selected.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, type: OrderKpiEntity })
+  async getOrderKpis(
+    @Query() query: FindOrderDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const { platform } = req.data;
+    this.logger.log(
+      `[${platform}] ${req.user.phone} is fetching order kpis with query ${JSON.stringify(query)}`,
+    );
+    return await this.orderService.getOrderKpis(query);
   }
 
   @Get('flagged')

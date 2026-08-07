@@ -9,9 +9,14 @@ import { AppUtilService } from 'src/helper/service/app-util.service';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { Currency } from 'src/schema/catalog/currency.schema';
 import { Item } from 'src/schema/catalog/item.schema';
+import { Office } from 'src/schema/office/office.schema';
 import { OrderItem } from 'src/schema/order/order-item.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
-import { OrderStatusEnum } from 'src/schema/order/order.dto';
+import {
+  OrderPaymentStatusEnum,
+  OrderStatusEnum,
+  PricingModelEnum,
+} from 'src/schema/order/order.dto';
 import { Order } from 'src/schema/order/order.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
@@ -50,6 +55,7 @@ describe('OrderService', () => {
     updateOne: jest.Mock;
   };
   let orderStatusModel: { findOne: jest.Mock };
+  let officeModel: { findOne: jest.Mock };
   let eventEmitter: { emit: jest.Mock };
   let subscriptionModel: { updateOne: jest.Mock };
   let promoUsageModel: { create: jest.Mock };
@@ -97,6 +103,12 @@ describe('OrderService', () => {
     orderStatusModel = {
       findOne: jest.fn().mockResolvedValue({ _id: new Types.ObjectId() }),
     };
+    // Chainable: the service resolves an office code with .select().lean().
+    officeModel = {
+      findOne: jest.fn().mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(null) }),
+      }),
+    };
     eventEmitter = { emit: jest.fn() };
     subscriptionModel = {
       updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
@@ -138,6 +150,7 @@ describe('OrderService', () => {
           provide: getModelToken(OrderStatus.name),
           useValue: orderStatusModel,
         },
+        { provide: getModelToken(Office.name), useValue: officeModel },
         { provide: getModelToken(PickupRequest.name), useValue: {} },
         { provide: getModelToken(PickupStatus.name), useValue: {} },
         { provide: getModelToken(Customer.name), useValue: {} },
@@ -367,25 +380,19 @@ describe('OrderService', () => {
   });
 
   describe('findAll', () => {
-    it('returns paginated orders with a per-status breakdown', async () => {
+    it('returns a paginated page of orders', async () => {
       orderModel.aggregate
         .mockResolvedValueOnce([{ total: 2 }]) // count
-        .mockResolvedValueOnce([
-          { _id: 'READY', count: 1 },
-          { _id: 'DELIVERED', count: 1 },
-          { _id: null, count: 3 }, // null bucket only bumps `all`
-        ])
         .mockResolvedValueOnce([{ orderCode: 'OR-1' }, { orderCode: 'OR-2' }]);
 
       const res = await service.findAll({ page: 1, size: 20 } as never);
 
       expect(res.total).toBe(2);
       expect(res.data).toHaveLength(2);
-      expect(res.byOrderStatus.ready).toBe(1);
-      expect(res.byOrderStatus.delivered).toBe(1);
-      expect(res.byOrderStatus.all).toBe(5);
       expect(res.nextPage).toBeNull();
-      expect(orderModel.aggregate).toHaveBeenCalledTimes(3);
+      // Count + page only — the status breakdown moved to GET /orders/kpis, so
+      // the list no longer pays for an aggregation nobody asked for.
+      expect(orderModel.aggregate).toHaveBeenCalledTimes(2);
     });
 
     it('resolves the orderStatus name filter and applies keyword + dates', async () => {
@@ -396,7 +403,6 @@ describe('OrderService', () => {
       });
       orderModel.aggregate
         .mockResolvedValueOnce([]) // count -> total 0
-        .mockResolvedValueOnce([]) // byOrderStatus
         .mockResolvedValueOnce([]); // data
 
       const res = await service.findAll({
@@ -409,10 +415,213 @@ describe('OrderService', () => {
       } as never);
 
       expect(res.total).toBe(0);
-      expect(res.byOrderStatus.all).toBe(0);
       expect(orderStatusModel.findOne).toHaveBeenCalledWith({
         orderStatusName: OrderStatusEnum.READY,
       });
+    });
+  });
+
+  describe('getOrderKpis', () => {
+    // One aggregate call: the per-status counts every KPI is derived from.
+    const withCounts = (rows: Array<{ _id: string | null; count: number }>) =>
+      orderModel.aggregate.mockResolvedValueOnce(rows);
+
+    it('derives the four headline figures from the status counts', async () => {
+      withCounts([
+        { _id: 'DRAFT', count: 3 },
+        { _id: 'CONFIRMED', count: 5 },
+        { _id: 'RECEIVED', count: 4 },
+        { _id: 'WASHING', count: 6 },
+        { _id: 'READY', count: 8 },
+        { _id: 'DELIVERED', count: 14 },
+        { _id: 'CANCELLED', count: 2 },
+      ]);
+
+      const res = await service.getOrderKpis({} as never);
+
+      expect(res.totalOrders).toBe(42);
+      expect(res.inProgress).toBe(15); // confirmed + received + washing
+      expect(res.readyForCollection).toBe(8);
+      // 14 delivered / (42 - 2 cancelled) = 35%
+      expect(res.completionBase).toBe(40);
+      expect(res.completionRate).toBe(35);
+      expect(orderModel.aggregate).toHaveBeenCalledTimes(1);
+    });
+
+    it('excludes drafts from in-progress — they are not on the floor yet', async () => {
+      withCounts([
+        { _id: 'DRAFT', count: 9 },
+        { _id: 'WASHING', count: 1 },
+      ]);
+
+      const res = await service.getOrderKpis({} as never);
+
+      expect(res.inProgress).toBe(1);
+      expect(res.totalOrders).toBe(10);
+    });
+
+    it('reports 0% rather than NaN when nothing could have completed', async () => {
+      withCounts([{ _id: 'CANCELLED', count: 4 }]);
+
+      const res = await service.getOrderKpis({} as never);
+
+      expect(res.completionBase).toBe(0);
+      expect(res.completionRate).toBe(0);
+    });
+
+    it('rounds the completion rate to one decimal', async () => {
+      withCounts([
+        { _id: 'DELIVERED', count: 1 },
+        { _id: 'READY', count: 2 },
+      ]);
+
+      const res = await service.getOrderKpis({} as never);
+
+      expect(res.completionRate).toBe(33.3); // 1/3, not 33.33333…
+    });
+
+    it('narrows the headline figures on orderStatus but not the breakdown', async () => {
+      const statusId = new Types.ObjectId();
+      orderStatusModel.findOne.mockReturnValueOnce({
+        select: () => ({ lean: () => Promise.resolve({ _id: statusId }) }),
+      });
+      orderModel.aggregate
+        // 1st: every status, filters minus orderStatus — the tab counts.
+        .mockResolvedValueOnce([
+          { _id: 'READY', count: 2 },
+          { _id: 'DELIVERED', count: 3 },
+        ])
+        // 2nd: narrowed by the status filter — the cards.
+        .mockResolvedValueOnce([{ _id: 'READY', count: 2 }]);
+
+      const res = await service.getOrderKpis({
+        orderStatus: OrderStatusEnum.READY,
+      } as never);
+
+      // Cards follow the filter…
+      expect(res.totalOrders).toBe(2);
+      expect(res.readyForCollection).toBe(2);
+      expect(res.delivered).toBe(0);
+      // …while the breakdown still sees the orders behind every other tab.
+      expect(res.byOrderStatus.all).toBe(5);
+      expect(res.byOrderStatus.delivered).toBe(3);
+
+      const [unscoped] = orderModel.aggregate.mock.calls[0] as [
+        Array<Record<string, never>>,
+      ];
+      const [scoped] = orderModel.aggregate.mock.calls[1] as [
+        Array<Record<string, never>>,
+      ];
+      expect(JSON.stringify(unscoped)).not.toContain(statusId.toString());
+      expect(JSON.stringify(scoped)).toContain(statusId.toString());
+    });
+
+    it('narrows on paymentStatus, breakdown included', async () => {
+      withCounts([{ _id: 'READY', count: 1 }]);
+
+      await service.getOrderKpis({
+        paymentStatus: OrderPaymentStatusEnum.UNPAID,
+      } as never);
+
+      // In the base $match, so it reaches the breakdown as well as the cards —
+      // unlike orderStatus, which is held back.
+      const [pipeline] = orderModel.aggregate.mock.calls[0] as [
+        Array<Record<string, never>>,
+      ];
+      expect(JSON.stringify(pipeline)).toContain('"paymentStatus":"UNPAID"');
+    });
+
+    it('narrows on pricingModel and pickedUpBy', async () => {
+      const agentId = new Types.ObjectId();
+      withCounts([{ _id: 'READY', count: 1 }]);
+
+      await service.getOrderKpis({
+        pricingModel: PricingModelEnum.PER_KG,
+        pickedUpBy: agentId.toString(),
+      } as never);
+
+      const [pipeline] = orderModel.aggregate.mock.calls[0] as [
+        Array<Record<string, never>>,
+      ];
+      const stages = JSON.stringify(pipeline);
+      expect(stages).toContain('"pricingModel":"PER_KG"');
+      expect(stages).toContain(agentId.toString());
+    });
+
+    it('resolves officeCode to an id and $ands it in', async () => {
+      const officeId = new Types.ObjectId();
+      officeModel.findOne.mockReturnValueOnce({
+        select: () => ({ lean: () => Promise.resolve({ _id: officeId }) }),
+      });
+      withCounts([{ _id: 'READY', count: 1 }]);
+
+      await service.getOrderKpis({ officeCode: 'of-dla-01' } as never);
+
+      // Codes are stored upper-case; the caller's casing must not matter.
+      expect(officeModel.findOne).toHaveBeenCalledWith({
+        officeCode: 'OF-DLA-01',
+      });
+
+      const [pipeline] = orderModel.aggregate.mock.calls[0] as [
+        Array<Record<string, never>>,
+      ];
+      // $and, so an office-scoped caller's own officeId cannot overwrite it.
+      expect(JSON.stringify(pipeline)).toContain('$and');
+      expect(JSON.stringify(pipeline)).toContain(officeId.toString());
+    });
+
+    it('matches nothing for an unknown officeCode', async () => {
+      // The default mock resolves null — no office by that code.
+      withCounts([]);
+
+      await service.getOrderKpis({ officeCode: 'NOPE' } as never);
+
+      const [pipeline] = orderModel.aggregate.mock.calls[0] as [
+        Array<Record<string, never>>,
+      ];
+      // Still an id-shaped match, just one nothing can carry.
+      expect(JSON.stringify(pipeline)).toContain('$and');
+    });
+
+    it('counts once when no status filter is set', async () => {
+      withCounts([{ _id: 'READY', count: 2 }]);
+
+      const res = await service.getOrderKpis({} as never);
+
+      // Both sets are identical without a status filter — no second pass.
+      expect(orderModel.aggregate).toHaveBeenCalledTimes(1);
+      expect(res.totalOrders).toBe(2);
+      expect(res.byOrderStatus.all).toBe(2);
+    });
+
+    it('applies the list filters — keyword, dates and customer', async () => {
+      withCounts([{ _id: 'READY', count: 1 }]);
+
+      await service.getOrderKpis({
+        keyword: 'ali.ce',
+        startDate: '2026-07-01',
+        endDate: '2026-08-01',
+      } as never);
+
+      const [pipeline] = orderModel.aggregate.mock.calls[0] as [
+        Array<Record<string, never>>,
+      ];
+      const stages = JSON.stringify(pipeline);
+      expect(stages).toContain('receivedAt');
+      // The keyword is escaped before it reaches the regex.
+      expect(stages).toContain('ali\\\\.ce');
+    });
+
+    it('counts orders whose status row is missing so the total reconciles', async () => {
+      withCounts([
+        { _id: 'READY', count: 2 },
+        { _id: null, count: 3 },
+      ]);
+
+      const res = await service.getOrderKpis({} as never);
+
+      expect(res.totalOrders).toBe(5);
+      expect(res.readyForCollection).toBe(2);
     });
   });
 
