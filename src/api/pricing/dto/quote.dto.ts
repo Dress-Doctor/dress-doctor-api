@@ -30,6 +30,21 @@ export class QuoteLineDto {
   @IsInt({ message: 'quantity must be an integer' })
   @Min(1, { message: 'quantity must be at least 1' })
   quantity: number;
+
+  @ApiProperty({
+    required: false,
+    example: 750.5,
+    description:
+      'Agreed price for one garment on this line. Supplied, it replaces the ' +
+      'price list for this line and no PRICE_NOT_FOUND can arise from it.',
+  })
+  @IsOptional()
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'unitPrice must be a number with at most 2 decimals' },
+  )
+  @Min(0, { message: 'unitPrice cannot be negative' })
+  unitPrice?: number;
 }
 
 export class QuoteDto {

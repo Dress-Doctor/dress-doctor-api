@@ -15,6 +15,7 @@ import { CorrelationIdMiddleware } from './helper/middleware/correlation-id.midd
 import { LogRequestMiddleware } from './helper/middleware/log-request.middleware';
 import { ApiClientLookupService } from './helper/service/api-client-lookup.service';
 import { CodeGeneratorService } from './helper/service/code-generator.service';
+import { HistoryLabelModule } from './helper/service/history-label.module';
 import { SeederService } from './helper/service/seeder.service';
 import { i18nModule } from './i18n/i18n.module';
 import { SchemaModule } from './schema/schema.module';
@@ -46,6 +47,7 @@ import { envValidationSchema } from './config/env.validation';
     EventEmitterModule.forRoot(),
     AuthModule,
     SchemaModule,
+    HistoryLabelModule,
     PickupModule,
     OfficeLinkModule,
     HealthModule,

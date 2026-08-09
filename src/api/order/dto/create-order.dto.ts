@@ -1,6 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsDate,
   IsDefined,
   IsEnum,
@@ -11,8 +13,10 @@ import {
   MaxLength,
   Min,
   MinDate,
+  ValidateNested,
 } from 'class-validator';
 import { PricingModelEnum } from 'src/schema/order/order.dto';
+import { CreateOrderItemDto } from './create-order-item.dto';
 
 export class CreateOrderDto {
   @ApiProperty({ required: true, description: 'Customer id' })
@@ -118,6 +122,27 @@ export class CreateOrderDto {
   // discountAmount/totalAmount/balanceDue stay computed (§2.3): they fall out
   // of orderAmount minus the discounts, so accepting them would let a client
   // state a total its own numbers contradict.
+
+  @ApiProperty({
+    required: false,
+    isArray: true,
+    type: CreateOrderItemDto,
+    description:
+      'Garments booked with the order, so a counter can take the whole ' +
+      'intake in one request. Item ids are checked up front, and the order, ' +
+      'its lines and the price snapshot are committed in one transaction — a ' +
+      'garment that cannot be priced books no order at all. Omit it and the ' +
+      'order is created empty, exactly as before; lines can still be added ' +
+      'afterwards through POST /orders/:orderId/items while it is in DRAFT.',
+  })
+  @IsOptional()
+  @IsArray({ message: 'items must be an array' })
+  @ArrayMaxSize(100, {
+    message: 'An order cannot be created with over 100 items',
+  })
+  @ValidateNested({ each: true })
+  @Type(() => CreateOrderItemDto)
+  items?: CreateOrderItemDto[];
 
   @ApiProperty({
     required: false,

@@ -221,26 +221,27 @@ export class PaymentService {
     const session = await this.connection.startSession();
     try {
       await session.withTransaction(async () => {
-        const [payment] = await this.paymentModel.create(
-          [
-            {
-              orderId,
-              customerId: order.customerId,
-              officeId: this.req.data.officeId,
-              note: data.note,
-              paidAt: new Date(),
-              amount: data.amount,
-              debtType: data.debtType ?? DebtTypeEnum.CURRENT,
-              currencyId: currency.id,
-              paymentTypeId,
-              paymentMethodId: paymentMethod._id,
-              transactionRef: data.transactionRef,
-              idempotencyKey,
-              receivedBy: userId,
-            },
-          ],
-          { session },
-        );
+        // Built and saved rather than Model.create()d so `$locals.changedBy`
+        // is set before the save: that is the only thing the history hook can
+        // read on a create, and without it the PaymentHistory row fails
+        // validation and is dropped — a payment with no audit entry at all.
+        const payment = new this.paymentModel({
+          orderId,
+          customerId: order.customerId,
+          officeId: this.req.data.officeId,
+          note: data.note,
+          paidAt: new Date(),
+          amount: data.amount,
+          debtType: data.debtType ?? DebtTypeEnum.CURRENT,
+          currencyId: currency.id,
+          paymentTypeId,
+          paymentMethodId: paymentMethod._id,
+          transactionRef: data.transactionRef,
+          idempotencyKey,
+          receivedBy: userId,
+        });
+        payment.$locals.changedBy = userId;
+        await payment.save({ session });
         paymentId = payment._id;
 
         await this.orderModel.findOneAndUpdate(

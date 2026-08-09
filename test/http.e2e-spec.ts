@@ -254,6 +254,153 @@ describe('HTTP contract (e2e)', () => {
       ).toBe(true);
     });
 
+    it('serves one order by code, with its joins and what changed', async () => {
+      const { orderCode } = await model('Order').findById(orderId);
+
+      const res = await auth(
+        request(app.getHttpServer()).get(`/api/v1/orders/${orderCode}`),
+      ).expect(200);
+
+      const detail = res.body.data;
+      expect(detail.orderCode).toBe(orderCode);
+      expect(detail._id).toBe(orderId);
+
+      // The fk joins a detail screen needs.
+      expect(detail.customer.phone).toBe('611111111');
+      expect(detail.customer.passwordHash).toBeUndefined();
+      expect(detail.orderStatus.orderStatusName).toBe('READY');
+      expect(detail.currency.isoCode).toBeDefined();
+      expect(detail.createdByUser).toBeDefined();
+      expect(detail.orderItems).toHaveLength(1);
+      expect(detail.orderItems[0].item).toBeDefined();
+      expect(detail.payments.length).toBeGreaterThan(0);
+      expect(detail.payments[0].idempotencyKey).toBeUndefined();
+
+      // The trail carries what changed — and never the stored snapshot.
+      expect(Array.isArray(detail.history)).toBe(true);
+      const statusChange = detail.history
+        .flatMap((entry: any) => entry.changes)
+        .find((c: any) => c.field === 'orderStatusId');
+      expect(statusChange).toBeDefined();
+      const statusEntry = detail.history.find((entry: any) =>
+        entry.changes.some((c: any) => c.field === 'orderStatusId'),
+      );
+      expect(statusEntry.snapshot).toBeUndefined();
+      expect(statusEntry.action).toBe('UPDATE');
+
+      // Foreign keys read as names — the raw ids stay put beside them.
+      expect(statusChange.from).toMatch(/^[a-f\d]{24}$/);
+      expect(statusChange.to).toMatch(/^[a-f\d]{24}$/);
+      expect(['DRAFT', 'CONFIRMED', 'RECEIVED', 'WASHING', 'READY']).toContain(
+        statusChange.fromLabel,
+      );
+      expect(['CONFIRMED', 'RECEIVED', 'WASHING', 'READY']).toContain(
+        statusChange.toLabel,
+      );
+
+      // A plain (non-reference) field is left exactly as stored.
+      const amountChange = detail.history
+        .flatMap((entry: any) => entry.changes)
+        .find((c: any) => c.field === 'amountPaid');
+      if (amountChange) {
+        expect(typeof amountChange.to).toBe('number');
+        expect(amountChange.toLabel).toBeUndefined();
+      }
+    });
+
+    it('404s on an unknown order code', async () => {
+      await auth(
+        request(app.getHttpServer()).get('/api/v1/orders/OR-NOSUCHCODE'),
+      ).expect(404);
+    });
+
+    // The history hooks have to run inside the caller's transaction, which
+    // only a real replica set can prove — hence these live here rather than
+    // in a unit test.
+    describe('audit trail is written inside the transaction', () => {
+      const customer = async (phone: string) =>
+        model('User').create({
+          firstName: 'Audit',
+          lastName: phone,
+          phone,
+          whatsappPhone: phone,
+          userTypeId: (
+            await model('UserType').findOne({ userTypeName: 'CUSTOMER' })
+          )._id,
+        });
+
+      it('records a create as ONE create plus the pricing edit, not two creates', async () => {
+        const buyer = await customer('655555551');
+
+        await auth(request(app.getHttpServer()).post('/api/v1/orders'))
+          .send({
+            customerId: buyer._id.toString(),
+            currencyId,
+            pricingModel: 'PER_KG',
+            totalWeightKg: 3,
+            estimatedDeliveryDate: tomorrow(),
+            items: [{ itemId, serviceTypeId, quantity: 1 }],
+          })
+          .expect(201);
+
+        const created = await model('Order').findOne({ customerId: buyer._id });
+        const rows = await model('OrderHistory')
+          .find({ orderId: created._id })
+          .sort({ createdAt: 1 })
+          .lean();
+
+        // The reprice that follows the insert used to be logged as a second
+        // CREATE with no changed fields, because the hook read the previous
+        // state outside the transaction and could not see the row it had
+        // just written.
+        expect(rows.map((r: any) => r.action)).toEqual(['CREATE', 'UPDATE']);
+        expect(Object.keys(rows[1].changedFields)).toEqual(
+          expect.arrayContaining(['orderAmount', 'totalAmount', 'balanceDue']),
+        );
+      });
+
+      it('leaves no history behind when the create rolls back', async () => {
+        const buyer = await customer('655555552');
+        const before = await model('OrderHistory').countDocuments({});
+
+        // An unknown serviceTypeId makes pricing throw inside the transaction.
+        await auth(request(app.getHttpServer()).post('/api/v1/orders')).send({
+          customerId: buyer._id.toString(),
+          currencyId,
+          pricingModel: 'PER_PIECE',
+          estimatedDeliveryDate: tomorrow(),
+          items: [
+            {
+              itemId,
+              serviceTypeId: new Types.ObjectId().toString(),
+              quantity: 1,
+            },
+          ],
+        });
+
+        expect(
+          await model('Order').countDocuments({ customerId: buyer._id }),
+        ).toBe(0);
+        // No audit entry for an order that never existed.
+        expect(await model('OrderHistory').countDocuments({})).toBe(before);
+      });
+
+      it('audits the payment itself, attributed to whoever took it', async () => {
+        const payment = await model('Payment').findOne({
+          orderId: new Types.ObjectId(orderId),
+        });
+        const rows = await model('PaymentHistory')
+          .find({ paymentId: payment._id })
+          .lean();
+
+        // Created without a changedBy, the history row failed validation and
+        // was swallowed — a payment with no audit entry at all.
+        expect(rows).toHaveLength(1);
+        expect(rows[0].action).toBe('CREATE');
+        expect(rows[0].changedBy).toBeDefined();
+      });
+    });
+
     it('payment is idempotent (same x-idempotency-key → one payment)', async () => {
       const key = 'e2e-idem-key-1';
       const pay = () =>
@@ -408,6 +555,127 @@ describe('HTTP contract (e2e)', () => {
         .expect(400);
 
       expect(res.body.error?.code ?? res.body.code).toBe('INVALID_OFFICE');
+    });
+  });
+
+  /**
+   * Booking the garments with the order. PER_KG throughout, so the price comes
+   * from the seeded perKgRate rather than catalog Price rows (there are none).
+   */
+  describe('order creation: garments in the same request', () => {
+    let currencyId: string;
+    let customerTypeId: string;
+    let itemId: string;
+    let serviceTypeId: string;
+
+    const newCustomer = async (phone: string) => {
+      const customer = await model('User').create({
+        firstName: 'Basket',
+        lastName: 'Probe',
+        phone,
+        whatsappPhone: phone,
+        userTypeId: customerTypeId,
+      });
+      return customer._id.toString();
+    };
+
+    const body = (customerId: string) => ({
+      customerId,
+      currencyId,
+      pricingModel: 'PER_KG',
+      totalWeightKg: 3,
+      estimatedDeliveryDate: tomorrow(),
+    });
+
+    beforeAll(async () => {
+      currencyId = (
+        await model('Currency').findOne({ isoCode: 'XAF' })
+      )._id.toString();
+      customerTypeId = (
+        await model('UserType').findOne({ userTypeName: 'CUSTOMER' })
+      )._id.toString();
+      itemId = (await model('Item').findOne({}))._id.toString();
+      serviceTypeId = (await model('ServiceType').findOne({}))._id.toString();
+    });
+
+    it('books the order and its garments in one request, and returns the id', async () => {
+      const customerId = await newCustomer('645000001');
+
+      const res = await auth(
+        request(app.getHttpServer()).post('/api/v1/orders'),
+      )
+        .send({
+          ...body(customerId),
+          items: [
+            { itemId, serviceTypeId, quantity: 2, colour: 'blue' },
+            { itemId, serviceTypeId, quantity: 1, colour: 'white' },
+          ],
+        })
+        .expect(201);
+
+      // The response now carries the order, not just a message.
+      expect(res.body.data._id).toBeDefined();
+      expect(res.body.data.orderCode).toMatch(/^OR-/);
+      expect(res.body.message).toBe('Order created successfully');
+
+      const rows = await model('OrderItem')
+        .find({ orderId: new Types.ObjectId(res.body.data._id as string) })
+        .sort({ createdAt: 1 });
+      // Same catalog item twice — per-garment rows, never merged.
+      expect(rows).toHaveLength(2);
+      expect(rows.map((row: { colour: string }) => row.colour)).toEqual([
+        'blue',
+        'white',
+      ]);
+
+      // Priced by weight, and the lines carry the QC 0s PER_KG gives them.
+      const order = await model('Order').findById(res.body.data._id);
+      expect(order.totalAmount).toBe(3000);
+      expect(
+        rows.every((row: { lineTotal: number }) => row.lineTotal === 0),
+      ).toBe(true);
+    });
+
+    it('books no order at all when one garment is invalid', async () => {
+      const customerId = await newCustomer('645000002');
+
+      const res = await auth(
+        request(app.getHttpServer()).post('/api/v1/orders'),
+      )
+        .send({
+          ...body(customerId),
+          items: [
+            { itemId, serviceTypeId, quantity: 1 },
+            {
+              itemId: new Types.ObjectId().toString(),
+              serviceTypeId,
+              quantity: 1,
+            },
+          ],
+        })
+        .expect(400);
+
+      expect(res.body.error?.code ?? res.body.code).toBe('INVALID_ITEM');
+
+      const order = await model('Order').findOne({
+        customerId: new Types.ObjectId(customerId),
+      });
+      expect(order).toBeNull();
+    });
+
+    it('still creates an empty order when items are omitted', async () => {
+      const customerId = await newCustomer('645000003');
+
+      const res = await auth(
+        request(app.getHttpServer()).post('/api/v1/orders'),
+      )
+        .send(body(customerId))
+        .expect(201);
+
+      const rows = await model('OrderItem').find({
+        orderId: new Types.ObjectId(res.body.data._id as string),
+      });
+      expect(rows).toHaveLength(0);
     });
   });
 

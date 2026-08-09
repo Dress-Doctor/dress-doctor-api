@@ -40,12 +40,15 @@ import {
 } from './dto/create-order.dto';
 import { ExportOrderDto } from './dto/export-order.dto';
 import { FindOrderDto } from './dto/find-order.dto';
+import { OrderCodeParamsDto } from './dto/order-code-params.dto';
 import { UpdateOrderDraftDto } from './dto/update-order-draft.dto';
 import {
   OrderItemParamsDto,
   UpdateOrderItemDto,
 } from './dto/update-order-item.dto';
 import { FindAllOrderWithItemsEntity } from './entities/find-all-order-with-items.entity';
+import { OrderDetailResponseEntity } from './entities/order-detail.entity';
+import { OrderCreatedEntity } from './entities/order-created.entity';
 import { OrderKpiEntity } from './entities/order-kpi.entity';
 import { OrderService } from './order.service';
 
@@ -137,11 +140,44 @@ export class OrderController {
     return await this.orderService.findFlagged(query);
   }
 
+  // Declared after every static GET above so `export`, `kpis` and `flagged`
+  // are never read as an order code.
+  @Get(':orderCode')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get one order by its code, with its joins and history',
+    description:
+      'Everything a detail screen shows in one round trip: customer, office, ' +
+      'currency, status, creator and pickup agent, the garment lines resolved ' +
+      'against the catalog, the linked pickup request, the promo and ' +
+      'subscription it was priced against, its payments, and its audit trail. ' +
+      'The trail carries only what changed (field, from, to), who changed it ' +
+      'and when — never the stored full-order snapshot — newest first, capped ' +
+      'at the latest 100 entries. Office/self scoped like the list: an order ' +
+      'outside the caller’s scope returns 404.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, type: OrderDetailResponseEntity })
+  async getOrderByCode(
+    @Param() { orderCode }: OrderCodeParamsDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const { platform } = req.data;
+    this.logger.log(
+      `[${platform}] ${req.user.phone} is fetching order ${orderCode}`,
+    );
+    return await this.orderService.findByCode(orderCode);
+  }
+
   @Post('pickup')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create order for a pickup request' })
+  @ApiOperation({
+    summary: 'Create order for a pickup request',
+    description:
+      'Accepts an optional `items[]` of garments, booked with the order in ' +
+      'one transaction — see POST /orders.',
+  })
   @CheckAccess(CheckTypeEnum.customerPickup, 'customerId', 'body')
-  @ApiResponse({ status: HttpStatus.CREATED, type: ApiSuccessResponse })
+  @ApiResponse({ status: HttpStatus.CREATED, type: OrderCreatedEntity })
   async createOrderWithPickup(
     @Body() data: CreateOrderWithPickupDto,
     @Req() req: AppRequestWithUser,
@@ -156,8 +192,17 @@ export class OrderController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create order without pickup request' })
-  @ApiResponse({ status: HttpStatus.CREATED, type: ApiSuccessResponse })
+  @ApiOperation({
+    summary: 'Create order without pickup request',
+    description:
+      'Creates the order in DRAFT. An optional `items[]` books the garments ' +
+      'in the same request: every line is validated first, and the order plus ' +
+      'its lines are written in one transaction, so a rejected garment leaves ' +
+      'no order behind. Items can still be added afterwards through ' +
+      'POST /orders/:orderId/items while the order is in DRAFT. Returns the ' +
+      'new order id and code.',
+  })
+  @ApiResponse({ status: HttpStatus.CREATED, type: OrderCreatedEntity })
   async createOrder(
     @Body() data: CreateOrderDto,
     @Req() req: AppRequestWithUser,

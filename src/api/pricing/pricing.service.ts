@@ -138,9 +138,22 @@ export class PricingService {
       .findOne({ ...base, officeId: null })
       .sort({ effectiveFrom: -1 });
     if (!companyWide) {
+      // Name the pair. "One of the items" tells an operator with six garments
+      // in the basket nothing they can act on, and the usual cause — a
+      // (garment, service type) combination that was simply never priced — is
+      // fixable from the price list once you know which one it is.
+      const [item, serviceType] = await Promise.all([
+        this.itemModel.findById(itemId).select('itemName'),
+        this.serviceTypeModel.findById(serviceTypeId).select('serviceTypeName'),
+      ]);
+      const pair = `${item?.itemName ?? itemId.toString()} (${
+        serviceType?.serviceTypeName ?? serviceTypeId.toString()
+      })`;
+      this.logger.error(`no active price row for ${pair}`);
       throw new NotFoundException({
         code: 'PRICE_NOT_FOUND',
-        message: 'No price configured for one of the items',
+        field: 'items',
+        message: `No price is set up for ${pair}. Add it to the price list, or pick a service type that has one.`,
       });
     }
     return companyWide;
@@ -178,19 +191,27 @@ export class PricingService {
     switch (data.pricingModel) {
       case PricingModelEnum.PER_PIECE: {
         for (const line of data.items ?? []) {
-          const price = await this.resolvePrice(
-            new Types.ObjectId(line.itemId),
-            new Types.ObjectId(line.serviceTypeId),
-            officeId,
-          );
-          const lineTotal = price.unitPrice * line.quantity;
-          subtotal += lineTotal;
-          currencyId = price.currencyId;
+          // An agreed price for the line beats the rate card, exactly as
+          // orderAmount does for the order — and it is the only thing that
+          // makes a garment bookable when no price row exists for its
+          // (item, service type) pair.
+          let unitPrice = line.unitPrice;
+          if (unitPrice === undefined) {
+            const price = await this.resolvePrice(
+              new Types.ObjectId(line.itemId),
+              new Types.ObjectId(line.serviceTypeId),
+              officeId,
+            );
+            unitPrice = price.unitPrice;
+            currencyId = price.currencyId;
+          }
+          const lineTotal = this.round(unitPrice * line.quantity);
+          subtotal = this.round(subtotal + lineTotal);
           lines.push({
             itemId: line.itemId,
             serviceTypeId: line.serviceTypeId,
             quantity: line.quantity,
-            unitPrice: price.unitPrice,
+            unitPrice,
             lineTotal,
           });
         }
@@ -239,14 +260,20 @@ export class PricingService {
           // overage lands on the order subtotal.
           const unitPrices: number[] = [];
           for (const line of data.items ?? []) {
-            const price = await this.resolvePrice(
-              new Types.ObjectId(line.itemId),
-              new Types.ObjectId(line.serviceTypeId),
-              officeId,
-            );
-            currencyId = price.currencyId;
+            // Same rule as PER_PIECE: an agreed price for the line is what the
+            // overage is billed at.
+            let unitPrice = line.unitPrice;
+            if (unitPrice === undefined) {
+              const price = await this.resolvePrice(
+                new Types.ObjectId(line.itemId),
+                new Types.ObjectId(line.serviceTypeId),
+                officeId,
+              );
+              unitPrice = price.unitPrice;
+              currencyId = price.currencyId;
+            }
             for (let i = 0; i < line.quantity; i++) {
-              unitPrices.push(price.unitPrice);
+              unitPrices.push(unitPrice);
             }
           }
           unitPrices.sort((a, b) => b - a);

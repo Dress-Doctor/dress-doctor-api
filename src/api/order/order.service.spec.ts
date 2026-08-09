@@ -1,12 +1,17 @@
 import { AbilityBuilder } from '@casl/ability';
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { getModelToken } from '@nestjs/mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Types } from 'mongoose';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
+import { HistoryLabelService } from 'src/helper/service/history-label.service';
 import { Currency } from 'src/schema/catalog/currency.schema';
 import { Item } from 'src/schema/catalog/item.schema';
 import { OfficeUser } from 'src/schema/office/office-user.schema';
@@ -50,11 +55,17 @@ describe('OrderService', () => {
     find: jest.Mock;
     aggregate: jest.Mock;
   };
-  let orderItemModel: {
+  // Constructible, because createOrder builds rows with `new orderItemModel()`
+  // and saves them (which is what keeps the history hook firing).
+  let orderItemModel: jest.Mock & {
     countDocuments: jest.Mock;
     find: jest.Mock;
     updateOne: jest.Mock;
   };
+  let savedOrderItems: Record<string, unknown>[];
+  let itemModel: { find: jest.Mock };
+  let userModel: { findById: jest.Mock; exists: jest.Mock };
+  let currencyModel: { findById: jest.Mock };
   let orderStatusModel: { findOne: jest.Mock };
   let officeModel: { findOne: jest.Mock };
   let eventEmitter: { emit: jest.Mock };
@@ -62,6 +73,8 @@ describe('OrderService', () => {
   let promoUsageModel: { create: jest.Mock };
   let promoCodeModel: { updateOne: jest.Mock };
   let pricingService: { priceOrder: jest.Mock };
+  let historyLabelService: { labelChanges: jest.Mock };
+  let connection: { startSession: jest.Mock };
 
   const orderWithStatus = (
     status: OrderStatusEnum,
@@ -96,10 +109,39 @@ describe('OrderService', () => {
       find: jest.fn(),
       aggregate: jest.fn(),
     };
-    orderItemModel = {
-      countDocuments: jest.fn().mockResolvedValue(1),
-      find: jest.fn().mockResolvedValue([]),
-      updateOne: jest.fn().mockResolvedValue({}),
+    savedOrderItems = [];
+    orderItemModel = Object.assign(
+      jest.fn().mockImplementation((doc: Record<string, unknown>) => {
+        const row = {
+          ...doc,
+          $locals: {} as Record<string, unknown>,
+          save: jest.fn().mockImplementation(() => {
+            savedOrderItems.push(row);
+            return Promise.resolve(row);
+          }),
+        };
+        return row;
+      }),
+      {
+        countDocuments: jest.fn().mockResolvedValue(1),
+        find: jest.fn().mockResolvedValue([]),
+        updateOne: jest.fn().mockResolvedValue({}),
+      },
+    ) as unknown as typeof orderItemModel;
+    // assertItemsExist reads .find().select(); every requested id resolves.
+    itemModel = {
+      find: jest
+        .fn()
+        .mockImplementation((filter: { _id: { $in: unknown[] } }) => ({
+          select: () => Promise.resolve(filter._id.$in.map((_id) => ({ _id }))),
+        })),
+    };
+    userModel = {
+      findById: jest.fn().mockResolvedValue({ _id: new Types.ObjectId() }),
+      exists: jest.fn().mockResolvedValue(true),
+    };
+    currencyModel = {
+      findById: jest.fn().mockResolvedValue({ _id: new Types.ObjectId() }),
     };
     orderStatusModel = {
       findOne: jest.fn().mockResolvedValue({ _id: new Types.ObjectId() }),
@@ -119,11 +161,31 @@ describe('OrderService', () => {
       updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
     };
     pricingService = { priceOrder: jest.fn() };
+    historyLabelService = {
+      labelChanges: jest
+        .fn()
+        .mockImplementation((_model: string, entries: unknown) =>
+          Promise.resolve(entries),
+        ),
+    };
+
+    // Runs the transaction body straight through, like payment.service.spec.
+    connection = {
+      startSession: jest.fn().mockResolvedValue({
+        withTransaction: async (fn: () => Promise<void>) => fn(),
+        endSession: jest.fn(),
+      }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrderService,
-        { provide: CodeGeneratorService, useValue: {} },
+        {
+          provide: CodeGeneratorService,
+          useValue: {
+            generateOrderReference: jest.fn().mockResolvedValue('OR-000123'),
+          },
+        },
         {
           provide: AppUtilService,
           useValue: {
@@ -131,6 +193,7 @@ describe('OrderService', () => {
           },
         },
         { provide: PricingService, useValue: pricingService },
+        { provide: HistoryLabelService, useValue: historyLabelService },
         {
           provide: REQUEST,
           useValue: {
@@ -143,9 +206,9 @@ describe('OrderService', () => {
           },
         },
         { provide: getModelToken(Order.name), useValue: orderModel },
-        { provide: getModelToken(Item.name), useValue: {} },
-        { provide: getModelToken(User.name), useValue: {} },
-        { provide: getModelToken(Currency.name), useValue: {} },
+        { provide: getModelToken(Item.name), useValue: itemModel },
+        { provide: getModelToken(User.name), useValue: userModel },
+        { provide: getModelToken(Currency.name), useValue: currencyModel },
         { provide: getModelToken(OrderItem.name), useValue: orderItemModel },
         {
           provide: getModelToken(OrderStatus.name),
@@ -155,7 +218,11 @@ describe('OrderService', () => {
         { provide: getModelToken(OfficeUser.name), useValue: {} },
         { provide: getModelToken(PickupRequest.name), useValue: {} },
         { provide: getModelToken(PickupStatus.name), useValue: {} },
-        { provide: getModelToken(Customer.name), useValue: {} },
+        {
+          provide: getModelToken(Customer.name),
+          // onOrderCreated bumps the customer's lastOrderAt rollup.
+          useValue: { findOneAndUpdate: jest.fn().mockResolvedValue({}) },
+        },
         {
           provide: getModelToken(Subscription.name),
           useValue: subscriptionModel,
@@ -165,11 +232,248 @@ describe('OrderService', () => {
           useValue: promoUsageModel,
         },
         { provide: getModelToken(PromoCode.name), useValue: promoCodeModel },
+        { provide: getConnectionToken(), useValue: connection },
         { provide: EventEmitter2, useValue: eventEmitter },
       ],
     }).compile();
 
     service = await module.resolve<OrderService>(OrderService);
+  });
+
+  describe('createOrder with items', () => {
+    const created = {
+      _id: new Types.ObjectId(),
+      orderCode: 'OR-000123',
+      amountPaid: 0,
+    };
+
+    const dto = (over: Record<string, unknown> = {}) =>
+      ({
+        customerId: new Types.ObjectId().toString(),
+        currencyId: new Types.ObjectId().toString(),
+        pricingModel: PricingModelEnum.PER_PIECE,
+        estimatedDeliveryDate: new Date(),
+        ...over,
+      }) as never;
+
+    const line = (over: Record<string, unknown> = {}) => ({
+      itemId: new Types.ObjectId().toString(),
+      serviceTypeId: new Types.ObjectId().toString(),
+      quantity: 2,
+      ...over,
+    });
+
+    beforeEach(() => {
+      // No existing draft for this customer.
+      orderModel.findOne.mockResolvedValue(null);
+      orderModel.findOneAndUpdate.mockResolvedValue(created);
+      // reprice() re-reads the order it just wrote.
+      orderModel.findById.mockResolvedValue({
+        ...created,
+        pricingModel: PricingModelEnum.PER_PIECE,
+        customerId: new Types.ObjectId(),
+      });
+      pricingService.priceOrder.mockResolvedValue({
+        lines: [],
+        subtotal: 0,
+        manualDiscount: 0,
+        promoDiscount: 0,
+        total: 0,
+        currencyId: null,
+        promoCodeId: null,
+        subscriptionId: null,
+        quotaConsumed: 0,
+      });
+    });
+
+    it('books the order and one row per garment', async () => {
+      await service.createOrder(dto({ items: [line(), line()] }));
+
+      expect(orderModel.findOneAndUpdate).toHaveBeenCalled();
+      expect(savedOrderItems).toHaveLength(2);
+      expect(savedOrderItems[0]).toEqual(
+        expect.objectContaining({
+          orderId: created._id,
+          quantity: 2,
+          unitPrice: 0,
+          lineTotal: 0,
+        }),
+      );
+    });
+
+    it('returns the new order id and code so the caller can address it', async () => {
+      const res = await service.createOrder(dto());
+
+      expect(res).toEqual({
+        message: 'Order created successfully',
+        data: { _id: created._id, orderCode: 'OR-000123' },
+      });
+    });
+
+    it('creates an empty order when items are omitted, exactly as before', async () => {
+      await service.createOrder(dto());
+
+      expect(orderModel.findOneAndUpdate).toHaveBeenCalled();
+      expect(savedOrderItems).toHaveLength(0);
+    });
+
+    it('never persists `items` onto the order document itself', async () => {
+      await service.createOrder(dto({ items: [line()] }));
+
+      const [, update] = orderModel.findOneAndUpdate.mock.calls[0] as [
+        unknown,
+        Record<string, unknown>,
+      ];
+      expect(update).not.toHaveProperty('items');
+    });
+
+    it('rejects an unknown itemId and writes nothing', async () => {
+      itemModel.find.mockReturnValue({ select: () => Promise.resolve([]) });
+
+      await expect(
+        service.createOrder(dto({ items: [line()] })),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(orderModel.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(savedOrderItems).toHaveLength(0);
+    });
+
+    it('keeps garments that differ in colour as separate rows', async () => {
+      const itemId = new Types.ObjectId().toString();
+      const serviceTypeId = new Types.ObjectId().toString();
+
+      await service.createOrder(
+        dto({
+          items: [
+            line({ itemId, serviceTypeId, colour: 'blue' }),
+            line({ itemId, serviceTypeId, colour: 'white' }),
+          ],
+        }),
+      );
+
+      expect(savedOrderItems).toHaveLength(2);
+      expect(savedOrderItems.map((row) => row.colour)).toEqual([
+        'blue',
+        'white',
+      ]);
+    });
+
+    it('keeps garments that differ in condition as separate rows', async () => {
+      const itemId = new Types.ObjectId().toString();
+      const serviceTypeId = new Types.ObjectId().toString();
+
+      await service.createOrder(
+        dto({
+          items: [
+            line({ itemId, serviceTypeId, colour: 'blue' }),
+            line({
+              itemId,
+              serviceTypeId,
+              colour: 'blue',
+              condition: 'Stained',
+            }),
+          ],
+        }),
+      );
+
+      expect(savedOrderItems).toHaveLength(2);
+    });
+
+    it('counts an identical garment twice as one row of higher quantity', async () => {
+      const itemId = new Types.ObjectId().toString();
+      const serviceTypeId = new Types.ObjectId().toString();
+
+      await service.createOrder(
+        dto({
+          items: [
+            line({ itemId, serviceTypeId, colour: 'blue', quantity: 2 }),
+            line({ itemId, serviceTypeId, colour: 'blue', quantity: 3 }),
+          ],
+        }),
+      );
+
+      expect(savedOrderItems).toHaveLength(1);
+      expect(savedOrderItems[0].quantity).toBe(5);
+    });
+
+    it('treats colour as case- and whitespace-insensitive when merging', async () => {
+      const itemId = new Types.ObjectId().toString();
+      const serviceTypeId = new Types.ObjectId().toString();
+
+      await service.createOrder(
+        dto({
+          items: [
+            line({ itemId, serviceTypeId, colour: 'Navy Blue', quantity: 1 }),
+            line({ itemId, serviceTypeId, colour: ' navy blue ', quantity: 1 }),
+          ],
+        }),
+      );
+
+      expect(savedOrderItems).toHaveLength(1);
+      expect(savedOrderItems[0].quantity).toBe(2);
+    });
+
+    it('persists an agreed unit price on the line', async () => {
+      await service.createOrder(dto({ items: [line({ unitPrice: 750.5 })] }));
+
+      expect(savedOrderItems[0].unitPrice).toBe(750.5);
+    });
+
+    it('keeps the later agreed price when two identical lines disagree', async () => {
+      const itemId = new Types.ObjectId().toString();
+      const serviceTypeId = new Types.ObjectId().toString();
+
+      await service.createOrder(
+        dto({
+          items: [
+            line({ itemId, serviceTypeId, unitPrice: 500 }),
+            line({ itemId, serviceTypeId, unitPrice: 900 }),
+          ],
+        }),
+      );
+
+      expect(savedOrderItems).toHaveLength(1);
+      expect(savedOrderItems[0].unitPrice).toBe(900);
+    });
+
+    it('attributes every garment row to the creator for the audit trail', async () => {
+      await service.createOrder(dto({ items: [line()] }));
+
+      const locals = savedOrderItems[0].$locals as { changedBy?: unknown };
+      expect(locals.changedBy).toBeInstanceOf(Types.ObjectId);
+    });
+
+    it('names the cause when the deployment cannot open a transaction', async () => {
+      // What a standalone mongod says — a config problem, not a bad request.
+      connection.startSession.mockResolvedValue({
+        withTransaction: () => {
+          throw new Error(
+            'This MongoDB deployment does not support retryable writes. ' +
+              'Please add retryWrites=false to your connection string.',
+          );
+        },
+        endSession: jest.fn(),
+      });
+
+      await expect(service.createOrder(dto())).rejects.toMatchObject({
+        response: { code: 'TRANSACTIONS_UNSUPPORTED' },
+      });
+    });
+
+    it('lets a pricing failure abort the whole booking', async () => {
+      // e.g. PRICE_NOT_FOUND for a PER_PIECE line — raised inside the
+      // transaction, so the order it had just written rolls back with it.
+      pricingService.priceOrder.mockRejectedValue(
+        new BadRequestException('No price configured for one of the items'),
+      );
+
+      await expect(
+        service.createOrder(dto({ items: [line()] })),
+      ).rejects.toThrow(BadRequestException);
+
+      // The order.created listeners must not have run for an order that failed.
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
   });
 
   describe('status transitions', () => {
@@ -347,6 +651,38 @@ describe('OrderService', () => {
       expect(promoCodeModel.updateOne).not.toHaveBeenCalled();
     });
 
+    it('feeds a stored agreed unit price back on every reprice', async () => {
+      // Without this, adding a second garment would re-price the first from
+      // the catalog and silently undo what the counter agreed.
+      orderItemModel.find.mockResolvedValue([
+        {
+          _id: new Types.ObjectId(),
+          itemId: new Types.ObjectId(),
+          serviceTypeId: new Types.ObjectId(),
+          quantity: 2,
+          unitPrice: 750.5,
+        },
+        {
+          _id: new Types.ObjectId(),
+          itemId: new Types.ObjectId(),
+          serviceTypeId: new Types.ObjectId(),
+          quantity: 1,
+          // Never agreed — the engine still prices this one.
+          unitPrice: 0,
+        },
+      ]);
+
+      await service.updateOrderDraft('507f1f77bcf86cd799439011', {
+        manualDiscount: 0,
+      });
+
+      const [payload] = pricingService.priceOrder.mock.calls.at(-1) as [
+        { items: { unitPrice?: number }[] },
+      ];
+      expect(payload.items[0].unitPrice).toBe(750.5);
+      expect(payload.items[1].unitPrice).toBeUndefined();
+    });
+
     it('feeds a stored agreed price back to the engine on every reprice', async () => {
       orderModel.findById.mockResolvedValue({
         _id: new Types.ObjectId(),
@@ -410,6 +746,116 @@ describe('OrderService', () => {
       expect(sort).toHaveBeenCalledWith({ balanceDue: -1, createdAt: 1 });
       expect(res.total).toBe(2);
       expect(res.data).toHaveLength(1);
+    });
+  });
+
+  describe('findByCode', () => {
+    // The pipeline stage a given collection is joined in, so a test can assert
+    // the join exists without pinning every field of it.
+    const lookupFor = (from: string) => {
+      const [pipeline] = orderModel.aggregate.mock.calls[0] as [
+        Record<string, { from?: string; pipeline?: unknown[] }>[],
+      ];
+      return pipeline.find((stage) => stage.$lookup?.from === from)?.$lookup;
+    };
+
+    it('returns the order addressed by its code', async () => {
+      orderModel.aggregate.mockResolvedValueOnce([
+        { orderCode: 'OR-000123', history: [] },
+      ]);
+
+      const res = await service.findByCode('OR-000123');
+
+      expect(res.orderCode).toBe('OR-000123');
+      const [pipeline] = orderModel.aggregate.mock.calls[0] as [
+        Record<string, unknown>[],
+      ];
+      expect(pipeline[0]).toEqual({ $match: { orderCode: 'OR-000123' } });
+    });
+
+    it('joins the customer, office, items, payments and history', async () => {
+      orderModel.aggregate.mockResolvedValueOnce([{ orderCode: 'OR-1' }]);
+
+      await service.findByCode('OR-1');
+
+      for (const from of [
+        'user',
+        'office',
+        'order_item',
+        'payment',
+        'order_history',
+        'order_status',
+        'currency',
+        'pickup_request',
+        'promo_code',
+        'subscription',
+      ]) {
+        expect(lookupFor(from)).toBeDefined();
+      }
+    });
+
+    it('returns what changed on each history entry, never the snapshot', async () => {
+      orderModel.aggregate.mockResolvedValueOnce([{ orderCode: 'OR-1' }]);
+
+      await service.findByCode('OR-1');
+
+      const history = lookupFor('order_history');
+      const projection = history?.pipeline?.find(
+        (stage): stage is { $project: Record<string, unknown> } =>
+          typeof stage === 'object' && stage !== null && '$project' in stage,
+      )?.$project;
+
+      expect(projection).toBeDefined();
+      expect(projection).not.toHaveProperty('snapshot');
+      expect(projection).toHaveProperty('changes');
+      expect(projection).toHaveProperty('action');
+      // Newest first, and capped so a heavily edited order can't return an
+      // unbounded trail.
+      expect(history?.pipeline).toContainEqual({ $sort: { createdAt: -1 } });
+      expect(history?.pipeline).toContainEqual({ $limit: 100 });
+    });
+
+    it('never projects the payment idempotency key', async () => {
+      orderModel.aggregate.mockResolvedValueOnce([{ orderCode: 'OR-1' }]);
+
+      await service.findByCode('OR-1');
+
+      expect(lookupFor('payment')?.pipeline).toContainEqual({
+        $project: { idempotencyKey: 0 },
+      });
+    });
+
+    it('hands the trail to the labeller so ids read as names', async () => {
+      const history = [
+        {
+          action: 'UPDATE',
+          changes: [
+            {
+              field: 'orderStatusId',
+              from: new Types.ObjectId(),
+              to: new Types.ObjectId(),
+            },
+          ],
+        },
+      ];
+      orderModel.aggregate.mockResolvedValueOnce([
+        { orderCode: 'OR-1', history },
+      ]);
+
+      await service.findByCode('OR-1');
+
+      expect(historyLabelService.labelChanges).toHaveBeenCalledWith(
+        Order.name,
+        history,
+      );
+    });
+
+    it('404s on an unknown or out-of-scope order code', async () => {
+      orderModel.aggregate.mockResolvedValueOnce([]);
+
+      await expect(service.findByCode('OR-NOPE')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 

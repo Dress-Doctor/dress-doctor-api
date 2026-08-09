@@ -83,6 +83,9 @@ Layered by concern, then feature. `api/<feature>/` holds `*.module.ts`, `*.contr
 - Human-readable codes via `CodeGeneratorService` (`OR-`, `CU-`, `PU-`), office-scoped sequences where noted.
 - Declare indexes on the schema for every list filter/sort path (see database doc). Audited schemas get `attachHistoryHooks()`.
 - Enum-like fields reference lookup collections by id; seed the named values.
+- **A history row only says what changed if the write went through `findOneAndUpdate` with `{ context: { changedBy } }`.** That is the only path that diffs previous vs `$set` into `changedFields`. A `save()` writes `action: CREATE` with an empty `changedFields`, so it lands on a timeline as a bare marker with nothing in it — fine for an actual creation, useless for an edit. Mutate audited schemas through `findOneAndUpdate` + context; reserve `save()` for creates (and set `doc.$locals.changedBy` so the entry is still attributed).
+- History joins the caller's transaction: pass `{ session }` on transactional writes and the hook reads the previous state and writes the audit row inside that session — so a rollback takes the entry with it, and a create-then-update in one transaction is logged as CREATE + UPDATE, not two creates.
+- Read history back through `HistoryLabelService.labelChanges(SourceModel.name, entries)` (global, no wiring): it turns the foreign keys in a trail into names (`orderStatusId: … → …` becomes `CONFIRMED → RECEIVED`) off the schema's own `ref`s, so no per-table mapping or query. Raw ids stay beside the labels; never return the stored `snapshot` to a client.
 
 ## 10. Queues, events, notifications
 
@@ -127,4 +130,4 @@ Layered by concern, then feature. `api/<feature>/` holds `*.module.ts`, `*.contr
 - Put every business rule in a service; compute flags; scope by office; go through the queue for external calls; extend `attachHistoryHooks`; keep Swagger current; write real order/payment tests.
 
 **Don't**
-- Call it "branch"; split staff/customers into two identity tables; hardcode statuses/roles as the runtime source of truth; re-check permissions with `if (role)`; call WhatsApp/SMTP inline in a request; store money as float; log secrets/OTPs; return unpaginated lists; import from `api/` inside `schema/`; leave `order.service`/`payment.service` untested.
+- Call it "branch"; split staff/customers into two identity tables; hardcode statuses/roles as the runtime source of truth; re-check permissions with `if (role)`; call WhatsApp/SMTP inline in a request; store money as float; log secrets/OTPs; return unpaginated lists; import from `api/` inside `schema/`; **edit an audited schema with `save()` or an update that carries no `changedBy` context — the history row comes out empty**; leave `order.service`/`payment.service` untested.

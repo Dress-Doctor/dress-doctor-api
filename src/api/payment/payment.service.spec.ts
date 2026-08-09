@@ -30,7 +30,8 @@ const manageAllAbility = () => {
 
 describe('PaymentService', () => {
   let service: PaymentService;
-  let paymentModel: { findOne: jest.Mock; create: jest.Mock };
+  let paymentModel: jest.Mock & { findOne: jest.Mock };
+  let savedPayments: Record<string, unknown>[];
   let orderModel: {
     findOne: jest.Mock;
     findById: jest.Mock;
@@ -83,10 +84,25 @@ describe('PaymentService', () => {
 
   beforeEach(async () => {
     headers = {};
-    paymentModel = {
-      findOne: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockResolvedValue([{ _id: new Types.ObjectId() }]),
-    };
+    savedPayments = [];
+    // Constructible: the service builds the payment with `new paymentModel()`
+    // so it can set `$locals.changedBy` before saving — that is the only way
+    // the history hook learns who took the money.
+    paymentModel = Object.assign(
+      jest.fn().mockImplementation((doc: Record<string, unknown>) => {
+        const row = {
+          ...doc,
+          _id: new Types.ObjectId(),
+          $locals: {} as Record<string, unknown>,
+          save: jest.fn().mockImplementation(() => {
+            savedPayments.push(row);
+            return Promise.resolve(row);
+          }),
+        };
+        return row;
+      }),
+      { findOne: jest.fn().mockResolvedValue(null) },
+    ) as unknown as typeof paymentModel;
     orderModel = {
       findOne: jest.fn(),
       findById: jest.fn(),
@@ -181,6 +197,22 @@ describe('PaymentService', () => {
     );
   });
 
+  it('attributes the payment so the history hook can audit it', async () => {
+    setOrder();
+
+    await pay({ amount: 400 });
+
+    // Without $locals.changedBy the PaymentHistory row fails validation and
+    // is swallowed, leaving a payment with no audit entry at all.
+    expect(savedPayments).toHaveLength(1);
+    expect(savedPayments[0].$locals).toEqual({ changedBy: expect.anything() });
+    // Saved inside the caller's transaction, like the order update beside it.
+    const save = savedPayments[0].save as jest.Mock;
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ session: expect.anything() }),
+    );
+  });
+
   it('flags an overpayment as OVERPAID', async () => {
     setOrder({ amountPaid: 900, totalAmount: 1000 });
 
@@ -212,7 +244,7 @@ describe('PaymentService', () => {
     const res = await pay({ amount: 400 });
 
     expect(res).toBe('Payment already recorded');
-    expect(paymentModel.create).not.toHaveBeenCalled();
+    expect(savedPayments).toHaveLength(0);
     expect(orderModel.findOneAndUpdate).not.toHaveBeenCalled();
   });
 

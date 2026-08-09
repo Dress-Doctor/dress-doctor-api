@@ -71,9 +71,24 @@ describe('PricingService', () => {
           },
         },
         { provide: getModelToken(Price.name), useValue: priceModel },
-        { provide: getModelToken(Item.name), useValue: {} },
+        // Only read to name the pair in a PRICE_NOT_FOUND message.
+        {
+          provide: getModelToken(Item.name),
+          useValue: {
+            findById: () => ({
+              select: () => Promise.resolve({ itemName: 'T-Shirt' }),
+            }),
+          },
+        },
         { provide: getModelToken(Currency.name), useValue: {} },
-        { provide: getModelToken(ServiceType.name), useValue: {} },
+        {
+          provide: getModelToken(ServiceType.name),
+          useValue: {
+            findById: () => ({
+              select: () => Promise.resolve({ serviceTypeName: 'Basic' }),
+            }),
+          },
+        },
         { provide: getModelToken(PromoCode.name), useValue: promoCodeModel },
         {
           provide: getModelToken(PromoCodeUsage.name),
@@ -132,6 +147,47 @@ describe('PricingService', () => {
           items: [line()],
         } as QuoteDto),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('bills an agreed unit price instead of the price list', async () => {
+      // The price list is never consulted, so a pair with no row still books.
+      setResolver(() => null);
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_PIECE,
+        items: [line({ quantity: 3, unitPrice: 750.5 })],
+      } as QuoteDto);
+
+      expect(res.lines[0].unitPrice).toBe(750.5);
+      expect(res.lines[0].lineTotal).toBe(2251.5);
+      expect(res.subtotal).toBe(2251.5);
+    });
+
+    it('mixes agreed and catalog lines in one order', async () => {
+      setResolver(() => ({ unitPrice: 1000, currencyId }));
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_PIECE,
+        items: [line({ quantity: 2, unitPrice: 250 }), line({ quantity: 1 })],
+      } as QuoteDto);
+
+      expect(res.lines[0].lineTotal).toBe(500);
+      expect(res.lines[1].lineTotal).toBe(1000);
+      expect(res.subtotal).toBe(1500);
+    });
+
+    it('names the garment and service type that has no price', async () => {
+      setResolver(() => null);
+      await expect(
+        service.priceOrder({
+          pricingModel: PricingModelEnum.PER_PIECE,
+          items: [line()],
+        } as QuoteDto),
+        // "one of the items" is useless with six garments in the basket.
+      ).rejects.toMatchObject({
+        response: {
+          code: 'PRICE_NOT_FOUND',
+          message: expect.stringContaining('T-Shirt (Basic)') as unknown,
+        },
+      });
     });
   });
 

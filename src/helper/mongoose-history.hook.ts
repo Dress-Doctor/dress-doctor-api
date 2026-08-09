@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { Model, Query, Schema, Types, Document } from 'mongoose';
+import { ClientSession, Model, Query, Schema, Types, Document } from 'mongoose';
 import { HistoryActionEnum } from '../schema/admin/admin.dto';
 import { ChangedFieldDto } from '../schema/user/user.dto';
 
@@ -9,6 +9,21 @@ interface QueryWithPrevious<T> extends Query<T, T> {
 
 interface QueryContext {
   changedBy?: Types.ObjectId;
+}
+
+/**
+ * The transaction a write is running in, if any.
+ *
+ * Everything this file does has to join that transaction. Reading the
+ * previous state outside it cannot see a document the same transaction just
+ * created, which would make an update look like a create and lose the diff;
+ * writing the history row outside it would leave an audit entry behind for a
+ * change that later rolled back.
+ */
+function sessionOf(query: {
+  getOptions: () => { session?: ClientSession | null } | undefined;
+}): ClientSession | undefined {
+  return query.getOptions()?.session ?? undefined;
 }
 
 function normalize(value: any): any {
@@ -68,11 +83,15 @@ export function attachHistoryHooks<T extends Document>(
   const { schema, idField, resourceName, historyModel } = data;
   const logger = new Logger(`${resourceName}:History`);
 
-  // Pre-hook: capture the previous state before update
+  // Pre-hook: capture the previous state before update. The read joins the
+  // caller's transaction — without the session it cannot see a document that
+  // same transaction just created, and the update would be recorded as a
+  // second CREATE with no changed fields instead of the edit it really is.
   schema.pre('findOneAndUpdate', async function () {
     const query = this as QueryWithPrevious<T>;
     const previous = (await query.model
       .findOne(query.getQuery())
+      .session(sessionOf(query) ?? null)
       .lean()) as T | null;
     query._previous = previous ?? undefined;
   });
@@ -83,12 +102,20 @@ export function attachHistoryHooks<T extends Document>(
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       const changedBy = (doc as any).$locals?.changedBy;
 
-      await historyModel.create({
-        action: HistoryActionEnum.CREATE,
-        changedBy: changedBy as Types.ObjectId,
-        [idField]: doc[idField as keyof T] || doc._id,
-        snapshot: doc.toObject() as Record<string, any>,
-      });
+      // Same transaction as the document itself, so a rollback takes the
+      // audit entry with it rather than leaving a record of a change that
+      // never happened.
+      await historyModel.create(
+        [
+          {
+            action: HistoryActionEnum.CREATE,
+            changedBy: changedBy as Types.ObjectId,
+            [idField]: doc[idField as keyof T] || doc._id,
+            snapshot: doc.toObject() as Record<string, any>,
+          },
+        ],
+        { session: doc.$session() ?? undefined },
+      );
       logger.log(`History recorded for ${resourceName} CREATE`);
     } catch (error) {
       logger.error(
@@ -109,14 +136,24 @@ export function attachHistoryHooks<T extends Document>(
       // Get context (who made the change)
       const context = query.getOptions()?.context as QueryContext | undefined;
 
+      const session = sessionOf(query);
+
       if (!previous) {
-        // No previous record means it was a create
-        await historyModel.create({
-          changedBy: context?.changedBy,
-          action: HistoryActionEnum.CREATE,
-          [idField]: doc[idField as keyof T] || doc._id,
-          snapshot: doc.toObject() as Record<string, any>,
-        });
+        // Nothing was there before this ran: an upsert that inserted. (The
+        // pre-hook reads inside the caller's transaction, so a document
+        // created earlier in that same transaction is visible and does NOT
+        // land here.)
+        await historyModel.create(
+          [
+            {
+              changedBy: context?.changedBy,
+              action: HistoryActionEnum.CREATE,
+              [idField]: doc[idField as keyof T] || doc._id,
+              snapshot: doc.toObject() as Record<string, any>,
+            },
+          ],
+          { session },
+        );
         logger.log(`History recorded for ${resourceName} CREATE (via update)`);
         return next();
       }
@@ -141,13 +178,18 @@ export function attachHistoryHooks<T extends Document>(
 
       if (!Object.keys(changedFields).length) return next();
 
-      await historyModel.create({
-        changedFields,
-        changedBy: context?.changedBy,
-        action: HistoryActionEnum.UPDATE,
-        [idField]: doc[idField as keyof T] || doc._id,
-        snapshot: doc.toObject() as Record<string, any>,
-      });
+      await historyModel.create(
+        [
+          {
+            changedFields,
+            changedBy: context?.changedBy,
+            action: HistoryActionEnum.UPDATE,
+            [idField]: doc[idField as keyof T] || doc._id,
+            snapshot: doc.toObject() as Record<string, any>,
+          },
+        ],
+        { session },
+      );
 
       logger.log(`History recorded for ${resourceName} UPDATE`);
     } catch (error) {
@@ -166,12 +208,17 @@ export function attachHistoryHooks<T extends Document>(
       const query = this as Query<T, T>;
       const context = query.getOptions()?.context as QueryContext | undefined;
 
-      await historyModel.create({
-        changedBy: context?.changedBy,
-        action: HistoryActionEnum.DELETE,
-        [idField]: doc[idField as keyof T] || doc._id,
-        snapshot: doc.toObject() as Record<string, any>,
-      });
+      await historyModel.create(
+        [
+          {
+            changedBy: context?.changedBy,
+            action: HistoryActionEnum.DELETE,
+            [idField]: doc[idField as keyof T] || doc._id,
+            snapshot: doc.toObject() as Record<string, any>,
+          },
+        ],
+        { session: sessionOf(query) },
+      );
 
       logger.log(`History recorded for ${resourceName} DELETE`);
     } catch (error) {

@@ -9,6 +9,7 @@ import {
   IsPositive,
   IsString,
   MaxLength,
+  Min,
 } from 'class-validator';
 import { OrderItemConditionEnum } from 'src/schema/order/order.dto';
 
@@ -30,8 +31,25 @@ export class CreateOrderItemDto {
   @IsPositive({ message: 'Quantity cannot be negative or zero' })
   quantity: number;
 
-  // unitPrice is NOT accepted from the client — it is resolved server-side by
-  // the pricing engine and snapshotted onto the line (§6-8).
+  @ApiProperty({
+    required: false,
+    example: 750.5,
+    description:
+      'Agreed price for ONE garment on this line; the line is worth ' +
+      'unitPrice × quantity. Sent, it overrides the price list and survives ' +
+      'later reprices, the same way orderAmount does for the order as a ' +
+      'whole. Omit it and the pricing engine resolves the price itself (Per ' +
+      'Piece from the catalog; Per KG / Subscription / Free leave it at 0). ' +
+      'Setting it requires the same permission as a manual discount.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'unitPrice must be a number with at most 2 decimals' },
+  )
+  @Min(0, { message: 'unitPrice cannot be negative' })
+  unitPrice?: number;
 
   @ApiProperty({
     required: false,

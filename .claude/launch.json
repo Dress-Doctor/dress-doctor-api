@@ -11,6 +11,34 @@
         "/Users/ejaralive/Documents/ejara/koma-analytics-client"
       ],
       "port": 5173
+    },
+    {
+      "name": "admin-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "/Users/ejaralive/Documents/dress-doctor/dress-doctor-admin",
+        "--",
+        "--port",
+        "5174"
+      ],
+      "port": 5174
+    },
+    {
+      "name": "admin-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "preview",
+        "--prefix",
+        "/Users/ejaralive/Documents/dress-doctor/dress-doctor-admin",
+        "--",
+        "--port",
+        "4173"
+      ],
+      "port": 4173
     }
   ]
 }

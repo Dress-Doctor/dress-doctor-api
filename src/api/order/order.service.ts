@@ -5,17 +5,29 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, PipelineStage, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import {
+  ClientSession,
+  Connection,
+  Model,
+  PipelineStage,
+  Types,
+} from 'mongoose';
 import { Workbook } from 'exceljs';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
+import { HistoryActionEnum } from 'src/schema/admin/admin.dto';
 import { scopeFilter, scopePermitsCustomer } from 'src/helper/casl/casl-scope';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
+import {
+  HistoryLabelService,
+  type HistoryChange,
+} from 'src/helper/service/history-label.service';
 import { Currency } from 'src/schema/catalog/currency.schema';
 import { Item } from 'src/schema/catalog/item.schema';
 import { OrderItem } from 'src/schema/order/order-item.schema';
@@ -55,6 +67,19 @@ import {
   type OrderCreatedEvent,
   type OrderStatusChangedEvent,
 } from './order.events';
+
+/**
+ * Whether a failure is Mongo refusing to open a transaction at all, rather
+ * than the transaction body failing. A standalone mongod reports it one of two
+ * ways depending on driver version, and neither carries a usable error code.
+ */
+function isTransactionUnsupported(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    message.includes('does not support retryable writes') ||
+    message.includes('Transaction numbers are only allowed on a replica set')
+  );
+}
 
 /** Order counts per status, plus `all` across every status. */
 export type OrderStatusCounts = {
@@ -103,6 +128,169 @@ const SAFE_USER_PROJECTION = {
   isActive: 1,
   userTypeId: 1,
 } as const;
+
+/**
+ * Allow-list of Office fields safe to return with an order. The office's
+ * `signedLink` carries an HMAC and must never be exposed here.
+ */
+const SAFE_OFFICE_PROJECTION = {
+  officeTypeId: 1,
+  officeName: 1,
+  officeCode: 1,
+  slug: 1,
+  address: 1,
+  city: 1,
+  region: 1,
+  isActive: 1,
+} as const;
+
+/**
+ * Customer join. On the list it runs BEFORE the keyword filter so free-text
+ * can match the customer's phone/name too; the detail view reuses it so both
+ * shape the customer the same way.
+ */
+const CUSTOMER_LOOKUP: PipelineStage[] = [
+  {
+    $lookup: {
+      from: 'user',
+      localField: 'customerId',
+      foreignField: '_id',
+      as: 'customer',
+      pipeline: [{ $project: SAFE_USER_PROJECTION }],
+    },
+  },
+  { $unwind: { path: '$customer', preserveNullAndEmptyArrays: true } },
+];
+
+/** Office join — same story as the customer join above. */
+const OFFICE_LOOKUP: PipelineStage[] = [
+  {
+    $lookup: {
+      as: 'office',
+      from: 'office',
+      foreignField: '_id',
+      localField: 'officeId',
+      pipeline: [{ $project: SAFE_OFFICE_PROJECTION }],
+    },
+  },
+  { $unwind: { path: '$office', preserveNullAndEmptyArrays: true } },
+];
+
+/**
+ * The order's garment lines, each resolved against the shared catalog: item →
+ * service, service type and currency. Shared by the list and the detail view.
+ */
+const ORDER_ITEMS_LOOKUP: PipelineStage[] = [
+  {
+    $lookup: {
+      from: 'order_item',
+      localField: '_id',
+      foreignField: 'orderId',
+      as: 'orderItems',
+      pipeline: [
+        {
+          $lookup: {
+            from: 'item',
+            localField: 'itemId',
+            foreignField: '_id',
+            as: 'item',
+            pipeline: [
+              {
+                $lookup: {
+                  from: 'service',
+                  localField: 'serviceId',
+                  foreignField: '_id',
+                  as: 'service',
+                },
+              },
+              {
+                $unwind: {
+                  path: '$service',
+                  preserveNullAndEmptyArrays: true,
+                },
+              },
+
+              {
+                $lookup: {
+                  from: 'service_type',
+                  localField: 'serviceTypeId',
+                  foreignField: '_id',
+                  as: 'serviceType',
+                },
+              },
+              {
+                $unwind: {
+                  path: '$serviceType',
+                  preserveNullAndEmptyArrays: true,
+                },
+              },
+
+              {
+                $lookup: {
+                  from: 'currency',
+                  localField: 'currencyId',
+                  foreignField: '_id',
+                  as: 'currency',
+                },
+              },
+              {
+                $unwind: {
+                  path: '$currency',
+                  preserveNullAndEmptyArrays: true,
+                },
+              },
+            ],
+          },
+        },
+        {
+          $unwind: {
+            path: '$item',
+            preserveNullAndEmptyArrays: true,
+          },
+        },
+      ],
+    },
+  },
+];
+
+/**
+ * How many audit entries the detail view carries. An order that has been
+ * edited hundreds of times is a data problem, not a page that should return
+ * hundreds of rows — the newest ones are the ones anybody reads.
+ */
+const ORDER_HISTORY_LIMIT = 100;
+
+/**
+ * One field the audit trail saw change, flattened out of `changedFields`.
+ * `from`/`to` are the values exactly as stored; when the field references
+ * another document, HistoryLabelService adds the readable label beside them.
+ */
+export type OrderHistoryChange = HistoryChange;
+
+/**
+ * One audit entry on the detail view: who changed what, when. Deliberately
+ * WITHOUT the stored `snapshot` — a full copy of the order per entry, which
+ * would dwarf the order itself and says nothing the changes don't.
+ */
+export type OrderHistoryEntry = {
+  _id: Types.ObjectId;
+  action: HistoryActionEnum;
+  changes: OrderHistoryChange[];
+  changedBy?: Types.ObjectId;
+  changedByUser?: Record<string, unknown>;
+  createdAt: Date;
+};
+
+/**
+ * One order with every join a detail screen needs, plus its audit trail.
+ * Loose on the order's own fields (the aggregation returns the document as
+ * stored) and precise about what the endpoint adds on top.
+ */
+export type OrderDetail = Record<string, unknown> & {
+  _id: Types.ObjectId;
+  orderCode: string;
+  history: OrderHistoryEntry[];
+};
 
 // One flat row per order for the CSV/Excel export.
 interface OrderExportRow {
@@ -179,6 +367,8 @@ export class OrderService {
     @InjectModel(Order.name)
     private readonly orderModel: Model<Order>,
 
+    @InjectConnection() private readonly connection: Connection,
+
     @Inject(REQUEST) private readonly req: AppRequestWithUser,
     private readonly codeService: CodeGeneratorService,
     private readonly appUtilService: AppUtilService,
@@ -217,6 +407,7 @@ export class OrderService {
     private readonly subscriptionModel: Model<Subscription>,
 
     private readonly pricingService: PricingService,
+    private readonly historyLabelService: HistoryLabelService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -228,11 +419,19 @@ export class OrderService {
    * otherwise repeated draft edits would over-decrement quota and burn promo
    * uses. Called after every draft mutation so the snapshot never drifts.
    */
-  private async reprice(orderId: Types.ObjectId, changedBy: Types.ObjectId) {
-    const order = await this.orderModel.findById(orderId);
+  private async reprice(
+    orderId: Types.ObjectId,
+    changedBy: Types.ObjectId,
+    session?: ClientSession,
+  ) {
+    // Session passed as an option rather than chained via .session(): when it
+    // is undefined this is exactly the query it always was.
+    const order = await this.orderModel.findById(orderId, null, { session });
     if (!order) return;
 
-    const items = await this.orderItemModel.find({ orderId });
+    const items = await this.orderItemModel.find({ orderId }, null, {
+      session,
+    });
     const pricing = await this.pricingService.priceOrder({
       pricingModel: order.pricingModel,
       officeId: this.req.data.officeId?.toString(),
@@ -247,22 +446,27 @@ export class OrderService {
         itemId: i.itemId.toString(),
         serviceTypeId: i.serviceTypeId.toString(),
         quantity: i.quantity,
+        // An agreed unit price outranks the price list on every reprice, not
+        // just the first — otherwise the next garment added would silently
+        // undo it. 0 means nobody agreed one, so the engine prices the line.
+        unitPrice: i.unitPrice > 0 ? i.unitPrice : undefined,
       })),
     });
 
     // Snapshot resolved unitPrice/lineTotal onto each line (Per Piece prices;
     // other models keep them at 0). Order of pricing.lines matches items.
-    await Promise.all(
-      items.map((item, idx) =>
-        this.orderItemModel.updateOne(
-          { _id: item._id },
-          {
-            unitPrice: pricing.lines[idx]?.unitPrice ?? 0,
-            lineTotal: pricing.lines[idx]?.lineTotal ?? 0,
-          },
-        ),
-      ),
-    );
+    // Sequential rather than Promise.all: when a session is threaded through,
+    // Mongo rejects concurrent operations on it.
+    for (const [idx, item] of items.entries()) {
+      await this.orderItemModel.updateOne(
+        { _id: item._id },
+        {
+          unitPrice: pricing.lines[idx]?.unitPrice ?? 0,
+          lineTotal: pricing.lines[idx]?.lineTotal ?? 0,
+        },
+        { session },
+      );
+    }
 
     const combinedDiscount = pricing.manualDiscount + pricing.promoDiscount;
     // Reward redemption is applied transactionally by the redeem path and is
@@ -286,8 +490,98 @@ export class OrderService {
         quotaConsumed: pricing.quotaConsumed,
         balanceDue: Math.max(0, totalAmount - order.amountPaid),
       },
-      { context: { changedBy }, returnDocument: 'after' } as never,
+      { context: { changedBy }, returnDocument: 'after', session } as never,
     );
+  }
+
+  /**
+   * Write an order and the garments booked with it as one unit.
+   *
+   * The order upsert, its item rows and the price snapshot all land inside a
+   * single transaction, so a counter that books six garments never ends up with
+   * an order holding four — the whole intake either exists or it doesn't. That
+   * matters more here than on the per-item endpoint because a half-filled DRAFT
+   * has no screen that can repair it yet.
+   *
+   * Callers are expected to have already run `assertItemsExist()`, which turns
+   * the one vague failure (a bad itemId) into a named rejection; everything
+   * else the engine refuses rolls back from in here.
+   */
+  private async commitOrderWithItems(params: {
+    filter: Record<string, unknown>;
+    update: Record<string, unknown>;
+    items: CreateOrderItemDto[];
+    userId: Types.ObjectId;
+  }): Promise<Order> {
+    const { filter, update, items, userId } = params;
+
+    let created: Order | undefined;
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        created = (await this.orderModel.findOneAndUpdate(filter, update, {
+          context: { changedBy: userId },
+          upsert: true,
+          returnDocument: 'after',
+          session,
+        } as never)) as unknown as Order;
+
+        // Saved one at a time, and deliberately not in a Promise.all: a Mongo
+        // session cannot carry concurrent operations. save() (rather than
+        // insertMany) is what keeps the post('save') history hook firing, and
+        // $locals is how that hook learns who to attribute the row to — the
+        // same shape createOrderItem() uses. lineTotal is a placeholder;
+        // reprice() computes it right after.
+        for (const item of this.mergeLines(items)) {
+          const row = new this.orderItemModel({
+            orderId: created._id,
+            itemId: new Types.ObjectId(item.itemId),
+            serviceTypeId: new Types.ObjectId(item.serviceTypeId),
+            quantity: item.quantity,
+            unitPrice: item.unitPrice ?? 0,
+            lineTotal: 0,
+            condition: item.condition ?? OrderItemConditionEnum.NORMAL,
+            colour: item.colour,
+          });
+          row.$locals.changedBy = userId;
+          await row.save({ session });
+        }
+
+        await this.reprice(created._id, userId, session);
+      });
+    } catch (err) {
+      // A standalone mongod cannot open a transaction at all. That is a
+      // deployment problem, not a bad request, and it takes down every
+      // multi-document write (payments and rewards included) — so say which
+      // one it is rather than letting it surface as an anonymous 500.
+      if (isTransactionUnsupported(err)) {
+        this.logger.error(
+          'Cannot create an order: this MongoDB deployment does not support ' +
+            'transactions. Point DATABASE_URL at a replica set — e.g. ' +
+            '?replicaSet=rs0&directConnection=true — and restart.',
+        );
+        throw new ServiceUnavailableException({
+          code: 'TRANSACTIONS_UNSUPPORTED',
+          message:
+            'Orders cannot be created because the database is not configured ' +
+            'for transactions. Please contact support.',
+        });
+      }
+      throw err;
+    } finally {
+      await session.endSession();
+    }
+
+    // withTransaction resolves only once its body has run to completion, so a
+    // missing order here means the upsert returned nothing rather than that
+    // the transaction failed — a state the caller must not carry on from.
+    if (!created) {
+      throw new BadRequestException({
+        code: 'ORDER_NOT_CREATED',
+        message: 'Order could not be created',
+      });
+    }
+    return created;
   }
 
   /**
@@ -446,6 +740,12 @@ export class OrderService {
 
   async createOrderWithPickup(data: CreateOrderWithPickupDto) {
     this.can('CREATE', 'Order');
+    const { items = [], ...order } = data;
+    if (items.length) this.can('CREATE', 'OrderItem');
+    // Same rule as the per-item endpoint: hand-set prices are permissioned.
+    if (items.some((i) => i.unitPrice !== undefined)) {
+      this.can('UPDATE', 'Payment');
+    }
 
     const platform = this.req.data.platform;
     const { phone } = this.req.user;
@@ -480,6 +780,7 @@ export class OrderService {
     }
 
     this.assertWeightForModel(data.pricingModel, data.totalWeightKg);
+    await this.assertItemsExist(items, base);
 
     const orderStatusDraft = OrderStatusEnum.DRAFT;
     const orderStatus = await this.orderStatusModel.findOne({
@@ -512,9 +813,11 @@ export class OrderService {
       this.logger.error(
         `${base} this customer with id ${data.customerId} can only have one draft order at a time`,
       );
-      throw new BadRequestException(
-        'A customer can only have one draft order at a time',
-      );
+      throw new BadRequestException({
+        code: 'DRAFT_EXISTS',
+        field: 'customerId',
+        message: 'A customer can only have one draft order at a time',
+      });
     }
 
     const userId = new Types.ObjectId(this.req.user.userId);
@@ -523,10 +826,12 @@ export class OrderService {
       userId,
       base,
     );
-    const created = (await this.orderModel.findOneAndUpdate(
-      { customerId: customerId, pickupRequestId: pickupRequestId },
-      {
-        ...data,
+    const created = await this.commitOrderWithItems({
+      items,
+      userId,
+      filter: { customerId: customerId, pickupRequestId: pickupRequestId },
+      update: {
+        ...order,
         customerId,
         currencyId,
         pickupRequestId,
@@ -540,24 +845,29 @@ export class OrderService {
         createdBy: userId,
         pickedUpBy,
       },
-      {
-        context: { changedBy: userId },
-        upsert: true,
-        returnDocument: 'after',
-      } as never,
-    )) as unknown as Order;
+    });
 
-    await this.reprice(created._id, userId);
+    // Outside the transaction: the listeners react to an order that exists, so
+    // they must not fire for one that ends up rolled back.
     await this.onOrderCreated(created._id, customerId, userId);
 
     this.logger.log(
-      `${base} has successfully created order for pickup request ${data.pickupRequestId}`,
+      `${base} has successfully created order for pickup request ${data.pickupRequestId} with ${items.length} item(s)`,
     );
-    return 'Order created successfully';
+    return {
+      message: 'Order created successfully',
+      data: { _id: created._id, orderCode: created.orderCode },
+    };
   }
 
   async createOrder(data: CreateOrderDto) {
     this.can('CREATE', 'Order');
+    const { items = [], ...order } = data;
+    if (items.length) this.can('CREATE', 'OrderItem');
+    // Same rule as the per-item endpoint: hand-set prices are permissioned.
+    if (items.some((i) => i.unitPrice !== undefined)) {
+      this.can('UPDATE', 'Payment');
+    }
 
     const platform = this.req.data.platform;
     const { phone } = this.req.user;
@@ -579,6 +889,7 @@ export class OrderService {
     }
 
     this.assertWeightForModel(data.pricingModel, data.totalWeightKg);
+    await this.assertItemsExist(items, base);
 
     const orderStatusDraft = OrderStatusEnum.DRAFT;
     const orderStatus = await this.orderStatusModel.findOne({
@@ -599,7 +910,11 @@ export class OrderService {
       this.logger.error(
         `${base} this customer with id ${data.customerId} can only have one draft order at a time`,
       );
-      throw new BadRequestException('A customer can only have one draft order');
+      throw new BadRequestException({
+        code: 'DRAFT_EXISTS',
+        field: 'customerId',
+        message: 'A customer can only have one draft order',
+      });
     }
 
     const userId = new Types.ObjectId(this.req.user.userId);
@@ -608,10 +923,12 @@ export class OrderService {
       userId,
       base,
     );
-    const created = (await this.orderModel.findOneAndUpdate(
-      { customerId, orderStatusId: orderStatus._id },
-      {
-        ...data,
+    const created = await this.commitOrderWithItems({
+      items,
+      userId,
+      filter: { customerId, orderStatusId: orderStatus._id },
+      update: {
+        ...order,
         customerId,
         currencyId,
         // The posted amount is an input to pricing, not the priced result —
@@ -624,20 +941,19 @@ export class OrderService {
         createdBy: userId,
         pickedUpBy,
       },
-      {
-        context: { changedBy: userId },
-        upsert: true,
-        returnDocument: 'after',
-      } as never,
-    )) as unknown as Order;
+    });
 
-    await this.reprice(created._id, userId);
+    // Outside the transaction: the listeners react to an order that exists, so
+    // they must not fire for one that ends up rolled back.
     await this.onOrderCreated(created._id, customerId, userId);
 
     this.logger.log(
-      `${base} has successfully created order for customer ${data.customerId}`,
+      `${base} has successfully created order for customer ${data.customerId} with ${items.length} item(s)`,
     );
-    return 'Order created successfully';
+    return {
+      message: 'Order created successfully',
+      data: { _id: created._id, orderCode: created.orderCode },
+    };
   }
 
   /**
@@ -741,6 +1057,83 @@ export class OrderService {
     return requested;
   }
 
+  /**
+   * The identity of a garment line: item, service type, condition and colour.
+   * Two lines that agree on all four are the same thing counted twice, so they
+   * collapse into one row with a higher quantity rather than sitting next to
+   * each other identically. Differ in any of them — a white shirt and a blue
+   * one, normal and stained — and they stay separate, which is what
+   * per-garment rows are for.
+   *
+   * Colour is compared case- and whitespace-insensitively: "Navy Blue" and
+   * "navy blue" are one colour, and nobody at a counter should have to make
+   * them agree.
+   */
+  private lineKey(line: {
+    itemId: Types.ObjectId | string;
+    serviceTypeId: Types.ObjectId | string;
+    condition?: OrderItemConditionEnum;
+    colour?: string;
+  }): string {
+    return [
+      line.itemId.toString(),
+      line.serviceTypeId.toString(),
+      line.condition ?? OrderItemConditionEnum.NORMAL,
+      (line.colour ?? '').trim().toLowerCase(),
+    ].join('|');
+  }
+
+  /**
+   * Fold repeated garments in one request into single lines. The client merges
+   * as it goes so the basket reads right, but the endpoint cannot assume it
+   * did — and the same request may legitimately arrive twice on a retry.
+   *
+   * A later line's agreed unit price wins: it is the more recent thing the
+   * operator typed for that garment.
+   */
+  private mergeLines(items: CreateOrderItemDto[]): CreateOrderItemDto[] {
+    const merged = new Map<string, CreateOrderItemDto>();
+    for (const item of items) {
+      const key = this.lineKey(item);
+      const seen = merged.get(key);
+      if (!seen) {
+        merged.set(key, { ...item });
+        continue;
+      }
+      seen.quantity += item.quantity;
+      if (item.unitPrice !== undefined) seen.unitPrice = item.unitPrice;
+    }
+    return [...merged.values()];
+  }
+
+  /**
+   * Check every garment booked with an order references a real catalog item,
+   * in one query rather than one per line.
+   *
+   * Pricing failures (no price row for a PER_PIECE line, no active
+   * subscription) are left to the transaction in `commitOrderWithItems()` to
+   * roll back — they already produce a precise error from the engine. This
+   * only covers the one case the engine would report vaguely: a bad itemId,
+   * which is worth naming.
+   */
+  private async assertItemsExist(items: CreateOrderItemDto[], logBase: string) {
+    if (!items.length) return;
+
+    const ids = [...new Set(items.map((item) => item.itemId))];
+    const found = await this.itemModel
+      .find({ _id: { $in: ids.map((id) => new Types.ObjectId(id)) } })
+      .select('_id');
+    if (found.length === ids.length) return;
+
+    const known = new Set(found.map((item) => item._id.toString()));
+    const unknown = ids.filter((id) => !known.has(id));
+    this.logger.error(`${logBase} invalid itemId(s) ${unknown.join(', ')}`);
+    throw new BadRequestException({
+      code: 'INVALID_ITEM',
+      message: `Invalid item id(s): ${unknown.join(', ')}`,
+    });
+  }
+
   /** PER_KG needs a positive weight (else it silently prices to 0). */
   private assertWeightForModel(model: PricingModelEnum, weight?: number) {
     if (model === PricingModelEnum.PER_KG && (!weight || weight <= 0)) {
@@ -828,56 +1221,13 @@ export class OrderService {
     // their own office's orders relabelled as the answer.
     if (officeIdFilter) baseMatch.$and = [{ officeId: officeIdFilter }];
 
-    // Customer join runs BEFORE the keyword filter so free-text can match the
-    // customer's phone/name too. Allow-list projection — passwordHash / any
-    // secret is never returned; never switch to an exclusion projection.
-    const customerLookup: PipelineStage[] = [
-      {
-        $lookup: {
-          from: 'user',
-          localField: 'customerId',
-          foreignField: '_id',
-          as: 'customer',
-          pipeline: [{ $project: SAFE_USER_PROJECTION }],
-        },
-      },
-      { $unwind: { path: '$customer', preserveNullAndEmptyArrays: true } },
-    ];
-
-    // Office join also runs before the keyword filter so free-text can match
-    // the office name/code. Allow-list projection — the signedLink carries an
-    // HMAC and must never be exposed here.
-    const officeLookup: PipelineStage[] = [
-      {
-        $lookup: {
-          as: 'office',
-          from: 'office',
-          foreignField: '_id',
-          localField: 'officeId',
-          pipeline: [
-            {
-              $project: {
-                officeTypeId: 1,
-                officeName: 1,
-                officeCode: 1,
-                slug: 1,
-                address: 1,
-                city: 1,
-                region: 1,
-                isActive: 1,
-              },
-            },
-          ],
-        },
-      },
-      { $unwind: { path: '$office', preserveNullAndEmptyArrays: true } },
-    ];
-
     // Filter stages shared by the count and the data query so paging is exact.
+    // The customer/office joins run BEFORE the keyword filter so free-text can
+    // match the customer's phone/name and the office name/code too.
     const filterStages: PipelineStage[] = [
       { $match: baseMatch },
-      ...customerLookup,
-      ...officeLookup,
+      ...CUSTOMER_LOOKUP,
+      ...OFFICE_LOOKUP,
     ];
 
     if (query.keyword?.trim()) {
@@ -1107,76 +1457,7 @@ export class OrderService {
         $unwind: { path: '$pickedUpByUser', preserveNullAndEmptyArrays: true },
       },
 
-      {
-        $lookup: {
-          from: 'order_item',
-          localField: '_id',
-          foreignField: 'orderId',
-          as: 'orderItems',
-          pipeline: [
-            {
-              $lookup: {
-                from: 'item',
-                localField: 'itemId',
-                foreignField: '_id',
-                as: 'item',
-                pipeline: [
-                  {
-                    $lookup: {
-                      from: 'service',
-                      localField: 'serviceId',
-                      foreignField: '_id',
-                      as: 'service',
-                    },
-                  },
-                  {
-                    $unwind: {
-                      path: '$service',
-                      preserveNullAndEmptyArrays: true,
-                    },
-                  },
-
-                  {
-                    $lookup: {
-                      from: 'service_type',
-                      localField: 'serviceTypeId',
-                      foreignField: '_id',
-                      as: 'serviceType',
-                    },
-                  },
-                  {
-                    $unwind: {
-                      path: '$serviceType',
-                      preserveNullAndEmptyArrays: true,
-                    },
-                  },
-
-                  {
-                    $lookup: {
-                      from: 'currency',
-                      localField: 'currencyId',
-                      foreignField: '_id',
-                      as: 'currency',
-                    },
-                  },
-                  {
-                    $unwind: {
-                      path: '$currency',
-                      preserveNullAndEmptyArrays: true,
-                    },
-                  },
-                ],
-              },
-            },
-            {
-              $unwind: {
-                path: '$item',
-                preserveNullAndEmptyArrays: true,
-              },
-            },
-          ],
-        },
-      },
+      ...ORDER_ITEMS_LOOKUP,
     ]);
 
     const totalPages = Math.ceil(total / size);
@@ -1184,6 +1465,302 @@ export class OrderService {
 
     this.logger.log(`${logBase} has successfully retrieve all items`);
     return { total, data, nextPage };
+  }
+
+  /**
+   * One order, addressed by its human-readable code — everything a detail
+   * screen shows in a single round trip: the customer, office, currency,
+   * status, creator and pickup agent, the garment lines resolved against the
+   * catalog, the linked pickup request, the promo/subscription it was priced
+   * against, its payments, and its audit trail.
+   *
+   * The trail carries only what changed (field, from, to) and who changed it.
+   * The stored `snapshot` — a full copy of the order per entry — is
+   * deliberately dropped: it would dwarf the order itself and adds nothing a
+   * reader of the timeline needs.
+   *
+   * Office/self scoped through the same READ conditions as the list, so an
+   * order belonging to another office simply isn't found rather than being
+   * readable by anyone who can guess a code.
+   */
+  async findByCode(orderCode: string): Promise<OrderDetail> {
+    this.can('READ', 'Order');
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+    const base = `[${platform}] ${phone}`;
+
+    const code = orderCode.trim();
+    const scope = scopeFilter(this.req.user.ability, 'READ', 'Order');
+
+    const [order] = await this.orderModel.aggregate<OrderDetail>([
+      { $match: { orderCode: code, ...scope } },
+      { $limit: 1 },
+
+      ...CUSTOMER_LOOKUP,
+      ...OFFICE_LOOKUP,
+
+      {
+        $lookup: {
+          as: 'orderStatus',
+          from: 'order_status',
+          localField: 'orderStatusId',
+          foreignField: '_id',
+        },
+      },
+      { $unwind: { path: '$orderStatus', preserveNullAndEmptyArrays: true } },
+
+      {
+        $lookup: {
+          as: 'currency',
+          from: 'currency',
+          localField: 'currencyId',
+          foreignField: '_id',
+          pipeline: [
+            {
+              $project: {
+                isoCode: 1,
+                name: 1,
+                symbol: 1,
+                numericCode: 1,
+                decimalPlaces: 1,
+              },
+            },
+          ],
+        },
+      },
+      { $unwind: { path: '$currency', preserveNullAndEmptyArrays: true } },
+
+      // Creator and pickup agent (both Users) — same allow-list as the
+      // customer; passwordHash / any secret is never returned.
+      {
+        $lookup: {
+          as: 'createdByUser',
+          from: 'user',
+          localField: 'createdBy',
+          foreignField: '_id',
+          pipeline: [{ $project: SAFE_USER_PROJECTION }],
+        },
+      },
+      { $unwind: { path: '$createdByUser', preserveNullAndEmptyArrays: true } },
+
+      {
+        $lookup: {
+          as: 'pickedUpByUser',
+          from: 'user',
+          localField: 'pickedUpBy',
+          foreignField: '_id',
+          pipeline: [{ $project: SAFE_USER_PROJECTION }],
+        },
+      },
+      {
+        $unwind: { path: '$pickedUpByUser', preserveNullAndEmptyArrays: true },
+      },
+
+      ...ORDER_ITEMS_LOOKUP,
+
+      // The pickup request the order came from, with its own status name.
+      {
+        $lookup: {
+          as: 'pickupRequest',
+          from: 'pickup_request',
+          localField: 'pickupRequestId',
+          foreignField: '_id',
+          pipeline: [
+            {
+              $lookup: {
+                as: 'pickupStatus',
+                from: 'pickup_status',
+                localField: 'pickupStatusId',
+                foreignField: '_id',
+                pipeline: [{ $project: { pickupStatusName: 1 } }],
+              },
+            },
+            {
+              $unwind: {
+                path: '$pickupStatus',
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+          ],
+        },
+      },
+      { $unwind: { path: '$pickupRequest', preserveNullAndEmptyArrays: true } },
+
+      // What the order was priced against: the applied promo and, for the
+      // Subscription model, the enrolment its quota was drawn from.
+      {
+        $lookup: {
+          as: 'promo',
+          from: 'promo_code',
+          localField: 'promoCodeId',
+          foreignField: '_id',
+          pipeline: [
+            {
+              $project: {
+                promoCodeName: 1,
+                discountType: 1,
+                discountValue: 1,
+                stackable: 1,
+                expiresAt: 1,
+                isActive: 1,
+              },
+            },
+          ],
+        },
+      },
+      { $unwind: { path: '$promo', preserveNullAndEmptyArrays: true } },
+
+      {
+        $lookup: {
+          as: 'subscription',
+          from: 'subscription',
+          localField: 'subscriptionId',
+          foreignField: '_id',
+          pipeline: [
+            {
+              $project: {
+                planId: 1,
+                status: 1,
+                quotaType: 1,
+                billingCycle: 1,
+                remainingQuota: 1,
+              },
+            },
+          ],
+        },
+      },
+      { $unwind: { path: '$subscription', preserveNullAndEmptyArrays: true } },
+
+      // Payments against this order, newest first, with the method/type names
+      // and who took the money.
+      {
+        $lookup: {
+          as: 'payments',
+          from: 'payment',
+          localField: '_id',
+          foreignField: 'orderId',
+          pipeline: [
+            { $sort: { paidAt: -1 } },
+            {
+              $lookup: {
+                as: 'paymentMethod',
+                from: 'payment_method',
+                localField: 'paymentMethodId',
+                foreignField: '_id',
+                pipeline: [{ $project: { paymentMethodName: 1 } }],
+              },
+            },
+            {
+              $unwind: {
+                path: '$paymentMethod',
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $lookup: {
+                as: 'paymentType',
+                from: 'payment_type',
+                localField: 'paymentTypeId',
+                foreignField: '_id',
+                pipeline: [{ $project: { paymentTypeName: 1 } }],
+              },
+            },
+            {
+              $unwind: {
+                path: '$paymentType',
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $lookup: {
+                as: 'receivedByUser',
+                from: 'user',
+                localField: 'receivedBy',
+                foreignField: '_id',
+                pipeline: [{ $project: SAFE_USER_PROJECTION }],
+              },
+            },
+            {
+              $unwind: {
+                path: '$receivedByUser',
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            // The idempotency key is a client secret of sorts and the audit
+            // trail's business is elsewhere — neither belongs on this screen.
+            { $project: { idempotencyKey: 0 } },
+          ],
+        },
+      },
+
+      // The audit trail: what changed, by whom, newest first. `changedFields`
+      // is an object keyed by field name, so it is turned into a flat array a
+      // timeline can render directly. `snapshot` is never projected.
+      {
+        $lookup: {
+          as: 'history',
+          from: 'order_history',
+          localField: '_id',
+          foreignField: 'orderId',
+          pipeline: [
+            { $sort: { createdAt: -1 } },
+            { $limit: ORDER_HISTORY_LIMIT },
+            {
+              $lookup: {
+                as: 'changedByUser',
+                from: 'user',
+                localField: 'changedBy',
+                foreignField: '_id',
+                pipeline: [{ $project: SAFE_USER_PROJECTION }],
+              },
+            },
+            {
+              $unwind: {
+                path: '$changedByUser',
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $project: {
+                action: 1,
+                createdAt: 1,
+                changedBy: 1,
+                changedByUser: 1,
+                changes: {
+                  $map: {
+                    as: 'change',
+                    input: {
+                      $objectToArray: { $ifNull: ['$changedFields', {}] },
+                    },
+                    in: {
+                      field: '$$change.k',
+                      from: '$$change.v.from',
+                      to: '$$change.v.to',
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    if (!order) {
+      this.logger.error(`${base} unknown/out-of-scope order code ${code}`);
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Order not found',
+      });
+    }
+
+    // `orderStatusId: 6a58…53d → 6a58…53e` means nothing to a reader, so every
+    // foreign key in the trail gets its label attached (CONFIRMED → RECEIVED).
+    // Generic, off the schema's own `ref`s — no per-field mapping to maintain.
+    await this.historyLabelService.labelChanges(Order.name, order.history);
+
+    this.logger.log(`${base} has successfully retrieved order ${code}`);
+    return order;
   }
 
   // Export the filtered orders (same params as findAll, no pagination) as a
@@ -1376,6 +1953,9 @@ export class OrderService {
 
   async createOrderItem(orderId: string, data: CreateOrderItemDto) {
     this.can('CREATE', 'OrderItem');
+    // A hand-set price moves what the customer owes, so it carries the same
+    // permission as a manual discount rather than riding on "can add a line".
+    if (data.unitPrice !== undefined) this.can('UPDATE', 'Payment');
     const platform = this.req.data.platform;
     const { phone } = this.req.user;
     const base = `[${platform}] ${phone}`;
@@ -1417,22 +1997,41 @@ export class OrderService {
     }
 
     const userId = new Types.ObjectId(this.req.user.userId);
-    // Per-garment row: the same item may appear multiple times in one order with
-    // different condition/colour, so we insert rather than upsert-by-(orderId,
-    // itemId). unitPrice/lineTotal are NOT taken from the client — reprice()
-    // resolves them server-side from the catalog and snapshots them.
-    const orderItem = new this.orderItemModel({
-      itemId: item._id,
+
+    // Adding a garment the order already carries — same item, service type,
+    // condition and colour — counts it again rather than laying a second,
+    // identical row beside the first. Anything that differs is still its own
+    // row; that is what per-garment rows are for.
+    const key = this.lineKey(data);
+    const siblings = await this.orderItemModel.find({
       orderId: order._id,
+      itemId: item._id,
       serviceTypeId: new Types.ObjectId(data.serviceTypeId),
-      quantity: data.quantity,
-      unitPrice: 0,
-      lineTotal: 0,
-      condition: data.condition ?? OrderItemConditionEnum.NORMAL,
-      colour: data.colour,
     });
-    orderItem.$locals.changedBy = userId;
-    await orderItem.save();
+    const existing = siblings.find((row) => this.lineKey(row) === key);
+
+    if (existing) {
+      existing.quantity += data.quantity;
+      // A freshly agreed price replaces the old one; omitting it keeps
+      // whatever the line was already worth.
+      if (data.unitPrice !== undefined) existing.unitPrice = data.unitPrice;
+      existing.$locals.changedBy = userId;
+      await existing.save();
+    } else {
+      const orderItem = new this.orderItemModel({
+        itemId: item._id,
+        orderId: order._id,
+        serviceTypeId: new Types.ObjectId(data.serviceTypeId),
+        quantity: data.quantity,
+        // lineTotal is a placeholder — reprice() computes it right after.
+        unitPrice: data.unitPrice ?? 0,
+        lineTotal: 0,
+        condition: data.condition ?? OrderItemConditionEnum.NORMAL,
+        colour: data.colour,
+      });
+      orderItem.$locals.changedBy = userId;
+      await orderItem.save();
+    }
 
     await this.reprice(order._id, userId);
 
