@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { ApiSuccessResponse } from 'src/dto/swagger.dto';
 import { HistoryActionEnum } from 'src/schema/admin/admin.dto';
+import { OrderStatusEnum } from 'src/schema/order/order.dto';
 import { OrderCurrencyEntity } from './order-currency.entity';
 import { OrderCustomerEntity } from './order-customer.entity';
 import { OrderItemEntity } from './order-item.entity';
@@ -52,8 +53,23 @@ export class OrderHistoryEntryEntity {
   @ApiProperty({ example: '64b8c9f1e4b0a2d3c4f5g6h' })
   _id: string;
 
-  @ApiProperty({ enum: HistoryActionEnum, example: HistoryActionEnum.UPDATE })
+  @ApiProperty({
+    enum: HistoryActionEnum,
+    example: HistoryActionEnum.UPDATE,
+    description:
+      'UPDATE for an ordinary edit, CANCEL when the work was called off.',
+  })
   action: HistoryActionEnum;
+
+  @ApiProperty({
+    required: false,
+    example: 'washing had not actually started',
+    description:
+      'Why the change was made, from the `x-change-reason` header the ' +
+      'request carried. Absent only on entries written before the header ' +
+      'was required.',
+  })
+  reason?: string;
 
   @ApiProperty({
     type: [OrderHistoryChangeEntity],
@@ -104,6 +120,30 @@ export class OrderPaymentEntity {
 
   @ApiProperty({ type: OrderCustomerEntity, required: false })
   receivedByUser?: OrderCustomerEntity;
+}
+
+/**
+ * Where this order can go next. Published so a client renders its status
+ * actions from the API rather than keeping its own copy of the workflow —
+ * which is how the two drift apart.
+ */
+export class OrderAvailableTransitionsEntity {
+  @ApiProperty({
+    enum: OrderStatusEnum,
+    isArray: true,
+    example: [
+      OrderStatusEnum.CONFIRMED,
+      OrderStatusEnum.WASHING,
+      OrderStatusEnum.READY,
+      OrderStatusEnum.DELIVERED,
+      OrderStatusEnum.CANCELLED,
+    ],
+    description:
+      'Every status this order may be moved to, cancellation included. ' +
+      'Empty from DELIVERED and CANCELLED, which are terminal; never ' +
+      'contains DRAFT, which no order may return to.',
+  })
+  allowed: OrderStatusEnum[];
 }
 
 /**
@@ -232,6 +272,9 @@ export class OrderDetailEntity {
     description: 'Audit trail, newest first, capped at the latest 100 entries',
   })
   history: OrderHistoryEntryEntity[];
+
+  @ApiProperty({ type: OrderAvailableTransitionsEntity })
+  availableTransitions: OrderAvailableTransitionsEntity;
 }
 
 export class OrderDetailResponseEntity extends ApiSuccessResponse {

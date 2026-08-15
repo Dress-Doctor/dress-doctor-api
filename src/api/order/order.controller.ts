@@ -25,7 +25,12 @@ import {
 } from '@nestjs/swagger';
 import { type Response } from 'express';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
-import { ApiSuccessResponse, xApiKey, xApiSecret } from 'src/dto/swagger.dto';
+import {
+  ApiSuccessResponse,
+  xApiKey,
+  xApiSecret,
+  xChangeReason,
+} from 'src/dto/swagger.dto';
 import {
   CheckAccess,
   CheckTypeEnum,
@@ -41,6 +46,7 @@ import {
 import { ExportOrderDto } from './dto/export-order.dto';
 import { FindOrderDto } from './dto/find-order.dto';
 import { OrderCodeParamsDto } from './dto/order-code-params.dto';
+import { TransitionOrderDto } from './dto/transition-order.dto';
 import { UpdateOrderDraftDto } from './dto/update-order-draft.dto';
 import {
   OrderItemParamsDto,
@@ -48,6 +54,7 @@ import {
 } from './dto/update-order-item.dto';
 import { FindAllOrderWithItemsEntity } from './entities/find-all-order-with-items.entity';
 import { OrderDetailResponseEntity } from './entities/order-detail.entity';
+import { OrderItemHistoryResponseEntity } from './entities/order-item-history.entity';
 import { OrderCreatedEntity } from './entities/order-created.entity';
 import { OrderKpiEntity } from './entities/order-kpi.entity';
 import { OrderService } from './order.service';
@@ -55,6 +62,7 @@ import { OrderService } from './order.service';
 @ApiHeader(xApiKey)
 @Controller('orders')
 @ApiHeader(xApiSecret)
+@ApiHeader(xChangeReason)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
 @ApiBearerAuth('access-token')
@@ -218,7 +226,28 @@ export class OrderController {
   @Patch(':orderId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Update draft inputs (weight/manualDiscount/promo)',
+    summary: 'Edit a draft order',
+    description: [
+      'Everything about a DRAFT is editable — who it is for, where it is',
+      'filed, how it is priced, its dates and its note. A draft is the order',
+      'before anyone is committed to it: no payment can exist on it, and no',
+      'quota or promo has been spent, so there is nothing downstream to',
+      'contradict. Anything past DRAFT is refused with ORDER_NOT_DRAFT;',
+      'a status move is POST /orders/:orderId/transitions and garments are',
+      'the /items endpoints.',
+      '',
+      'Only the fields sent are touched. The rules booking applies are',
+      're-checked here: the office must be one the caller is posted to, the',
+      'customer must be in their scope and hold no other draft (DRAFT_EXISTS),',
+      'PER_KG needs a weight (WEIGHT_REQUIRED), and `orderAmount`/',
+      '`manualDiscount` additionally require UPDATE Payment because they move',
+      'what the customer owes. Send `orderAmount: 0` to hand pricing back to',
+      'the engine and an empty `note` to clear it.',
+      '',
+      'The edit and the reprice that follows it share one transaction, so a',
+      'reprice the change makes impossible (PRICE_NOT_FOUND when switching to',
+      'PER_PIECE with an unpriced garment) leaves the order exactly as it was.',
+    ].join(' '),
   })
   @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
   async updateOrderDraft(
@@ -243,6 +272,31 @@ export class OrderController {
     this.logger.log(log);
 
     return await this.orderService.createOrderItem(orderId, data);
+  }
+
+  @Get(':orderId/items/history')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "The audit trail of an order's garments",
+    description:
+      'Every line added, corrected or removed on this order, newest first ' +
+      '(capped at 100 entries). Includes lines that are no longer on the ' +
+      'order: a removed garment keeps its trail, and each entry names the ' +
+      'garment and what the line held at the time. Readable by whoever may ' +
+      'read the order itself.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, type: OrderItemHistoryResponseEntity })
+  async getOrderItemHistory(
+    @Req() req: AppRequestWithUser,
+    @Param() params: OrderParamsDto,
+  ) {
+    const { platform } = req.data;
+    const phone = req.user.phone;
+    this.logger.log(
+      `[${platform}] ${phone} is fetching the garment history of order ${params.orderId}`,
+    );
+
+    return await this.orderService.findOrderItemHistory(params);
   }
 
   @Put(':orderId/items/:orderItemId')
@@ -276,6 +330,42 @@ export class OrderController {
     this.logger.log(log);
 
     return await this.orderService.deleteOrderItem(params);
+  }
+
+  @Post(':orderId/transitions')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Move an order to another status',
+    description:
+      'The one way an order changes status. Send where it should go; a live ' +
+      'order may be set to whatever status it is really in, in either ' +
+      'direction, so staff who find a bag two steps further along do not have ' +
+      'to walk it there one move at a time.\n\n' +
+      'Only two rules close anything off:\n\n' +
+      '- **DELIVERED and CANCELLED are terminal.** Nothing moves either.\n' +
+      '- **DRAFT is never a destination.** A draft is editable and has spent ' +
+      'nothing; letting a live order fall back into one would reopen its ' +
+      'garments and let its subscription quota and promo be spent twice.\n\n' +
+      'Leaving DRAFT for anywhere but CANCELLED requires at least one ' +
+      'garment (400 ORDER_EMPTY) and is what takes the subscription quota ' +
+      'and promo use; cancelling a live order hands them back and is logged ' +
+      'as CANCEL. Anything else is 409 INVALID_STATUS_TRANSITION, whose body ' +
+      'lists the statuses that were allowed instead — the same list the ' +
+      'detail read publishes as `availableTransitions.allowed`. The ' +
+      '`x-change-reason` header is recorded against the entry, so the trail ' +
+      'says why as well as what.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async transitionOrder(
+    @Req() req: AppRequestWithUser,
+    @Param() { orderId }: OrderParamsDto,
+    @Body() { target }: TransitionOrderDto,
+  ) {
+    const { platform } = req.data;
+    this.logger.log(
+      `[${platform}] ${req.user.phone} is moving order ${orderId} to ${target}`,
+    );
+    return await this.orderService.transitionOrder(orderId, target);
   }
 
   @Post(':orderId/confirm')

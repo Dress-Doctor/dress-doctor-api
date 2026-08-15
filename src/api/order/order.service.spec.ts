@@ -16,6 +16,7 @@ import { Currency } from 'src/schema/catalog/currency.schema';
 import { Item } from 'src/schema/catalog/item.schema';
 import { OfficeUser } from 'src/schema/office/office-user.schema';
 import { Office } from 'src/schema/office/office.schema';
+import { OrderItemHistory } from 'src/schema/order/order-item-history.schema';
 import { OrderItem } from 'src/schema/order/order-item.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
 import {
@@ -33,8 +34,14 @@ import { Subscription } from 'src/schema/subscription/subscription.schema';
 import { User } from 'src/schema/user/user.schema';
 import { PricingService } from '../pricing/pricing.service';
 import { AppAbility } from 'src/helper/casl/casl.dto';
+import { HistoryActionEnum } from 'src/schema/admin/admin.dto';
 import { OrderEvents } from './order.events';
-import { OrderService } from './order.service';
+import {
+  OrderService,
+  TransitionKindEnum,
+  availableTransitionsFrom,
+  classifyTransition,
+} from './order.service';
 
 // A real (unrestricted) ability so scopeFilter's rulesToQuery works and yields
 // an empty (unrestricted) filter in these tests.
@@ -70,8 +77,10 @@ describe('OrderService', () => {
   let officeModel: { findOne: jest.Mock };
   let eventEmitter: { emit: jest.Mock };
   let subscriptionModel: { updateOne: jest.Mock };
-  let promoUsageModel: { create: jest.Mock };
+  let promoUsageModel: { create: jest.Mock; deleteOne: jest.Mock };
   let promoCodeModel: { updateOne: jest.Mock };
+  let customerModel: { findOneAndUpdate: jest.Mock };
+  let orderItemHistoryModel: { aggregate: jest.Mock };
   let pricingService: { priceOrder: jest.Mock };
   let historyLabelService: { labelChanges: jest.Mock };
   let connection: { startSession: jest.Mock };
@@ -156,10 +165,15 @@ describe('OrderService', () => {
     subscriptionModel = {
       updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
     };
-    promoUsageModel = { create: jest.fn().mockResolvedValue({}) };
+    promoUsageModel = {
+      create: jest.fn().mockResolvedValue({}),
+      deleteOne: jest.fn().mockResolvedValue({ deletedCount: 1 }),
+    };
     promoCodeModel = {
       updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
     };
+    customerModel = { findOneAndUpdate: jest.fn().mockResolvedValue({}) };
+    orderItemHistoryModel = { aggregate: jest.fn().mockResolvedValue([]) };
     pricingService = { priceOrder: jest.fn() };
     historyLabelService = {
       labelChanges: jest
@@ -197,7 +211,7 @@ describe('OrderService', () => {
         {
           provide: REQUEST,
           useValue: {
-            data: { platform: 'WEB' },
+            data: { platform: 'WEB', reason: 'because I said so' },
             user: {
               phone: '600',
               userId: new Types.ObjectId().toString(),
@@ -214,14 +228,19 @@ describe('OrderService', () => {
           provide: getModelToken(OrderStatus.name),
           useValue: orderStatusModel,
         },
+        {
+          provide: getModelToken(OrderItemHistory.name),
+          useValue: orderItemHistoryModel,
+        },
         { provide: getModelToken(Office.name), useValue: officeModel },
         { provide: getModelToken(OfficeUser.name), useValue: {} },
         { provide: getModelToken(PickupRequest.name), useValue: {} },
         { provide: getModelToken(PickupStatus.name), useValue: {} },
         {
           provide: getModelToken(Customer.name),
-          // onOrderCreated bumps the customer's lastOrderAt rollup.
-          useValue: { findOneAndUpdate: jest.fn().mockResolvedValue({}) },
+          // onOrderCreated bumps the customer's lastOrderAt rollup, and a
+          // customer move rebuilds it on both sides.
+          useValue: customerModel,
         },
         {
           provide: getModelToken(Subscription.name),
@@ -245,6 +264,7 @@ describe('OrderService', () => {
       _id: new Types.ObjectId(),
       orderCode: 'OR-000123',
       amountPaid: 0,
+      createdAt: new Date('2026-03-04T09:15:00.000Z'),
     };
 
     const dto = (over: Record<string, unknown> = {}) =>
@@ -308,6 +328,19 @@ describe('OrderService', () => {
         message: 'Order created successfully',
         data: { _id: created._id, orderCode: 'OR-000123' },
       });
+    });
+
+    it("stamps lastOrderAt with the order's own createdAt", async () => {
+      // The same field `recomputeLastOrderAt` rebuilds the rollup from. Stamp
+      // a fresh `new Date()` here instead and the value shifts by the width of
+      // the write the first time the order changes customer.
+      await service.createOrder(dto());
+
+      expect(customerModel.findOneAndUpdate).toHaveBeenCalledWith(
+        expect.anything(),
+        { lastOrderAt: created.createdAt },
+        expect.anything(),
+      );
     });
 
     it('creates an empty order when items are omitted, exactly as before', async () => {
@@ -503,11 +536,14 @@ describe('OrderService', () => {
       expect(orderModel.findOneAndUpdate).not.toHaveBeenCalled();
     });
 
-    it('rejects an illegal transition (DRAFT -> READY)', async () => {
-      setOrder(OrderStatusEnum.DRAFT);
+    it('rejects a move back into DRAFT', async () => {
+      setOrder(OrderStatusEnum.CONFIRMED);
 
       await expect(
-        service.readyOrder('507f1f77bcf86cd799439011'),
+        service.transitionOrder(
+          '507f1f77bcf86cd799439011',
+          OrderStatusEnum.DRAFT,
+        ),
       ).rejects.toThrow(ConflictException);
       expect(orderModel.findOneAndUpdate).not.toHaveBeenCalled();
       expect(eventEmitter.emit).not.toHaveBeenCalled();
@@ -703,16 +739,307 @@ describe('OrderService', () => {
       );
     });
 
+    /**
+     * The edit itself is the FIRST findOneAndUpdate of the call; reprice's
+     * snapshot follows it.
+     */
+    const editWrite = () =>
+      orderModel.findOneAndUpdate.mock.calls[0] as unknown as [
+        unknown,
+        { $set?: Record<string, unknown>; $unset?: Record<string, unknown> },
+        { context?: { reason?: string; changedBy?: unknown } },
+      ];
+
     it('clears the agreed price when the draft sends 0', async () => {
       await service.updateOrderDraft('507f1f77bcf86cd799439011', {
         orderAmount: 0,
       });
 
-      const [, update] = orderModel.updateOne.mock.calls.at(-1) as [
-        unknown,
-        { $unset?: Record<string, unknown> },
-      ];
+      const [, update] = editWrite();
       expect(update.$unset).toEqual({ manualOrderAmount: 1 });
+    });
+
+    it('writes the edit through the hooked path, carrying the reason', async () => {
+      // updateOne is invisible to the history hook, which is attached to
+      // findOneAndUpdate. An edit that went that way left no audit entry and
+      // dropped the x-change-reason the caller was obliged to send.
+      await service.updateOrderDraft('507f1f77bcf86cd799439011', {
+        note: 'No starch on the blue shirt',
+      });
+
+      expect(orderModel.updateOne).not.toHaveBeenCalled();
+
+      const [, update, options] = editWrite();
+      expect(update.$set).toEqual({ note: 'No starch on the blue shirt' });
+      expect(options.context?.reason).toBe('because I said so');
+      expect(options.context?.changedBy).toBeDefined();
+    });
+
+    it('records a cleared note as an edit rather than as nothing', async () => {
+      await service.updateOrderDraft('507f1f77bcf86cd799439011', {
+        note: '  ',
+      });
+
+      const [, update, options] = editWrite();
+      expect(update.$unset).toEqual({ note: 1 });
+      expect(update.$set).toBeUndefined();
+      expect(options.context?.reason).toBe('because I said so');
+    });
+
+    it('skips the write entirely when the body asks for nothing', async () => {
+      // Mongo rejects an empty update operator; the reprice still runs.
+      await service.updateOrderDraft('507f1f77bcf86cd799439011', {});
+
+      expect(orderModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      const [, update] = editWrite();
+      expect(update.$set).toBeUndefined();
+      expect(update.$unset).toBeUndefined();
+    });
+
+    it('edits and reprices inside one transaction', async () => {
+      // The reprice can refuse what the edit asked for (PRICE_NOT_FOUND on a
+      // switch to PER_PIECE), and a rejected reprice must take the edit with
+      // it rather than leave a new pricing model beside stale amounts.
+      await service.updateOrderDraft('507f1f77bcf86cd799439011', {
+        note: 'Handle with care',
+      });
+
+      const [, , editOptions] = orderModel.findOneAndUpdate.mock.calls[0] as [
+        unknown,
+        unknown,
+        { session?: unknown },
+      ];
+      const [, , repriceOptions] = orderModel.findOneAndUpdate.mock
+        .calls[1] as [unknown, unknown, { session?: unknown }];
+      expect(editOptions.session).toBeDefined();
+      expect(repriceOptions.session).toBe(editOptions.session);
+    });
+  });
+
+  describe('editing a draft beyond its pricing inputs', () => {
+    const ORDER_ID = '507f1f77bcf86cd799439011';
+
+    /** The order under edit; a second findOne looks for a rival draft. */
+    const editing = (extra: Record<string, unknown> = {}) =>
+      orderModel.findOne.mockReturnValueOnce({
+        populate: jest
+          .fn()
+          .mockResolvedValue(orderWithStatus(OrderStatusEnum.DRAFT, extra)),
+      });
+
+    const editWrite = () =>
+      orderModel.findOneAndUpdate.mock.calls[0] as unknown as [
+        unknown,
+        { $set?: Record<string, unknown> },
+        unknown,
+      ];
+
+    beforeEach(() => {
+      orderModel.findById.mockResolvedValue({
+        _id: new Types.ObjectId(),
+        pricingModel: 'PER_PIECE',
+        customerId: new Types.ObjectId(),
+        totalWeightKg: 0,
+        manualDiscount: 0,
+        amountPaid: 0,
+      });
+      pricingService.priceOrder.mockResolvedValue({
+        pricingModel: 'PER_PIECE',
+        lines: [],
+        subtotal: 0,
+        manualDiscount: 0,
+        promoDiscount: 0,
+        total: 0,
+        currencyId: new Types.ObjectId(),
+        promoCodeId: null,
+        subscriptionId: null,
+        quotaConsumed: 0,
+      });
+    });
+
+    /**
+     * `recomputeLastOrderAt` reads the customer's newest remaining order:
+     * findOne(...).sort(...).select('createdAt').
+     */
+    const newestOrder = (createdAt: Date | null) =>
+      orderModel.findOne.mockReturnValueOnce({
+        sort: () => ({
+          select: () => Promise.resolve(createdAt ? { createdAt } : null),
+        }),
+      });
+
+    it('moves the draft to a customer who holds none', async () => {
+      editing();
+      // The rival-draft lookup finds nothing.
+      orderModel.findOne.mockResolvedValueOnce(null);
+      newestOrder(new Date('2026-01-01T00:00:00.000Z')); // customer left
+      newestOrder(new Date('2026-02-01T00:00:00.000Z')); // customer gained
+      const customerId = new Types.ObjectId();
+
+      await service.updateOrderDraft(ORDER_ID, {
+        customerId: customerId.toString(),
+      });
+
+      const [, update] = editWrite();
+      expect(update.$set?.customerId).toEqual(customerId);
+    });
+
+    it('rebuilds lastOrderAt on both customers after a move', async () => {
+      // The customer an order leaves may still hold older ones, so the rollup
+      // is recomputed from what remains rather than blindly bumped.
+      const previous = new Types.ObjectId();
+      const next = new Types.ObjectId();
+      const olderOrder = new Date('2026-01-01T00:00:00.000Z');
+      const movedOrder = new Date('2026-02-01T00:00:00.000Z');
+
+      editing({ customerId: previous });
+      orderModel.findOne.mockResolvedValueOnce(null);
+      newestOrder(olderOrder);
+      newestOrder(movedOrder);
+
+      await service.updateOrderDraft(ORDER_ID, { customerId: next.toString() });
+
+      expect(customerModel.findOneAndUpdate).toHaveBeenCalledWith(
+        { userId: previous },
+        { lastOrderAt: olderOrder },
+        expect.anything(),
+      );
+      expect(customerModel.findOneAndUpdate).toHaveBeenCalledWith(
+        { userId: next },
+        { lastOrderAt: movedOrder },
+        expect.anything(),
+      );
+    });
+
+    it('clears lastOrderAt for a customer left with no orders at all', async () => {
+      // Keeping the date of an order that is no longer theirs would hold them
+      // out of the inactivity scan on the strength of someone else's laundry.
+      const previous = new Types.ObjectId();
+      editing({ customerId: previous });
+      orderModel.findOne.mockResolvedValueOnce(null);
+      newestOrder(null);
+      newestOrder(new Date('2026-02-01T00:00:00.000Z'));
+
+      await service.updateOrderDraft(ORDER_ID, {
+        customerId: new Types.ObjectId().toString(),
+      });
+
+      expect(customerModel.findOneAndUpdate).toHaveBeenCalledWith(
+        { userId: previous },
+        { $unset: { lastOrderAt: 1 } },
+        expect.anything(),
+      );
+    });
+
+    it('leaves the rollups alone when the customer is unchanged', async () => {
+      const customerId = new Types.ObjectId();
+      editing({ customerId });
+
+      await service.updateOrderDraft(ORDER_ID, {
+        customerId: customerId.toString(),
+        note: 'Same customer, new note',
+      });
+
+      expect(customerModel.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('refuses a customer who already holds a draft', async () => {
+      // Otherwise the edit would make a state booking itself refuses to
+      // create: two drafts for one customer.
+      editing();
+      orderModel.findOne.mockResolvedValueOnce({ _id: new Types.ObjectId() });
+
+      await expect(
+        service.updateOrderDraft(ORDER_ID, {
+          customerId: new Types.ObjectId().toString(),
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(orderModel.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('does not look for a rival draft when the customer is unchanged', async () => {
+      const customerId = new Types.ObjectId();
+      editing({ customerId });
+
+      await service.updateOrderDraft(ORDER_ID, {
+        customerId: customerId.toString(),
+      });
+
+      // Only the order under edit was fetched.
+      expect(orderModel.findOne).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a switch to per-kg with no weight on file', async () => {
+      editing({ pricingModel: PricingModelEnum.PER_PIECE, totalWeightKg: 0 });
+
+      await expect(
+        service.updateOrderDraft(ORDER_ID, {
+          pricingModel: PricingModelEnum.PER_KG,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(orderModel.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('refuses to clear the weight of an order priced by the kilo', async () => {
+      // The same mistake from the other direction: the model stays, the
+      // weight it needs goes.
+      editing({ pricingModel: PricingModelEnum.PER_KG, totalWeightKg: 20.5 });
+
+      await expect(
+        service.updateOrderDraft(ORDER_ID, { totalWeightKg: 0 }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('takes a weight and a switch to per-kg together', async () => {
+      editing({ pricingModel: PricingModelEnum.PER_PIECE, totalWeightKg: 0 });
+
+      await service.updateOrderDraft(ORDER_ID, {
+        pricingModel: PricingModelEnum.PER_KG,
+        totalWeightKg: 20.5,
+      });
+
+      const [, update] = editWrite();
+      expect(update.$set).toMatchObject({
+        pricingModel: PricingModelEnum.PER_KG,
+        totalWeightKg: 20.5,
+      });
+    });
+
+    it('refuses an unknown pickup agent', async () => {
+      editing();
+      userModel.exists.mockResolvedValueOnce(null);
+
+      await expect(
+        service.updateOrderDraft(ORDER_ID, {
+          pickedUpBy: new Types.ObjectId().toString(),
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(orderModel.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('refuses an unknown currency', async () => {
+      editing();
+      currencyModel.findById.mockResolvedValueOnce(null);
+
+      await expect(
+        service.updateOrderDraft(ORDER_ID, {
+          currencyId: new Types.ObjectId().toString(),
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('carries the dates through as sent', async () => {
+      editing();
+      const receivedAt = new Date('2026-08-01T09:00:00.000Z');
+      const estimatedDeliveryDate = new Date('2026-08-05T09:00:00.000Z');
+
+      await service.updateOrderDraft(ORDER_ID, {
+        receivedAt,
+        estimatedDeliveryDate,
+      });
+
+      const [, update] = editWrite();
+      expect(update.$set).toEqual({ receivedAt, estimatedDeliveryDate });
     });
   });
 
@@ -746,6 +1073,313 @@ describe('OrderService', () => {
       expect(sort).toHaveBeenCalledWith({ balanceDue: -1, createdAt: 1 });
       expect(res.total).toBe(2);
       expect(res.data).toHaveLength(1);
+    });
+  });
+
+  describe('workflow rules', () => {
+    const S = OrderStatusEnum;
+
+    // Steps may be skipped in both directions: a live order is set to whatever
+    // status it is really in.
+    it.each([
+      [S.DRAFT, S.CONFIRMED],
+      [S.DRAFT, S.READY],
+      [S.DRAFT, S.DELIVERED],
+      [S.CONFIRMED, S.RECEIVED],
+      [S.CONFIRMED, S.DELIVERED],
+      [S.READY, S.RECEIVED],
+      [S.WASHING, S.CONFIRMED],
+    ])('%s → %s is an ordinary move', (from, to) => {
+      expect(classifyTransition(from, to)).toBe(TransitionKindEnum.NORMAL);
+    });
+
+    it.each([S.DRAFT, S.CONFIRMED, S.RECEIVED, S.WASHING, S.READY])(
+      'an order can be cancelled from %s',
+      (from) => {
+        expect(classifyTransition(from, S.CANCELLED)).toBe(
+          TransitionKindEnum.CANCELLATION,
+        );
+      },
+    );
+
+    it.each([
+      [S.DELIVERED, S.CANCELLED],
+      [S.CANCELLED, S.DRAFT],
+      [S.DELIVERED, S.READY],
+      [S.CANCELLED, S.CONFIRMED],
+    ])('%s → %s is refused: terminal', (from, to) => {
+      expect(classifyTransition(from, to)).toBeUndefined();
+    });
+
+    it.each([S.CONFIRMED, S.RECEIVED, S.WASHING, S.READY])(
+      '%s → DRAFT is refused: a live order never goes back to a draft',
+      (from) => {
+        expect(classifyTransition(from, S.DRAFT)).toBeUndefined();
+      },
+    );
+
+    it('refuses a move to the status the order is already in', () => {
+      expect(classifyTransition(S.WASHING, S.WASHING)).toBeUndefined();
+      expect(classifyTransition(S.DRAFT, S.DRAFT)).toBeUndefined();
+    });
+
+    it('publishes what is reachable from a status', () => {
+      expect(availableTransitionsFrom(S.WASHING)).toEqual({
+        allowed: [S.CONFIRMED, S.RECEIVED, S.READY, S.DELIVERED, S.CANCELLED],
+      });
+      expect(availableTransitionsFrom(S.DRAFT)).toEqual({
+        allowed: [
+          S.CONFIRMED,
+          S.RECEIVED,
+          S.WASHING,
+          S.READY,
+          S.DELIVERED,
+          S.CANCELLED,
+        ],
+      });
+      expect(availableTransitionsFrom(S.DELIVERED)).toEqual({ allowed: [] });
+      expect(availableTransitionsFrom(S.CANCELLED)).toEqual({ allowed: [] });
+    });
+  });
+
+  describe('transitionOrder', () => {
+    const lastContext = () => {
+      const calls = orderModel.findOneAndUpdate.mock.calls as unknown as Array<
+        [unknown, unknown, { context?: Record<string, unknown> }]
+      >;
+      return calls[0][2].context ?? {};
+    };
+
+    it('moves an order forward and records a plain update', async () => {
+      setOrder(OrderStatusEnum.RECEIVED);
+
+      const msg = await service.transitionOrder(
+        '507f1f77bcf86cd799439011',
+        OrderStatusEnum.WASHING,
+      );
+
+      expect(msg).toBe('Order moved to WASHING');
+      expect(lastContext()).toMatchObject({
+        action: HistoryActionEnum.UPDATE,
+      });
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        OrderEvents.statusChanged,
+        expect.objectContaining({ kind: TransitionKindEnum.NORMAL }),
+      );
+    });
+
+    it('walks a status back as an ordinary move', async () => {
+      setOrder(OrderStatusEnum.WASHING);
+
+      const msg = await service.transitionOrder(
+        '507f1f77bcf86cd799439011',
+        OrderStatusEnum.RECEIVED,
+      );
+
+      expect(msg).toBe('Order moved to RECEIVED');
+      expect(lastContext()).toMatchObject({
+        action: HistoryActionEnum.UPDATE,
+      });
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        OrderEvents.statusChanged,
+        expect.objectContaining({ kind: TransitionKindEnum.NORMAL }),
+      );
+    });
+
+    it('records a cancellation under its own action', async () => {
+      setOrder(OrderStatusEnum.WASHING);
+
+      await service.transitionOrder(
+        '507f1f77bcf86cd799439011',
+        OrderStatusEnum.CANCELLED,
+      );
+
+      expect(lastContext()).toMatchObject({ action: HistoryActionEnum.CANCEL });
+    });
+
+    it('carries the caller’s reason into the audit context', async () => {
+      setOrder(OrderStatusEnum.RECEIVED);
+
+      await service.transitionOrder(
+        '507f1f77bcf86cd799439011',
+        OrderStatusEnum.WASHING,
+      );
+
+      expect(lastContext()).toMatchObject({ reason: 'because I said so' });
+    });
+
+    it('refuses a move into DRAFT without touching the order', async () => {
+      setOrder(OrderStatusEnum.RECEIVED);
+
+      await expect(
+        service.transitionOrder(
+          '507f1f77bcf86cd799439011',
+          OrderStatusEnum.DRAFT,
+        ),
+      ).rejects.toThrow(ConflictException);
+      expect(orderModel.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('skips ahead when the bag is further along than the console says', async () => {
+      setOrder(OrderStatusEnum.RECEIVED);
+
+      await expect(
+        service.transitionOrder(
+          '507f1f77bcf86cd799439011',
+          OrderStatusEnum.DELIVERED,
+        ),
+      ).resolves.toBe('Order moved to DELIVERED');
+    });
+
+    it('refuses to cancel a delivered order', async () => {
+      setOrder(OrderStatusEnum.DELIVERED);
+
+      await expect(
+        service.transitionOrder(
+          '507f1f77bcf86cd799439011',
+          OrderStatusEnum.CANCELLED,
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('tells a refused caller what it could have asked for', async () => {
+      setOrder(OrderStatusEnum.RECEIVED);
+
+      await expect(
+        service.transitionOrder(
+          '507f1f77bcf86cd799439011',
+          OrderStatusEnum.DRAFT,
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          code: 'INVALID_STATUS_TRANSITION',
+          allowed: [
+            OrderStatusEnum.CONFIRMED,
+            OrderStatusEnum.WASHING,
+            OrderStatusEnum.READY,
+            OrderStatusEnum.DELIVERED,
+            OrderStatusEnum.CANCELLED,
+          ],
+        },
+      });
+    });
+
+    it('demands garments of an empty draft going live, whatever the target', async () => {
+      setOrder(OrderStatusEnum.DRAFT);
+      orderItemModel.countDocuments.mockResolvedValue(0);
+
+      await expect(
+        service.transitionOrder(
+          '507f1f77bcf86cd799439011',
+          OrderStatusEnum.RECEIVED,
+        ),
+      ).rejects.toMatchObject({ response: { code: 'ORDER_EMPTY' } });
+    });
+
+    it('never demands garments of an order already past DRAFT', async () => {
+      setOrder(OrderStatusEnum.RECEIVED);
+      orderItemModel.countDocuments.mockResolvedValue(0);
+
+      await expect(
+        service.transitionOrder(
+          '507f1f77bcf86cd799439011',
+          OrderStatusEnum.CONFIRMED,
+        ),
+      ).resolves.toBe('Order moved to CONFIRMED');
+    });
+
+    it('lets an empty draft be cancelled', async () => {
+      setOrder(OrderStatusEnum.DRAFT);
+      orderItemModel.countDocuments.mockResolvedValue(0);
+
+      await expect(
+        service.transitionOrder(
+          '507f1f77bcf86cd799439011',
+          OrderStatusEnum.CANCELLED,
+        ),
+      ).resolves.toBe('Order cancelled successfully');
+    });
+  });
+
+  describe('releasing what confirming reserved', () => {
+    const committed = (status: OrderStatusEnum) =>
+      setOrder(status, {
+        quotaConsumed: 3,
+        subscriptionId: new Types.ObjectId(),
+        promoCodeId: new Types.ObjectId(),
+      });
+
+    it('hands quota and the promo use back when a confirmed order is cancelled', async () => {
+      committed(OrderStatusEnum.CONFIRMED);
+
+      await service.transitionOrder(
+        '507f1f77bcf86cd799439011',
+        OrderStatusEnum.CANCELLED,
+      );
+
+      expect(subscriptionModel.updateOne).toHaveBeenCalledWith(
+        expect.anything(),
+        { $inc: { remainingQuota: 3 } },
+        expect.anything(),
+      );
+      expect(promoUsageModel.deleteOne).toHaveBeenCalled();
+      expect(promoCodeModel.updateOne).toHaveBeenCalledWith(
+        expect.anything(),
+        { $inc: { usedCount: -1 } },
+        expect.anything(),
+      );
+    });
+
+    it('releases the same commitments when a started order is cancelled', async () => {
+      committed(OrderStatusEnum.WASHING);
+
+      await service.transitionOrder(
+        '507f1f77bcf86cd799439011',
+        OrderStatusEnum.CANCELLED,
+      );
+
+      expect(subscriptionModel.updateOne).toHaveBeenCalledWith(
+        expect.anything(),
+        { $inc: { remainingQuota: 3 } },
+        expect.anything(),
+      );
+    });
+
+    it('releases nothing when a draft is cancelled — it never took anything', async () => {
+      committed(OrderStatusEnum.DRAFT);
+
+      await service.transitionOrder(
+        '507f1f77bcf86cd799439011',
+        OrderStatusEnum.CANCELLED,
+      );
+
+      expect(subscriptionModel.updateOne).not.toHaveBeenCalled();
+      expect(promoUsageModel.deleteOne).not.toHaveBeenCalled();
+    });
+
+    it('leaves usedCount alone when there was no usage row to delete', async () => {
+      committed(OrderStatusEnum.CONFIRMED);
+      promoUsageModel.deleteOne.mockResolvedValue({ deletedCount: 0 });
+
+      await service.transitionOrder(
+        '507f1f77bcf86cd799439011',
+        OrderStatusEnum.CANCELLED,
+      );
+
+      expect(promoCodeModel.updateOne).not.toHaveBeenCalled();
+    });
+
+    it('moving between live statuses never releases anything', async () => {
+      committed(OrderStatusEnum.RECEIVED);
+
+      await service.transitionOrder(
+        '507f1f77bcf86cd799439011',
+        OrderStatusEnum.CONFIRMED,
+      );
+
+      expect(subscriptionModel.updateOne).not.toHaveBeenCalled();
+      expect(promoUsageModel.deleteOne).not.toHaveBeenCalled();
     });
   });
 
@@ -1155,6 +1789,75 @@ describe('OrderService', () => {
       expect(res.filename).toMatch(/\.xlsx$/);
       // XLSX is a zip archive — the first two bytes are the PK signature.
       expect(res.buffer.subarray(0, 2).toString('utf8')).toBe('PK');
+    });
+  });
+
+  describe('findOrderItemHistory', () => {
+    const ORDER_ID = new Types.ObjectId();
+
+    it('reads the trail through the snapshot, not the surviving lines', async () => {
+      // A removed garment's row is deleted outright, so its id is no longer on
+      // the order. Matching on the snapshot is what keeps that entry readable.
+      orderModel.findOne.mockReturnValue({
+        select: () => Promise.resolve({ _id: ORDER_ID, orderCode: 'OR-TEST' }),
+      });
+
+      await service.findOrderItemHistory({ orderId: ORDER_ID.toString() });
+
+      const [pipeline] = orderItemHistoryModel.aggregate.mock.calls[0] as [
+        Record<string, unknown>[],
+      ];
+      expect(pipeline[0]).toEqual({
+        $match: { 'snapshot.orderId': ORDER_ID },
+      });
+    });
+
+    it('never returns the stored snapshot itself', async () => {
+      orderModel.findOne.mockReturnValue({
+        select: () => Promise.resolve({ _id: ORDER_ID, orderCode: 'OR-TEST' }),
+      });
+
+      await service.findOrderItemHistory({ orderId: ORDER_ID.toString() });
+
+      const [pipeline] = orderItemHistoryModel.aggregate.mock.calls[0] as [
+        Record<string, Record<string, unknown>>[],
+      ];
+      const projection = pipeline.find((stage) => stage.$project)?.$project;
+      expect(projection).toBeDefined();
+      expect(projection).not.toHaveProperty('snapshot');
+      // The summary fields are read off it instead.
+      expect(projection?.quantity).toBe('$snapshot.quantity');
+    });
+
+    it('labels the foreign keys the trail carries', async () => {
+      const entries = [{ changes: [{ field: 'serviceTypeId' }] }];
+      orderModel.findOne.mockReturnValue({
+        select: () => Promise.resolve({ _id: ORDER_ID, orderCode: 'OR-TEST' }),
+      });
+      orderItemHistoryModel.aggregate.mockResolvedValue(entries);
+
+      const res = await service.findOrderItemHistory({
+        orderId: ORDER_ID.toString(),
+      });
+
+      expect(historyLabelService.labelChanges).toHaveBeenCalledWith(
+        OrderItem.name,
+        entries,
+      );
+      expect(res).toBe(entries);
+    });
+
+    it("refuses an order outside the caller's scope", async () => {
+      // The scope filter is what makes the id unguessable-in-practice: an
+      // order the caller may not read simply is not found.
+      orderModel.findOne.mockReturnValue({
+        select: () => Promise.resolve(null),
+      });
+
+      await expect(
+        service.findOrderItemHistory({ orderId: ORDER_ID.toString() }),
+      ).rejects.toThrow(NotFoundException);
+      expect(orderItemHistoryModel.aggregate).not.toHaveBeenCalled();
     });
   });
 });

@@ -20,6 +20,10 @@ import {
 import { Workbook } from 'exceljs';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
+import {
+  applyAuditLocals,
+  auditContext,
+} from 'src/helper/service/audit-context';
 import { HistoryActionEnum } from 'src/schema/admin/admin.dto';
 import { scopeFilter, scopePermitsCustomer } from 'src/helper/casl/casl-scope';
 import { AppUtilService } from 'src/helper/service/app-util.service';
@@ -30,6 +34,7 @@ import {
 } from 'src/helper/service/history-label.service';
 import { Currency } from 'src/schema/catalog/currency.schema';
 import { Item } from 'src/schema/catalog/item.schema';
+import { OrderItemHistory } from 'src/schema/order/order-item-history.schema';
 import { OrderItem } from 'src/schema/order/order-item.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
 import {
@@ -48,7 +53,10 @@ import { PromoCodeUsage } from 'src/schema/promo/promo-code-usage.schema';
 import { Subscription } from 'src/schema/subscription/subscription.schema';
 import { type PaginationDto } from 'src/dto/request-data.dto';
 import { PricingService } from '../pricing/pricing.service';
-import { CreateOrderItemDto } from './dto/create-order-item.dto';
+import {
+  CreateOrderItemDto,
+  OrderParamsDto,
+} from './dto/create-order-item.dto';
 import {
   CreateOrderDto,
   CreateOrderWithPickupDto,
@@ -282,6 +290,20 @@ export type OrderHistoryEntry = {
 };
 
 /**
+ * One audit entry on a garment line. Everything `OrderHistoryEntry` carries,
+ * plus which line it was about — and, because a line can be removed and its
+ * row deleted outright, what that line looked like at the time: a trail that
+ * said only "a garment was removed" would name nothing a reader could check.
+ */
+export type OrderItemHistoryEntry = OrderHistoryEntry & {
+  orderItemId: Types.ObjectId;
+  item?: { _id: Types.ObjectId; itemName?: string };
+  quantity?: number;
+  colour?: string;
+  condition?: string;
+};
+
+/**
  * One order with every join a detail screen needs, plus its audit trail.
  * Loose on the order's own fields (the aggregation returns the document as
  * stored) and precise about what the endpoint adds on top.
@@ -290,6 +312,10 @@ export type OrderDetail = Record<string, unknown> & {
   _id: Types.ObjectId;
   orderCode: string;
   history: OrderHistoryEntry[];
+  /** The order status row, joined; carries the name the workflow keys off. */
+  orderStatus?: { orderStatusName?: string };
+  /** Every status this order may be moved to. Filled in on read. */
+  availableTransitions?: { allowed: OrderStatusEnum[] };
 };
 
 // One flat row per order for the CSV/Excel export.
@@ -334,29 +360,87 @@ const ORDER_EXPORT_COLUMNS: { header: string; key: keyof OrderExportRow }[] = [
 ];
 
 /**
- * Legal next-states per status. Any transition not listed here is rejected with
- * INVALID_STATUS_TRANSITION. DELIVERED and CANCELLED are terminal.
+ * What a status move means. Two kinds, because only two consequences differ:
+ * the work carries on, or it is called off and the commitments it took are
+ * handed back.
  */
-const LEGAL_TRANSITIONS: Record<OrderStatusEnum, OrderStatusEnum[]> = {
-  [OrderStatusEnum.DRAFT]: [
-    OrderStatusEnum.CONFIRMED,
-    OrderStatusEnum.CANCELLED,
-  ],
-  [OrderStatusEnum.CONFIRMED]: [
-    OrderStatusEnum.RECEIVED,
-    OrderStatusEnum.CANCELLED,
-  ],
-  [OrderStatusEnum.RECEIVED]: [
-    OrderStatusEnum.WASHING,
-    OrderStatusEnum.CANCELLED,
-  ],
-  [OrderStatusEnum.WASHING]: [OrderStatusEnum.READY, OrderStatusEnum.CANCELLED],
-  [OrderStatusEnum.READY]: [
-    OrderStatusEnum.DELIVERED,
-    OrderStatusEnum.CANCELLED,
-  ],
-  [OrderStatusEnum.DELIVERED]: [],
-  [OrderStatusEnum.CANCELLED]: [],
+export enum TransitionKindEnum {
+  /** Any move along the lifecycle, in either direction. */
+  NORMAL = 'NORMAL',
+  /** The work is called off. Possible from anywhere not already finished. */
+  CANCELLATION = 'CANCELLATION',
+}
+
+/**
+ * The lifecycle, stated as the only two things actually forbidden.
+ *
+ * Staff routinely find an order is two steps further along than the console
+ * says — the bag was washed and shelved while nobody was at a screen. Walking
+ * it there one step at a time cost more than the ordering ever bought, so a
+ * live order may now be set to whatever status it is really in.
+ *
+ * What stays closed:
+ * - DELIVERED and CANCELLED are terminal. The laundry is out of the building
+ *   or the work was called off; nothing moves either.
+ * - DRAFT is never a destination. A draft is editable and has spent nothing:
+ *   letting a live order fall back into one would reopen its garments and let
+ *   its subscription quota and promo be spent a second time.
+ */
+const TERMINAL_STATUSES: readonly OrderStatusEnum[] = [
+  OrderStatusEnum.DELIVERED,
+  OrderStatusEnum.CANCELLED,
+];
+
+/** Statuses no order may be moved *to* — see the note above. */
+const UNREACHABLE_STATUSES: readonly OrderStatusEnum[] = [
+  OrderStatusEnum.DRAFT,
+];
+
+/** Every move available from a status — published to clients on the detail read. */
+export function availableTransitionsFrom(status: OrderStatusEnum): {
+  allowed: OrderStatusEnum[];
+} {
+  if (TERMINAL_STATUSES.includes(status)) return { allowed: [] };
+
+  return {
+    allowed: Object.values(OrderStatusEnum).filter(
+      (candidate) =>
+        candidate !== status && !UNREACHABLE_STATUSES.includes(candidate),
+    ),
+  };
+}
+
+/**
+ * What kind of move `current → target` is, or undefined when it is no legal
+ * move at all. The caller names a target, never a kind, so nothing about how
+ * the move is recorded is left to the client.
+ */
+export function classifyTransition(
+  current: OrderStatusEnum,
+  target: OrderStatusEnum,
+): TransitionKindEnum | undefined {
+  if (!availableTransitionsFrom(current).allowed.includes(target)) {
+    return undefined;
+  }
+
+  return target === OrderStatusEnum.CANCELLED
+    ? TransitionKindEnum.CANCELLATION
+    : TransitionKindEnum.NORMAL;
+}
+
+/** The audit action a move of each kind is recorded under. */
+const HISTORY_ACTION_BY_KIND: Record<TransitionKindEnum, HistoryActionEnum> = {
+  [TransitionKindEnum.NORMAL]: HistoryActionEnum.UPDATE,
+  [TransitionKindEnum.CANCELLATION]: HistoryActionEnum.CANCEL,
+};
+
+/** What the API says back, so a correction does not read like progress. */
+const TRANSITION_MESSAGES: Record<
+  TransitionKindEnum,
+  (target: OrderStatusEnum) => string
+> = {
+  [TransitionKindEnum.NORMAL]: (target) => `Order moved to ${target}`,
+  [TransitionKindEnum.CANCELLATION]: () => 'Order cancelled successfully',
 };
 
 @Injectable()
@@ -382,6 +466,9 @@ export class OrderService {
 
     @InjectModel(OrderStatus.name)
     private readonly orderStatusModel: Model<OrderStatus>,
+
+    @InjectModel(OrderItemHistory.name)
+    private readonly orderItemHistoryModel: Model<OrderItemHistory>,
 
     @InjectModel(Office.name) private readonly officeModel: Model<Office>,
 
@@ -490,7 +577,11 @@ export class OrderService {
         quotaConsumed: pricing.quotaConsumed,
         balanceDue: Math.max(0, totalAmount - order.amountPaid),
       },
-      { context: { changedBy }, returnDocument: 'after', session } as never,
+      {
+        context: auditContext(this.req, changedBy),
+        returnDocument: 'after',
+        session,
+      } as never,
     );
   }
 
@@ -520,7 +611,7 @@ export class OrderService {
     try {
       await session.withTransaction(async () => {
         created = (await this.orderModel.findOneAndUpdate(filter, update, {
-          context: { changedBy: userId },
+          context: auditContext(this.req, userId),
           upsert: true,
           returnDocument: 'after',
           session,
@@ -543,7 +634,7 @@ export class OrderService {
             condition: item.condition ?? OrderItemConditionEnum.NORMAL,
             colour: item.colour,
           });
-          row.$locals.changedBy = userId;
+          applyAuditLocals(row, this.req, userId);
           await row.save({ session });
         }
 
@@ -644,8 +735,91 @@ export class OrderService {
     if (data.manualDiscount !== undefined) this.can('UPDATE', 'Payment');
     if (data.orderAmount !== undefined) this.can('UPDATE', 'Payment');
 
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+    const base = `[${platform}] ${phone}`;
+
     const update: Record<string, unknown> = {};
     const unset: Record<string, unknown> = {};
+    /** Set only on a real move, and only to rebuild both rollups afterwards. */
+    let movedFrom: Types.ObjectId | undefined;
+
+    // Who the order is for. Every rule creation applies applies here too: the
+    // caller's own scope, the customer has to exist, and a customer may hold
+    // one draft at a time — otherwise moving a draft onto someone who already
+    // has one would make a state the booking path refuses to create.
+    if (data.customerId !== undefined) {
+      const customerId = new Types.ObjectId(data.customerId);
+      this.assertCustomerScope(customerId, 'UPDATE', base);
+
+      const customer = await this.userModel.findById(customerId);
+      if (!customer) {
+        this.logger.error(`${base} invalid customer id ${data.customerId}`);
+        throw new BadRequestException('Invalid customer id');
+      }
+
+      if (!customerId.equals(order.customerId)) {
+        movedFrom = order.customerId;
+        const existingDraft = await this.orderModel.findOne({
+          customerId,
+          _id: { $ne: id },
+          orderStatusId: order.orderStatusId._id,
+        });
+        if (existingDraft) {
+          this.logger.error(
+            `${base} customer ${data.customerId} already holds a draft order`,
+          );
+          throw new BadRequestException({
+            code: 'DRAFT_EXISTS',
+            field: 'customerId',
+            message: 'A customer can only have one draft order',
+          });
+        }
+      }
+      update.customerId = customerId;
+    }
+
+    // Refused rather than quietly rewritten to the caller's own office, for
+    // the same reason as at creation: filing it somewhere other than the
+    // client was told is the worse failure.
+    if (data.officeId !== undefined) {
+      update.officeId = await this.resolveOfficeId(data.officeId, base);
+    }
+
+    if (data.currencyId !== undefined) {
+      const currencyId = new Types.ObjectId(data.currencyId);
+      const currency = await this.currencyModel.findById(currencyId);
+      if (!currency) {
+        this.logger.error(`${base} invalid currency id ${data.currencyId}`);
+        throw new BadRequestException('Invalid currency id');
+      }
+      update.currencyId = currencyId;
+    }
+
+    if (data.pickedUpBy !== undefined) {
+      update.pickedUpBy = await this.resolvePickedUpBy(
+        data.pickedUpBy,
+        order.pickedUpBy,
+        base,
+      );
+    }
+
+    if (data.pricingModel !== undefined)
+      update.pricingModel = data.pricingModel;
+    if (data.receivedAt !== undefined) update.receivedAt = data.receivedAt;
+    if (data.estimatedDeliveryDate !== undefined) {
+      update.estimatedDeliveryDate = data.estimatedDeliveryDate;
+    }
+
+    // Weight and pricing model are checked against each other as the order
+    // will stand, not as it arrived: switching to PER_KG with no weight on
+    // file, and clearing the weight of an order already priced by the kilo,
+    // are the same mistake seen from two directions.
+    this.assertWeightForModel(
+      data.pricingModel ?? (order.pricingModel as PricingModelEnum),
+      data.totalWeightKg ?? order.totalWeightKg,
+    );
+
     if (data.totalWeightKg !== undefined)
       update.totalWeightKg = data.totalWeightKg;
     // 0 hands pricing back to the engine — there is no "free order" reading to
@@ -666,33 +840,127 @@ export class OrderService {
       else unset.note = 1;
     }
 
-    await this.orderModel.updateOne(
-      { _id: id },
-      Object.keys(unset).length
-        ? // Mongo rejects an empty $set, so only include it when it has keys.
-          {
-            ...(Object.keys(update).length ? { $set: update } : {}),
-            $unset: unset,
-          }
-        : update,
-    );
-    await this.reprice(id, changedBy);
+    // findOneAndUpdate rather than updateOne, and with the audit context: the
+    // history hook is attached to findOneAndUpdate alone, so an updateOne here
+    // wrote the edit and told the trail nothing — an operator who rewrote a
+    // note or corrected a weight left no record, and the x-change-reason the
+    // guard obliged them to send was thrown away. Only a change that moved
+    // money showed up at all, and only because reprice() writes it below.
+    //
+    // Mongo rejects an empty operator, so each half is included only when it
+    // has keys, and a body that asked for nothing skips the write entirely
+    // rather than sending `{}`.
+    //
+    // The edit and the reprice share a transaction because the reprice can
+    // legitimately refuse what the edit asked for — PER_PIECE with a garment
+    // that has no price row comes back PRICE_NOT_FOUND. Without the session
+    // the new pricing model would already be on the order, sitting beside
+    // amounts computed under the old one.
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        if (Object.keys(update).length || Object.keys(unset).length) {
+          await this.orderModel.findOneAndUpdate(
+            { _id: id },
+            {
+              ...(Object.keys(update).length ? { $set: update } : {}),
+              ...(Object.keys(unset).length ? { $unset: unset } : {}),
+            },
+            {
+              context: auditContext(this.req, changedBy),
+              returnDocument: 'after',
+              session,
+            } as never,
+          );
+        }
+        await this.reprice(id, changedBy, session);
+      });
+    } catch (err) {
+      // Same deployment problem as creation: a standalone mongod cannot open a
+      // transaction at all, and that is worth naming rather than serving as an
+      // anonymous 500.
+      if (isTransactionUnsupported(err)) {
+        this.logger.error(
+          'Cannot edit an order: this MongoDB deployment does not support ' +
+            'transactions. Point DATABASE_URL at a replica set — e.g. ' +
+            '?replicaSet=rs0&directConnection=true — and restart.',
+        );
+        throw new ServiceUnavailableException({
+          code: 'TRANSACTIONS_UNSUPPORTED',
+          message:
+            'Orders cannot be edited because the database is not configured ' +
+            'for transactions. Please contact support.',
+        });
+      }
+      throw err;
+    } finally {
+      await session.endSession();
+    }
+
+    // After the transaction, like the create path's rollup: the listeners and
+    // the customer rollups react to an order that exists in its new shape, so
+    // they must not run for an edit that ends up rolled back. Both sides are
+    // rebuilt — the customer who gained the order and the one who lost it.
+    if (movedFrom) {
+      await Promise.all([
+        this.recomputeLastOrderAt(movedFrom, changedBy),
+        this.recomputeLastOrderAt(
+          update.customerId as Types.ObjectId,
+          changedBy,
+        ),
+      ]);
+    }
+
+    this.logger.log(`${base} edited draft order ${order.orderCode}`);
     return 'Order updated successfully';
+  }
+
+  /**
+   * Recompute a customer's `lastOrderAt` from the orders they actually hold.
+   *
+   * Creation can bump the rollup blindly — a new order is always the newest.
+   * A move cannot: the customer an order leaves may still have older orders,
+   * so the truthful value is the newest `createdAt` remaining to them, and
+   * none at all means the field goes away rather than keeping the date of an
+   * order that is no longer theirs.
+   */
+  private async recomputeLastOrderAt(
+    customerId: Types.ObjectId,
+    changedBy: Types.ObjectId,
+  ) {
+    const latest = await this.orderModel
+      .findOne({ customerId })
+      .sort({ createdAt: -1 })
+      .select('createdAt');
+
+    await this.customerModel.findOneAndUpdate(
+      { userId: customerId },
+      latest
+        ? { lastOrderAt: (latest as unknown as { createdAt: Date }).createdAt }
+        : { $unset: { lastOrderAt: 1 } },
+      { context: auditContext(this.req, changedBy) } as never,
+    );
   }
 
   /**
    * On order creation: bump the customer's lastOrderAt rollup and emit
    * order.created. totalOrders/totalSpend mature on order paid (§3.6).
+   *
+   * `orderedAt` is the order's own `createdAt`, not the clock reading at this
+   * line: `recomputeLastOrderAt` rebuilds the rollup from exactly that field,
+   * so stamping anything else here would make the value drift by the width of
+   * the write the first time an order moved between customers.
    */
   private async onOrderCreated(
     orderId: Types.ObjectId,
     customerId: Types.ObjectId,
     changedBy: Types.ObjectId,
+    orderedAt: Date,
   ) {
     await this.customerModel.findOneAndUpdate(
       { userId: customerId },
-      { lastOrderAt: new Date() },
-      { context: { changedBy } } as never,
+      { lastOrderAt: orderedAt },
+      { context: auditContext(this.req, changedBy) } as never,
     );
 
     const event: OrderCreatedEvent = { orderId, customerId, changedBy };
@@ -752,7 +1020,7 @@ export class OrderService {
     const base = `[${platform}] ${phone}`;
 
     const customerId = new Types.ObjectId(data.customerId);
-    this.assertCreateScope(customerId, base);
+    this.assertCustomerScope(customerId, 'CREATE', base);
     const customer = await this.userModel.findById(customerId);
     if (!customer) {
       this.logger.error(`${base} invalid customer id ${data.customerId}`);
@@ -849,7 +1117,12 @@ export class OrderService {
 
     // Outside the transaction: the listeners react to an order that exists, so
     // they must not fire for one that ends up rolled back.
-    await this.onOrderCreated(created._id, customerId, userId);
+    await this.onOrderCreated(
+      created._id,
+      customerId,
+      userId,
+      (created as unknown as { createdAt: Date }).createdAt,
+    );
 
     this.logger.log(
       `${base} has successfully created order for pickup request ${data.pickupRequestId} with ${items.length} item(s)`,
@@ -874,7 +1147,7 @@ export class OrderService {
     const base = `[${platform}] ${phone}`;
 
     const customerId = new Types.ObjectId(data.customerId);
-    this.assertCreateScope(customerId, base);
+    this.assertCustomerScope(customerId, 'CREATE', base);
     const customer = await this.userModel.findById(customerId);
     if (!customer) {
       this.logger.error(`${base} invalid customer id ${data.customerId}`);
@@ -945,7 +1218,12 @@ export class OrderService {
 
     // Outside the transaction: the listeners react to an order that exists, so
     // they must not fire for one that ends up rolled back.
-    await this.onOrderCreated(created._id, customerId, userId);
+    await this.onOrderCreated(
+      created._id,
+      customerId,
+      userId,
+      (created as unknown as { createdAt: Date }).createdAt,
+    );
 
     this.logger.log(
       `${base} has successfully created order for customer ${data.customerId} with ${items.length} item(s)`,
@@ -957,21 +1235,24 @@ export class OrderService {
   }
 
   /**
-   * Creation-time self-scope (§2.3 booking): a customer's CREATE Order rule
-   * carries { customerId: '$self' } — they can only ever book for themselves,
-   * whatever customerId the client sends. Staff rules are unconditioned.
+   * Self-scope on the customer an order names (§2.3 booking): a customer's own
+   * Order rules carry { customerId: '$self' } — they can only ever book for,
+   * or move an order to, themselves, whatever customerId the client sends.
+   * Staff rules are unconditioned.
+   *
+   * The action is passed in because the two paths are permissioned separately:
+   * booking is CREATE, moving an existing draft to another customer is UPDATE.
    */
-  private assertCreateScope(customerId: Types.ObjectId, logBase: string) {
+  private assertCustomerScope(
+    customerId: Types.ObjectId,
+    action: 'CREATE' | 'UPDATE',
+    logBase: string,
+  ) {
     if (
-      !scopePermitsCustomer(
-        this.req.user.ability,
-        'CREATE',
-        'Order',
-        customerId,
-      )
+      !scopePermitsCustomer(this.req.user.ability, action, 'Order', customerId)
     ) {
       this.logger.error(
-        `${logBase} tried to create an order for out-of-scope customer ${customerId.toString()}`,
+        `${logBase} tried to ${action === 'CREATE' ? 'create an order' : 'move an order'} for out-of-scope customer ${customerId.toString()}`,
       );
       throw new NotFoundException({
         code: 'NOT_FOUND',
@@ -1723,6 +2004,7 @@ export class OrderService {
             {
               $project: {
                 action: 1,
+                reason: 1,
                 createdAt: 1,
                 changedBy: 1,
                 changedByUser: 1,
@@ -1758,6 +2040,15 @@ export class OrderService {
     // foreign key in the trail gets its label attached (CONFIRMED → RECEIVED).
     // Generic, off the schema's own `ref`s — no per-field mapping to maintain.
     await this.historyLabelService.labelChanges(Order.name, order.history);
+
+    // What this order can do next, decided here rather than by each client
+    // keeping its own copy of the workflow — one of which will drift.
+    const status = order.orderStatus?.orderStatusName as
+      | OrderStatusEnum
+      | undefined;
+    order.availableTransitions = status
+      ? availableTransitionsFrom(status)
+      : { allowed: [] };
 
     this.logger.log(`${base} has successfully retrieved order ${code}`);
     return order;
@@ -2015,7 +2306,7 @@ export class OrderService {
       // A freshly agreed price replaces the old one; omitting it keeps
       // whatever the line was already worth.
       if (data.unitPrice !== undefined) existing.unitPrice = data.unitPrice;
-      existing.$locals.changedBy = userId;
+      applyAuditLocals(existing, this.req, userId);
       await existing.save();
     } else {
       const orderItem = new this.orderItemModel({
@@ -2029,7 +2320,7 @@ export class OrderService {
         condition: data.condition ?? OrderItemConditionEnum.NORMAL,
         colour: data.colour,
       });
-      orderItem.$locals.changedBy = userId;
+      applyAuditLocals(orderItem, this.req, userId);
       await orderItem.save();
     }
 
@@ -2105,7 +2396,10 @@ export class OrderService {
     await this.orderItemModel.findOneAndUpdate(
       { _id: orderItemId, orderId },
       update,
-      { context: { changedBy: userId }, returnDocument: 'after' } as never,
+      {
+        context: auditContext(this.req, userId),
+        returnDocument: 'after',
+      } as never,
     );
 
     await this.reprice(order._id, userId);
@@ -2171,7 +2465,7 @@ export class OrderService {
 
     const userId = new Types.ObjectId(this.req.user.userId);
     await this.orderItemModel.findOneAndDelete({ _id: orderItemId, orderId }, {
-      context: { changedBy: userId },
+      context: auditContext(this.req, userId),
       returnDocument: 'after',
     } as never);
 
@@ -2184,6 +2478,117 @@ export class OrderService {
   }
 
   /**
+   * The audit trail of an order's garments: every line added, corrected or
+   * removed, newest first.
+   *
+   * Read through the history rows' own `snapshot.orderId` rather than through
+   * the order's surviving lines, because a removed garment's row is deleted
+   * outright — walking the lines that remain would hide exactly the change an
+   * operator opens this to check, and a garment that was added and taken away
+   * again would leave no trace at all.
+   *
+   * `snapshot` itself is never returned: it is a full copy of the line per
+   * entry and says nothing the changes and the summary fields don't.
+   */
+  async findOrderItemHistory({
+    orderId,
+  }: OrderParamsDto): Promise<OrderItemHistoryEntry[]> {
+    // The trail of a line is the order's own data, so it is readable by whoever
+    // may read the order — no separate ability, and no view of a line for
+    // someone who cannot see the order it belongs to.
+    this.can('READ', 'Order');
+    const platform = this.req.data.platform;
+    const { phone } = this.req.user;
+    const base = `[${platform}] ${phone}`;
+
+    const id = new Types.ObjectId(orderId);
+    const order = await this.orderModel
+      .findOne({ _id: id, ...this.orderScope('READ') })
+      .select('_id orderCode');
+
+    if (!order) {
+      this.logger.error(`${base} invalid/out-of-scope orderId ${orderId}`);
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Order not found',
+      });
+    }
+
+    const history =
+      await this.orderItemHistoryModel.aggregate<OrderItemHistoryEntry>([
+        { $match: { 'snapshot.orderId': id } },
+        { $sort: { createdAt: -1 } },
+        { $limit: ORDER_HISTORY_LIMIT },
+        {
+          $lookup: {
+            as: 'changedByUser',
+            from: 'user',
+            localField: 'changedBy',
+            foreignField: '_id',
+            pipeline: [{ $project: SAFE_USER_PROJECTION }],
+          },
+        },
+        {
+          $unwind: {
+            path: '$changedByUser',
+            preserveNullAndEmptyArrays: true,
+          },
+        },
+        // The garment is named from the snapshot, not from the line: the line
+        // may be gone, and on an entry that changed the garment's own fields
+        // the snapshot is what that entry was actually about.
+        {
+          $lookup: {
+            as: 'item',
+            from: 'item',
+            localField: 'snapshot.itemId',
+            foreignField: '_id',
+            pipeline: [{ $project: { itemName: 1 } }],
+          },
+        },
+        { $unwind: { path: '$item', preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            action: 1,
+            reason: 1,
+            createdAt: 1,
+            changedBy: 1,
+            changedByUser: 1,
+            orderItemId: 1,
+            item: 1,
+            // A CREATE and a DELETE carry no changed fields — the line simply
+            // began or ended — so the entry states what it was.
+            quantity: '$snapshot.quantity',
+            colour: '$snapshot.colour',
+            condition: '$snapshot.condition',
+            changes: {
+              $map: {
+                as: 'change',
+                input: {
+                  $objectToArray: { $ifNull: ['$changedFields', {}] },
+                },
+                in: {
+                  field: '$$change.k',
+                  from: '$$change.v.from',
+                  to: '$$change.v.to',
+                },
+              },
+            },
+          },
+        },
+      ]);
+
+    // `serviceTypeId: 6a58…aa5 → 6a58…aa7` means nothing to a reader; the same
+    // generic labelling the order's trail gets, off OrderItem's own refs.
+    await this.historyLabelService.labelChanges(OrderItem.name, history);
+
+    this.logger.log(
+      `${base} retrieved ${history.length} garment history entrie(s) for ${order.orderCode}`,
+    );
+    return history;
+  }
+
+  /**
    * Single guarded status transition. Rejects any move not permitted by
    * LEGAL_TRANSITIONS with INVALID_STATUS_TRANSITION, runs status-specific
    * preconditions, mirrors the pickup side effects, and emits
@@ -2192,8 +2597,12 @@ export class OrderService {
   private async transition(
     orderId: string,
     target: OrderStatusEnum,
-    action: CaslActionsDto = 'UPDATE',
-  ) {
+  ): Promise<TransitionKindEnum> {
+    // Every move — forward, corrected or cancelled — is an UPDATE on the
+    // order. Confirming used to demand a separate CONFIRM action that was
+    // never seeded as a permission row, so in practice only a Manager
+    // (`manage all`) could confirm anything.
+    const action: CaslActionsDto = 'UPDATE';
     this.can(action, 'Order');
     const platform = this.req.data.platform;
     const { phone } = this.req.user;
@@ -2214,18 +2623,33 @@ export class OrderService {
     }
 
     const current = order.orderStatusId.orderStatusName as OrderStatusEnum;
-    if (!(LEGAL_TRANSITIONS[current] ?? []).includes(target)) {
+    const kind = classifyTransition(current, target);
+    if (!kind) {
       this.logger.error(
         `${base} illegal transition ${current}->${target} for ${order.orderCode}`,
       );
       throw new ConflictException({
         code: 'INVALID_STATUS_TRANSITION',
         message: `An order cannot move from ${current} to ${target}`,
+        // What the caller could have asked for instead, so a client does not
+        // have to keep its own copy of the workflow to recover from this.
+        allowed: availableTransitionsFrom(current).allowed,
       });
     }
 
-    // Precondition: an order must have at least one item to be confirmed.
-    if (target === OrderStatusEnum.CONFIRMED) {
+    const isCancelling = kind === TransitionKindEnum.CANCELLATION;
+    /**
+     * A draft has spent nothing yet, so the quota and promo it was priced
+     * against are taken the moment it goes live — whichever status it is set
+     * to. DRAFT is unreachable afterwards, which is what makes "once" true.
+     */
+    const goesLive = current === OrderStatusEnum.DRAFT && !isCancelling;
+
+    // Precondition: an order must hold at least one garment before it leaves
+    // DRAFT for anywhere but CANCELLED. Keyed on leaving the draft rather than
+    // on arriving at CONFIRMED, because a draft can now be set straight to
+    // RECEIVED and an empty order is no more sound there.
+    if (goesLive) {
       const itemCount = await this.orderItemModel.countDocuments({
         orderId: order._id,
       });
@@ -2255,14 +2679,19 @@ export class OrderService {
       statusUpdate.deliveredAt = new Date();
     }
     await this.orderModel.findOneAndUpdate({ _id: order._id }, statusUpdate, {
-      context: { changedBy: userId },
+      // The kind rides into the audit trail: a cancellation is recorded as
+      // CANCEL, so a timeline never reads calling the work off as progress.
+      context: auditContext(this.req, userId, HISTORY_ACTION_BY_KIND[kind]),
       returnDocument: 'after',
     } as never);
 
-    // One-time confirm side effects (quota decrement + promo usage). Safe from
-    // double-application: the guard only permits DRAFT→CONFIRMED once.
-    if (target === OrderStatusEnum.CONFIRMED) {
+    // Quota decrement + promo usage, taken once as the draft goes live and
+    // handed back only if the order is later cancelled.
+    if (goesLive) {
       await this.finalizeOnConfirm(order as unknown as Order);
+    }
+    if (this.releasesCommitments(current, kind)) {
+      await this.releaseOnUnconfirm(order as unknown as Order, userId);
     }
 
     await this.syncPickupOnTransition(order.pickupRequestId, target, userId);
@@ -2271,11 +2700,90 @@ export class OrderService {
       orderId: order._id,
       from: current,
       to: target,
+      kind,
       changedBy: userId,
     };
     this.eventEmitter.emit(OrderEvents.statusChanged, event);
 
-    this.logger.log(`${base} order ${order.orderCode} ${current}->${target}`);
+    this.logger.log(
+      `${base} order ${order.orderCode} ${current}->${target} (${kind})`,
+    );
+    return kind;
+  }
+
+  /**
+   * Whether this move gives back what going live took: the subscription quota
+   * the order reserved and the promo redemption it burned.
+   *
+   * Only a cancellation does, and only once the order had gone live —
+   * cancelling straight out of DRAFT reverses nothing, because a draft never
+   * took anything in the first place.
+   */
+  private releasesCommitments(
+    current: OrderStatusEnum,
+    kind: TransitionKindEnum,
+  ): boolean {
+    if (current === OrderStatusEnum.DRAFT) return false;
+    return kind === TransitionKindEnum.CANCELLATION;
+  }
+
+  /**
+   * The exact inverse of `finalizeOnConfirm()`: hand the subscription quota
+   * back, drop the promo redemption and un-count it.
+   *
+   * Written in one transaction because these are two collections plus the
+   * order's own row — a half-applied release would either strand quota nobody
+   * can use or leave a promo code counted against a customer who never got it.
+   */
+  private async releaseOnUnconfirm(order: Order, changedBy: Types.ObjectId) {
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        if (order.subscriptionId && order.quotaConsumed > 0) {
+          await this.subscriptionModel.updateOne(
+            { _id: order.subscriptionId },
+            { $inc: { remainingQuota: order.quotaConsumed } },
+            { session },
+          );
+        }
+
+        if (order.promoCodeId) {
+          const { deletedCount } = await this.promoUsageModel.deleteOne(
+            { orderId: order._id, promoCodeId: order.promoCodeId },
+            { session },
+          );
+          // Only give the use back if one was actually recorded, or a repeated
+          // release would drive usedCount below the number of real redemptions.
+          if (deletedCount) {
+            await this.promoCodeModel.updateOne(
+              { _id: order.promoCodeId },
+              { $inc: { usedCount: -1 } },
+              { session },
+            );
+          }
+        }
+      });
+    } catch (err) {
+      if (isTransactionUnsupported(err)) {
+        this.logger.error(
+          'Cannot release order commitments: this MongoDB deployment does ' +
+            'not support transactions. Point DATABASE_URL at a replica set.',
+        );
+        throw new ServiceUnavailableException({
+          code: 'TRANSACTIONS_UNSUPPORTED',
+          message:
+            'The order could not be updated because the database is not ' +
+            'configured for transactions. Please contact support.',
+        });
+      }
+      throw err;
+    } finally {
+      await session.endSession();
+    }
+
+    this.logger.log(
+      `released commitments for order ${order.orderCode} by ${changedBy.toString()}`,
+    );
   }
 
   /** Keep the linked pickup request in step with the order's lifecycle. */
@@ -2298,7 +2806,10 @@ export class OrderService {
       await this.pickupRequestModel.findOneAndUpdate(
         { _id: pickupRequestId, pickupStatusId: assigned?._id },
         { pickupStatusId: pickedUp?._id },
-        { context: { changedBy: userId }, returnDocument: 'after' } as never,
+        {
+          context: auditContext(this.req, userId),
+          returnDocument: 'after',
+        } as never,
       );
       return;
     }
@@ -2311,14 +2822,27 @@ export class OrderService {
         await this.pickupRequestModel.findOneAndUpdate(
           { _id: pickupRequestId },
           { pickupStatusId: cancelled._id },
-          { context: { changedBy: userId }, returnDocument: 'after' } as never,
+          {
+            context: auditContext(this.req, userId),
+            returnDocument: 'after',
+          } as never,
         );
       }
     }
   }
 
+  /**
+   * Move an order to `target`, whatever kind of move that turns out to be.
+   * The single entry point behind POST /orders/:orderId/transitions; the named
+   * methods below are thin aliases kept for the existing verb routes.
+   */
+  async transitionOrder(orderId: string, target: OrderStatusEnum) {
+    const kind = await this.transition(orderId, target);
+    return TRANSITION_MESSAGES[kind](target);
+  }
+
   async confirmOrder(orderId: string) {
-    await this.transition(orderId, OrderStatusEnum.CONFIRMED, 'CONFIRM');
+    await this.transition(orderId, OrderStatusEnum.CONFIRMED);
     return 'Order confirmed successfully';
   }
 
