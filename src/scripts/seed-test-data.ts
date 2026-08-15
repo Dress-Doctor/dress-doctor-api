@@ -20,6 +20,7 @@
  * it the way the e2e suite does. See the printed summary at the end.
  */
 import { Logger } from '@nestjs/common';
+import { systemAuditContext } from 'src/helper/service/audit-context';
 import { NestFactory } from '@nestjs/core';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -144,7 +145,15 @@ async function bootstrap(): Promise<void> {
       roleModel.findOne({ roleName: RoleEnum.CUSTOMER.toString() }),
       roleModel.findOne({ roleName: RoleEnum.MANAGER.toString() }),
       officeModel.findOne().sort({ createdAt: 1 }),
-      userModel.findOne({ phone: '237670678660' }), // bootstrap admin, if any
+      // The bootstrap admin, if any. Matched on phone OR email, the same way
+      // SeederService identifies it — a phone-only lookup missed an admin
+      // seeded under the email and left writes unattributed.
+      userModel.findOne({
+        $or: [
+          { phone: '670678660' },
+          { email: 'fedjio.raymond@dressdoctor.io' },
+        ],
+      }),
     ]);
 
   if (!customerType || !adminType || !customerRole || !managerRole) {
@@ -452,7 +461,9 @@ async function bootstrap(): Promise<void> {
             $set: { lastOrderAt: now },
             $inc: { totalOrders: 1, totalSpend: amountPaid },
           },
-          { context: { changedBy: actor } } as never,
+          {
+            context: systemAuditContext(actor, 'test data seed'),
+          } as never,
         );
 
         logger.log(

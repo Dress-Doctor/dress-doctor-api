@@ -26,6 +26,7 @@ import {
   ApiSuccessResponseWithPagination,
   xApiKey,
   xApiSecret,
+  xChangeReason,
 } from 'src/dto/swagger.dto';
 import { AssignRoleDto } from './dto/assign-role.dto';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -36,6 +37,7 @@ import { UserService } from './user.service';
 @Controller('users')
 @ApiHeader(xApiKey)
 @ApiHeader(xApiSecret)
+@ApiHeader(xChangeReason)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
 @ApiBearerAuth('access-token')

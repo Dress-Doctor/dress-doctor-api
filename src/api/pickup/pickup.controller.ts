@@ -22,7 +22,12 @@ import {
   type AppRequest,
   type AppRequestWithUser,
 } from 'src/dto/request-data.dto';
-import { ApiSuccessResponse, xApiKey, xApiSecret } from 'src/dto/swagger.dto';
+import {
+  ApiSuccessResponse,
+  xApiKey,
+  xApiSecret,
+  xChangeReason,
+} from 'src/dto/swagger.dto';
 import { Public } from 'src/helper/decorator/public.decorator';
 import {
   AssignPickupDto,
@@ -36,6 +41,7 @@ import { PickupService } from './pickup.service';
 @ApiHeader(xApiKey)
 @Controller('pickups')
 @ApiHeader(xApiSecret)
+@ApiHeader(xChangeReason)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
 @ApiBearerAuth('access-token')

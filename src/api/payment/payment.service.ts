@@ -11,6 +11,10 @@ import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
+import {
+  applyAuditLocals,
+  auditContext,
+} from 'src/helper/service/audit-context';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { scopeFilter } from 'src/helper/casl/casl-scope';
 import { Currency } from 'src/schema/catalog/currency.schema';
@@ -240,7 +244,7 @@ export class PaymentService {
           idempotencyKey,
           receivedBy: userId,
         });
-        payment.$locals.changedBy = userId;
+        applyAuditLocals(payment, this.req, userId);
         await payment.save({ session });
         paymentId = payment._id;
 
@@ -252,7 +256,7 @@ export class PaymentService {
             paymentStatus,
             flagged,
           },
-          { session, context: { changedBy: userId } } as never,
+          { session, context: auditContext(this.req, userId) } as never,
         );
       });
     } finally {

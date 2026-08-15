@@ -26,7 +26,13 @@ import { AppValidationPipe } from '../src/helper/pipe/app-validation.pipe';
 describe('HTTP contract (e2e)', () => {
   let app: INestApplication;
   let rs: MongoMemoryReplSet;
-  const apiHeaders = { 'x-api-key': 'e2e-key', 'x-api-secret': 'e2e-secret' };
+  const apiHeaders = {
+    'x-api-key': 'e2e-key',
+    'x-api-secret': 'e2e-secret',
+    // Every mutation must say why it is being made; these suites are not
+    // testing that rule, so they answer it once here.
+    'x-change-reason': 'automated end-to-end test',
+  };
   let adminToken: string;
 
   beforeAll(async () => {
@@ -398,6 +404,192 @@ describe('HTTP contract (e2e)', () => {
         expect(rows).toHaveLength(1);
         expect(rows[0].action).toBe('CREATE');
         expect(rows[0].changedBy).toBeDefined();
+      });
+    });
+
+    describe('status workflow: progress, corrections, cancellation', () => {
+      const newOrder = async (phone: string) => {
+        const buyer = await model('User').create({
+          firstName: 'Flow',
+          lastName: phone,
+          phone,
+          whatsappPhone: phone,
+          userTypeId: (
+            await model('UserType').findOne({ userTypeName: 'CUSTOMER' })
+          )._id,
+        });
+
+        await auth(request(app.getHttpServer()).post('/api/v1/orders'))
+          .send({
+            customerId: buyer._id.toString(),
+            currencyId,
+            pricingModel: 'PER_KG',
+            totalWeightKg: 2,
+            estimatedDeliveryDate: tomorrow(),
+            items: [{ itemId, serviceTypeId, quantity: 1 }],
+          })
+          .expect(201);
+
+        const order = await model('Order').findOne({ customerId: buyer._id });
+        return { id: order._id.toString(), code: order.orderCode };
+      };
+
+      const move = (id: string, target: string) =>
+        auth(
+          request(app.getHttpServer()).post(`/api/v1/orders/${id}/transitions`),
+        ).send({ target });
+
+      const statusOf = async (id: string) => {
+        const order = await model('Order').findById(id);
+        const status = await model('OrderStatus').findById(order.orderStatusId);
+        return status.orderStatusName;
+      };
+
+      it('walks the workflow forward one step at a time', async () => {
+        const { id } = await newOrder('633000001');
+
+        for (const target of ['CONFIRMED', 'RECEIVED', 'WASHING', 'READY']) {
+          await move(id, target).expect(200);
+          expect(await statusOf(id)).toBe(target);
+        }
+      });
+
+      it('refuses a skipped step and says what was allowed instead', async () => {
+        const { id } = await newOrder('633000002');
+        await move(id, 'CONFIRMED').expect(200);
+
+        const res = await move(id, 'READY').expect(409);
+
+        expect(res.body.error.code).toBe('INVALID_STATUS_TRANSITION');
+        expect(await statusOf(id)).toBe('CONFIRMED');
+      });
+
+      it('corrects a status back a step and logs it as a correction', async () => {
+        const { id, code } = await newOrder('633000003');
+        for (const target of ['CONFIRMED', 'RECEIVED', 'WASHING']) {
+          await move(id, target).expect(200);
+        }
+
+        await auth(
+          request(app.getHttpServer()).post(`/api/v1/orders/${id}/transitions`),
+        )
+          .set('x-change-reason', 'washing had not actually started')
+          .send({ target: 'RECEIVED' })
+          .expect(200);
+
+        expect(await statusOf(id)).toBe('RECEIVED');
+
+        const detail = (
+          await auth(
+            request(app.getHttpServer()).get(`/api/v1/orders/${code}`),
+          ).expect(200)
+        ).body.data;
+
+        // The correction is on the trail as a correction — not as progress —
+        // and carries the words the staff member typed.
+        const corrections = detail.history.filter(
+          (entry: any) => entry.action === 'CORRECT',
+        );
+        expect(corrections).toHaveLength(1);
+        expect(corrections[0].reason).toBe('washing had not actually started');
+        const change = corrections[0].changes.find(
+          (c: any) => c.field === 'orderStatusId',
+        );
+        expect(change.fromLabel).toBe('WASHING');
+        expect(change.toLabel).toBe('RECEIVED');
+      });
+
+      it('publishes what the order can do next, so clients need no copy of the rules', async () => {
+        const { id, code } = await newOrder('633000004');
+        await move(id, 'CONFIRMED').expect(200);
+        await move(id, 'RECEIVED').expect(200);
+
+        const detail = (
+          await auth(
+            request(app.getHttpServer()).get(`/api/v1/orders/${code}`),
+          ).expect(200)
+        ).body.data;
+
+        expect(detail.availableTransitions).toEqual({
+          normal: ['WASHING'],
+          correction: ['CONFIRMED'],
+          cancellable: true,
+        });
+      });
+
+      it('cancels from mid-workflow and logs it as a cancellation', async () => {
+        const { id, code } = await newOrder('633000005');
+        await move(id, 'CONFIRMED').expect(200);
+        await move(id, 'RECEIVED').expect(200);
+
+        await move(id, 'CANCELLED').expect(200);
+        expect(await statusOf(id)).toBe('CANCELLED');
+
+        const detail = (
+          await auth(
+            request(app.getHttpServer()).get(`/api/v1/orders/${code}`),
+          ).expect(200)
+        ).body.data;
+        expect(
+          detail.history.some((entry: any) => entry.action === 'CANCEL'),
+        ).toBe(true);
+        expect(detail.availableTransitions).toEqual({
+          normal: [],
+          correction: [],
+          cancellable: false,
+        });
+      });
+
+      it('will not cancel a delivered order, or move it anywhere else', async () => {
+        const { id } = await newOrder('633000006');
+        for (const target of [
+          'CONFIRMED',
+          'RECEIVED',
+          'WASHING',
+          'READY',
+          'DELIVERED',
+        ]) {
+          await move(id, target).expect(200);
+        }
+
+        await move(id, 'CANCELLED').expect(409);
+        await move(id, 'WASHING').expect(409);
+        expect(await statusOf(id)).toBe('DELIVERED');
+      });
+
+      it('rejects a mutation that does not say why', async () => {
+        const { id } = await newOrder('633000007');
+
+        const res = await request(app.getHttpServer())
+          .post(`/api/v1/orders/${id}/transitions`)
+          .set({ 'x-api-key': 'e2e-key', 'x-api-secret': 'e2e-secret' })
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ target: 'CONFIRMED' })
+          .expect(400);
+
+        expect(res.body.error.code).toBe('CHANGE_REASON_REQUIRED');
+        expect(await statusOf(id)).toBe('DRAFT');
+      });
+
+      it('records the reason on an ordinary edit too', async () => {
+        const { id, code } = await newOrder('633000008');
+
+        await auth(request(app.getHttpServer()).patch(`/api/v1/orders/${id}`))
+          .set('x-change-reason', 'customer added a second bag')
+          .send({ totalWeightKg: 4 })
+          .expect(200);
+
+        const detail = (
+          await auth(
+            request(app.getHttpServer()).get(`/api/v1/orders/${code}`),
+          ).expect(200)
+        ).body.data;
+
+        expect(
+          detail.history.some(
+            (entry: any) => entry.reason === 'customer added a second bag',
+          ),
+        ).toBe(true);
       });
     });
 

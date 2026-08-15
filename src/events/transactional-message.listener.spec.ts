@@ -7,6 +7,7 @@ import { Notification } from 'src/schema/notification/notification.schema';
 import { NotificationService } from 'src/helper/service/notification.service';
 import { SendNotificationDto } from 'src/schema/notification/notification.dto';
 import { OrderStatusEnum } from 'src/schema/order/order.dto';
+import { TransitionKindEnum } from 'src/api/order/order.service';
 import { TransactionalMessageListener } from './transactional-message.listener';
 
 describe('TransactionalMessageListener', () => {
@@ -28,10 +29,14 @@ describe('TransactionalMessageListener', () => {
     balanceDue: 1500,
   };
 
-  const statusEvent = (to: OrderStatusEnum) => ({
+  const statusEvent = (
+    to: OrderStatusEnum,
+    kind: TransitionKindEnum = TransitionKindEnum.NORMAL,
+  ) => ({
     orderId,
     from: OrderStatusEnum.WASHING,
     to,
+    kind,
     changedBy,
   });
 

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { systemAuditContext } from './audit-context';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { OfficeType } from 'src/schema/office/office-type.schema';
@@ -54,7 +55,11 @@ import itemData from 'src/static/item.data';
 
 @Injectable()
 export class SeederService {
-  private readonly phone = '237670678660';
+  // Nine digits, no country code — the format every phone is stored and looked
+  // up in (see the 9-digit login DTOs). `whatsappPhone` is the exception and
+  // keeps its 237 prefix, because WhatsApp addresses need the country code.
+  private readonly phone = '670678660';
+  private readonly email = 'fedjio.raymond@dressdoctor.io';
   private readonly logger = new Logger(SeederService.name);
 
   constructor(
@@ -354,9 +359,23 @@ export class SeederService {
     this.logger.log(`🌱 Done seeding ${count} data for RolePermission`);
   }
 
+  /**
+   * The user every seeded row is attributed to.
+   *
+   * Matched on phone OR email, exactly as `seedAdmin()` decides the admin
+   * already exists — looking one up by phone alone found nothing on a database
+   * whose admin was seeded under the email with a different phone, and the
+   * seed then died attributing a write to `null`.
+   */
+  private async findAdminUser() {
+    return await this.userModel
+      .findOne({ $or: [{ phone: this.phone }, { email: this.email }] })
+      .select('_id');
+  }
+
   private async seedAdmin() {
     const phone = this.phone;
-    const email = 'fedjio.raymond@dressdoctor.io';
+    const email = this.email;
     const adminUserExists = await this.userModel.exists({
       $or: [{ phone }, { email }],
     });
@@ -402,7 +421,8 @@ export class SeederService {
       gender: GenderEnum.MALE,
       userTypeId: userType?._id,
       passwordHash: hashedPassword,
-      whatsappPhone: '237670678660',
+      // Country code kept: a WhatsApp address is not a local phone number.
+      whatsappPhone: `237${this.phone}`,
       preferredLanguage: PreferredLanguageEnum.ENGLISH,
     });
     adminUserDoc.$locals.changedBy = adminUserId;
@@ -424,20 +444,29 @@ export class SeederService {
   }
 
   private async seedSystemApiClient() {
-    const adminUser = await this.userModel.findOne({ phone: this.phone });
-    const { key, secret, secretHash } =
-      await this.codeService.generateApiClient();
-
     const apiClientExists = await this.apiClientModel.findOne({
       name: seed.apiClient.name,
     });
     if (apiClientExists) return;
 
+    // Looked up after the exists-check so a re-run does not pay for it, and
+    // required: the client row records who created it.
+    const adminUser = await this.findAdminUser();
+    if (!adminUser) {
+      this.logger.warn(
+        'Skipping default API client: no admin user to attribute it to',
+      );
+      return;
+    }
+
+    const { key, secret, secretHash } =
+      await this.codeService.generateApiClient();
+
     await this.apiClientModel.create({
       key,
       secretHash,
       ...seed.apiClient,
-      createdBy: adminUser!._id,
+      createdBy: adminUser._id,
     });
 
     this.logger.log(
@@ -516,7 +545,12 @@ export class SeederService {
 
   private async seedItemCatalog() {
     const currency = await this.currencyModel.findOne({ isoCode: 'XAF' });
-    const adminUser = await this.userModel.findOne({ phone: this.phone });
+    const adminUser = await this.findAdminUser();
+    // The catalog is reference data and still has to land without an admin to
+    // sign for it; the audit entry is what goes missing, not the row.
+    const audit = adminUser
+      ? systemAuditContext(adminUser._id, 'price list seed')
+      : undefined;
 
     for (const item of itemData) {
       const [service, serviceType, category, subCategory] = await Promise.all([
@@ -543,7 +577,7 @@ export class SeederService {
           priceHigh: item.priceHigh,
         },
         {
-          context: { changedBy: adminUser?._id },
+          context: audit,
           upsert: true,
           returnDocument: 'after',
         } as never,
@@ -603,7 +637,10 @@ export class SeederService {
         return obj;
       });
 
-      const adminUser = await this.userModel.findOne({ phone: this.phone });
+      const adminUser = await this.findAdminUser();
+      const importAudit = adminUser
+        ? systemAuditContext(adminUser._id, 'price list import')
+        : undefined;
       const currency = await this.currencyModel.findOne({ isoCode: 'XAF' });
 
       // Loop Through Data
@@ -688,7 +725,7 @@ export class SeederService {
             priceHigh: Number(item['price high (xaf)'].replaceAll(',', '')),
           },
           {
-            context: { changedBy: adminUser?._id },
+            context: importAudit,
             upsert: true,
             returnDocument: 'after',
           } as never,

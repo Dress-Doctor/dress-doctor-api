@@ -10,6 +10,14 @@ export class RequestDataDto {
   platform: string;
   officeId: Types.ObjectId;
   apiClientId: Types.ObjectId;
+
+  /**
+   * Why the caller is making this change, from the `x-change-reason` header.
+   * Required on every mutating request (see ChangeReasonGuard) and carried
+   * into the audit trail by every write, so no history row can say what
+   * changed without saying why.
+   */
+  reason?: string;
 }
 
 export type AppRequest = Request & { data: RequestDataDto };

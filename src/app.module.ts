@@ -23,6 +23,7 @@ import { ApiClientModule } from './api/api-client/api-client.module';
 import { AuthModule } from './api/auth/auth.module';
 import { APP_GUARD } from '@nestjs/core';
 import { ApiClientGuard } from './helper/guard/api-client.guard';
+import { ChangeReasonGuard } from './helper/guard/change-reason.guard';
 import { UtilModule } from './api/util/util.module';
 import { UserModule } from './api/user/user.module';
 import { CustomerModule } from './api/customer/customer.module';
@@ -93,6 +94,7 @@ import { envValidationSchema } from './config/env.validation';
     CodeGeneratorService,
     ApiClientLookupService,
     { provide: APP_GUARD, useClass: ApiClientGuard },
+    { provide: APP_GUARD, useClass: ChangeReasonGuard },
   ],
 })
 export class AppModule implements NestModule, OnModuleInit {

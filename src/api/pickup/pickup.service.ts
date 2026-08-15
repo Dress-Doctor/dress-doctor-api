@@ -10,6 +10,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import type { AppRequestWithUser } from 'src/dto/request-data.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
+import { auditContext } from 'src/helper/service/audit-context';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { OfficeType } from 'src/schema/office/office-type.schema';
 import { Office } from 'src/schema/office/office.schema';
@@ -97,7 +98,7 @@ export class PickupService {
         { userId: foundedUser._id },
         { referralCode, userId: foundedUser._id },
         {
-          context: { changedBy: foundedUser._id },
+          context: auditContext(this.req, foundedUser._id),
           upsert: true,
           returnDocument: 'after',
         } as never,
@@ -141,7 +142,7 @@ export class PickupService {
           reference: await this.codeService.generatePickupReference(),
         },
         {
-          context: { changedBy: foundedUser._id },
+          context: auditContext(this.req, foundedUser._id),
           upsert: true,
           returnDocument: 'after',
         } as never,
@@ -276,7 +277,7 @@ export class PickupService {
         pickupRequestId: pickupRequestExists._id,
       },
       {
-        context: { changedBy: userId },
+        context: auditContext(this.req, userId),
         upsert: true,
         returnDocument: 'after',
       } as never,
@@ -289,7 +290,7 @@ export class PickupService {
       { _id: pickupRequestExists._id },
       { pickupStatusId: assignedPickupStatus!._id },
       {
-        context: { changedBy: userId },
+        context: auditContext(this.req, userId),
         upsert: true,
         returnDocument: 'after',
       } as never,
@@ -349,7 +350,10 @@ export class PickupService {
     await this.pickupRequestModel.findOneAndUpdate(
       { _id: pickupRequest._id },
       { pickupStatusId: confirmStatus._id, confirmedBy: userId },
-      { context: { changedBy: userId }, returnDocument: 'after' } as never,
+      {
+        context: auditContext(this.req, userId),
+        returnDocument: 'after',
+      } as never,
     );
 
     this.logger.log(`${base} pickup ${pickupRequest.reference} confirmed`);
@@ -407,7 +411,10 @@ export class PickupService {
     await this.pickupRequestModel.findOneAndUpdate(
       { _id: pickupRequest._id },
       { pickupStatusId: cancelledStatus._id },
-      { context: { changedBy: userId }, returnDocument: 'after' } as never,
+      {
+        context: auditContext(this.req, userId),
+        returnDocument: 'after',
+      } as never,
     );
 
     // Cancel any associated orders
@@ -440,7 +447,10 @@ export class PickupService {
         await this.orderModel.findOneAndUpdate(
           { _id: order._id },
           { orderStatusId: cancelledOrderStatus._id },
-          { context: { changedBy: userId }, returnDocument: 'after' } as never,
+          {
+            context: auditContext(this.req, userId),
+            returnDocument: 'after',
+          } as never,
         );
         this.logger.log(
           `${base} order ${order.orderCode} cancelled due to pickup cancellation`,

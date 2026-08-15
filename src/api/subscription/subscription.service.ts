@@ -14,6 +14,10 @@ import {
   type PaginationDto,
 } from 'src/dto/request-data.dto';
 import { scopeFilter, scopePermitsCustomer } from 'src/helper/casl/casl-scope';
+import {
+  applyAuditLocals,
+  auditContext,
+} from 'src/helper/service/audit-context';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { SubscriptionPlan } from 'src/schema/subscription/subscription-plan.schema';
@@ -86,7 +90,7 @@ export class SubscriptionService {
       {
         upsert: true,
         returnDocument: 'after',
-        context: { changedBy },
+        context: auditContext(this.req, changedBy),
       } as never,
     );
     return plan as unknown as SubscriptionPlan;
@@ -168,7 +172,7 @@ export class SubscriptionService {
       rolledOverQuota: 0,
       autoRenew: data.autoRenew ?? false,
     });
-    doc.$locals.changedBy = new Types.ObjectId(userId);
+    applyAuditLocals(doc, this.req, new Types.ObjectId(userId));
     await doc.save();
 
     this.logger.log(
@@ -238,7 +242,7 @@ export class SubscriptionService {
     }
 
     sub.status = to;
-    sub.$locals.changedBy = new Types.ObjectId(this.req.user.userId);
+    applyAuditLocals(sub, this.req, new Types.ObjectId(this.req.user.userId));
     await sub.save();
     this.logger.log(`subscription ${id} → ${to}`);
     return sub;

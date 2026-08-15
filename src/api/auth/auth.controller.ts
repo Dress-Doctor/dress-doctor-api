@@ -21,6 +21,7 @@ import {
 import type { AppRequest } from 'src/dto/request-data.dto';
 import { xApiKey, xApiSecret } from 'src/dto/swagger.dto';
 import { Public } from 'src/helper/decorator/public.decorator';
+import { SkipChangeReason } from 'src/helper/decorator/skip-change-reason.decorator';
 import { AuthService } from './auth.service';
 import { CompleteLoginDto, InitiateLoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh.dto';
@@ -40,6 +41,9 @@ import {
 @ApiHeader(xApiSecret)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
+// Signing in, asking for an OTP and refreshing a token are writes with no
+// human intent to record — nobody can say why they logged in.
+@SkipChangeReason()
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
   constructor(private readonly authService: AuthService) {}

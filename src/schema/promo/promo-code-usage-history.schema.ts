@@ -25,6 +25,15 @@ export class PromoCodeUsageHistory extends Document<Types.ObjectId> {
   @Prop({ required: true, type: String, enum: HistoryActionEnum })
   action: HistoryActionEnum;
 
+  /**
+   * Why the change was made. Required of every mutating request through the
+   * `x-change-reason` header, so a trail never says only what changed. Kept
+   * optional on the schema on purpose: a history row must never be rejected
+   * for a missing field, or the audit entry is lost entirely.
+   */
+  @Prop({ required: false, trim: true, maxlength: 500 })
+  reason?: string;
+
   @Prop({ required: false, type: Object, default: {} })
   snapshot?: Record<string, any>;
 }

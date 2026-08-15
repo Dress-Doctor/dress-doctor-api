@@ -9,6 +9,8 @@ export enum HistoryActionEnum {
   UPDATE = 'UPDATE',
   DELETE = 'DELETE',
   ASSIGN = 'ASSIGN',
+  /** Work called off: the record still exists, but its lifecycle ended here. */
+  CANCEL = 'CANCEL',
 }
 
 export enum PermissionActionEnum {

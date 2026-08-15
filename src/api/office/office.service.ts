@@ -11,6 +11,10 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
+import {
+  applyAuditLocals,
+  auditContext,
+} from 'src/helper/service/audit-context';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import { OfficeType } from 'src/schema/office/office-type.schema';
@@ -95,7 +99,7 @@ export class OfficeService {
       region: data.region,
       qrCodeUrl: data.qrCodeUrl,
     });
-    office.$locals.changedBy = actorId;
+    applyAuditLocals(office, this.req, actorId);
     await office.save();
 
     this.logger.log(`created office ${officeCode}`);
@@ -174,7 +178,7 @@ export class OfficeService {
       update.officeTypeId = new Types.ObjectId(data.officeTypeId);
 
     return await this.officeModel.findOneAndUpdate({ _id: officeId }, update, {
-      context: { changedBy: actorId },
+      context: auditContext(this.req, actorId),
       returnDocument: 'after',
     } as never);
   }
@@ -214,7 +218,7 @@ export class OfficeService {
     await this.officeUserModel.findOneAndUpdate(
       { officeId, userId, roleId },
       { officeId, userId, roleId, isActive: true },
-      { upsert: true, context: { changedBy: actorId } } as never,
+      { upsert: true, context: auditContext(this.req, actorId) } as never,
     );
     return 'User assigned to office successfully';
   }

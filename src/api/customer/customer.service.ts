@@ -11,6 +11,10 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
+import {
+  applyAuditLocals,
+  auditContext,
+} from 'src/helper/service/audit-context';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { scopeFilter } from 'src/helper/casl/casl-scope';
 import { maskPhone } from 'src/helper/pii';
@@ -127,7 +131,7 @@ export class CustomerService {
       gender: data.gender,
       userTypeId: customerType._id,
     });
-    user.$locals.changedBy = actorId;
+    applyAuditLocals(user, this.req, actorId);
     await user.save();
 
     let referredBy: Types.ObjectId | undefined;
@@ -136,7 +140,7 @@ export class CustomerService {
         referrerId: referrer.userId,
         referredUserId: user._id,
       });
-      referral.$locals.changedBy = actorId;
+      applyAuditLocals(referral, this.req, actorId);
       await referral.save();
       referredBy = referral._id;
     }
@@ -156,7 +160,7 @@ export class CustomerService {
         : undefined,
       referredBy,
     });
-    customer.$locals.changedBy = actorId;
+    applyAuditLocals(customer, this.req, actorId);
     await customer.save();
 
     this.logger.log(`${base} registered customer ${customerCode}`);
@@ -426,14 +430,14 @@ export class CustomerService {
       await this.userModel.findOneAndUpdate(
         { _id: customer.userId },
         userUpdate,
-        { context: { changedBy } } as never,
+        { context: auditContext(this.req, changedBy) } as never,
       );
     }
     if (Object.keys(profileUpdate).length > 0) {
       await this.customerModel.findOneAndUpdate(
         { _id: customer._id },
         profileUpdate,
-        { context: { changedBy } } as never,
+        { context: auditContext(this.req, changedBy) } as never,
       );
     }
 

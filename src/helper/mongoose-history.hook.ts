@@ -7,8 +7,28 @@ interface QueryWithPrevious<T> extends Query<T, T> {
   _previous?: T;
 }
 
-interface QueryContext {
+/**
+ * What a write tells the audit trail about itself, passed as the query's
+ * `context` option (or, on a create, as `doc.$locals`).
+ *
+ * `reason` is the caller's own words, taken from the `x-change-reason` header
+ * that every mutating request carries. `action` lets a caller name the kind of
+ * edit — calling work off is recorded as CANCEL rather than UPDATE — and is
+ * only honoured for edits; a create or a delete is what it is.
+ */
+export interface AuditContextDto {
   changedBy?: Types.ObjectId;
+  reason?: string;
+  action?: HistoryActionEnum;
+}
+
+/** Kept as the old name for readability at the call sites in this file. */
+type QueryContext = AuditContextDto;
+
+/** The audit fields a create carries on `doc.$locals`. */
+interface DocumentLocals {
+  changedBy?: Types.ObjectId;
+  reason?: string;
 }
 
 /**
@@ -99,8 +119,8 @@ export function attachHistoryHooks<T extends Document>(
   // Post-hook: save history after document is created
   schema.post('save', async function (doc: T, next) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-      const changedBy = (doc as any).$locals?.changedBy;
+      const { changedBy, reason } =
+        (doc as { $locals?: DocumentLocals }).$locals ?? {};
 
       // Same transaction as the document itself, so a rollback takes the
       // audit entry with it rather than leaving a record of a change that
@@ -108,8 +128,9 @@ export function attachHistoryHooks<T extends Document>(
       await historyModel.create(
         [
           {
+            reason,
+            changedBy,
             action: HistoryActionEnum.CREATE,
-            changedBy: changedBy as Types.ObjectId,
             [idField]: doc[idField as keyof T] || doc._id,
             snapshot: doc.toObject() as Record<string, any>,
           },
@@ -147,6 +168,7 @@ export function attachHistoryHooks<T extends Document>(
           [
             {
               changedBy: context?.changedBy,
+              reason: context?.reason,
               action: HistoryActionEnum.CREATE,
               [idField]: doc[idField as keyof T] || doc._id,
               snapshot: doc.toObject() as Record<string, any>,
@@ -161,6 +183,7 @@ export function attachHistoryHooks<T extends Document>(
       // Track which fields changed
       const update = query.getUpdate() as {
         $set?: Partial<T>;
+        $unset?: Record<string, unknown>;
       };
 
       const changedFields: Record<string, ChangedFieldDto> = {};
@@ -176,14 +199,37 @@ export function attachHistoryHooks<T extends Document>(
         }
       }
 
+      // A field taken away is a field changed. Clearing an order's note is as
+      // real an edit as rewriting it, and $unset is the only way to do it — so
+      // without this the write would be recorded as touching nothing, or not
+      // recorded at all when the clear was the whole edit. A key that was
+      // already absent is skipped: removing nothing changed nothing.
+      if (update.$unset) {
+        for (const key of Object.keys(update.$unset)) {
+          const prev = previous[key as keyof T];
+          if (prev === undefined || prev === null) continue;
+          changedFields[key] = { from: prev, to: null };
+        }
+      }
+
       if (!Object.keys(changedFields).length) return next();
+
+      // An edit may name itself something more precise than UPDATE — calling
+      // the work off records CANCEL — so a timeline can tell the end of a
+      // record's life from ordinary progress. CREATE and DELETE are not up for
+      // renaming: those are facts about the write, not readings of it.
+      const action =
+        context?.action && context.action !== HistoryActionEnum.CREATE
+          ? context.action
+          : HistoryActionEnum.UPDATE;
 
       await historyModel.create(
         [
           {
+            action,
             changedFields,
             changedBy: context?.changedBy,
-            action: HistoryActionEnum.UPDATE,
+            reason: context?.reason,
             [idField]: doc[idField as keyof T] || doc._id,
             snapshot: doc.toObject() as Record<string, any>,
           },
@@ -191,7 +237,7 @@ export function attachHistoryHooks<T extends Document>(
         { session },
       );
 
-      logger.log(`History recorded for ${resourceName} UPDATE`);
+      logger.log(`History recorded for ${resourceName} ${action}`);
     } catch (error) {
       logger.error(
         `Failed to save history for ${resourceName} UPDATE: ${error instanceof Error ? error.message : String(error)}`,
@@ -212,6 +258,7 @@ export function attachHistoryHooks<T extends Document>(
         [
           {
             changedBy: context?.changedBy,
+            reason: context?.reason,
             action: HistoryActionEnum.DELETE,
             [idField]: doc[idField as keyof T] || doc._id,
             snapshot: doc.toObject() as Record<string, any>,

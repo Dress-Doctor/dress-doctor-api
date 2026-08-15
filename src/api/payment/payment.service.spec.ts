@@ -31,7 +31,11 @@ const manageAllAbility = () => {
 describe('PaymentService', () => {
   let service: PaymentService;
   let paymentModel: jest.Mock & { findOne: jest.Mock };
-  let savedPayments: Record<string, unknown>[];
+  let savedPayments: {
+    $locals: Record<string, unknown>;
+    save: jest.Mock;
+    [field: string]: unknown;
+  }[];
   let orderModel: {
     findOne: jest.Mock;
     findById: jest.Mock;
@@ -205,12 +209,12 @@ describe('PaymentService', () => {
     // Without $locals.changedBy the PaymentHistory row fails validation and
     // is swallowed, leaving a payment with no audit entry at all.
     expect(savedPayments).toHaveLength(1);
-    expect(savedPayments[0].$locals).toEqual({ changedBy: expect.anything() });
+    expect(savedPayments[0].$locals.changedBy).toBeDefined();
     // Saved inside the caller's transaction, like the order update beside it.
-    const save = savedPayments[0].save as jest.Mock;
-    expect(save).toHaveBeenCalledWith(
-      expect.objectContaining({ session: expect.anything() }),
-    );
+    const [saveOptions] = savedPayments[0].save.mock.calls[0] as [
+      { session?: unknown },
+    ];
+    expect(saveOptions.session).toBeDefined();
   });
 
   it('flags an overpayment as OVERPAID', async () => {

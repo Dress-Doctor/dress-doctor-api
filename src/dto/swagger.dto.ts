@@ -12,6 +12,20 @@ export const xApiSecret: ApiHeaderOptions = {
   schema: { default: '{{apiSecret}}' },
 };
 
+/**
+ * Why this change is being made. Required on every mutating request
+ * (POST/PATCH/PUT/DELETE) and written to the audit trail, so no history entry
+ * can say what changed without saying why. 3–500 characters.
+ */
+export const xChangeReason: ApiHeaderOptions = {
+  required: true,
+  name: 'x-change-reason',
+  description:
+    'Why this change is being made (3–500 chars). Recorded on the audit ' +
+    'trail entry for every record the request touches.',
+  schema: { example: 'washing had not actually started' },
+};
+
 export class Base {
   @ApiProperty({
     required: true,

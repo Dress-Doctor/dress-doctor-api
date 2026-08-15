@@ -25,12 +25,13 @@ import {
 } from './entities/payment-response.entity';
 import { PaymentService } from './payment.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
-import { xApiKey, xApiSecret } from 'src/dto/swagger.dto';
+import { xApiKey, xApiSecret, xChangeReason } from 'src/dto/swagger.dto';
 import { FindPaymentDto } from './dto/find-payment.dto';
 
 @Controller()
 @ApiHeader(xApiKey)
 @ApiHeader(xApiSecret)
+@ApiHeader(xChangeReason)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
 @ApiBearerAuth('access-token')

@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { applyAuditLocals } from 'src/helper/service/audit-context';
 import { REQUEST } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -480,7 +481,7 @@ export class PricingService {
       unitPrice: data.unitPrice,
       effectiveFrom: data.effectiveFrom ?? new Date(),
     });
-    price.$locals.changedBy = actorId;
+    applyAuditLocals(price, this.req, actorId);
     await price.save();
     return price;
   }

@@ -26,7 +26,13 @@ describe('Subscriptions + pieces overage (e2e)', () => {
 
   let app: INestApplication;
   let rs: MongoMemoryReplSet;
-  const apiHeaders = { 'x-api-key': 'e2e-key', 'x-api-secret': 'e2e-secret' };
+  const apiHeaders = {
+    'x-api-key': 'e2e-key',
+    'x-api-secret': 'e2e-secret',
+    // Every mutation must say why it is being made; these suites are not
+    // testing that rule, so they answer it once here.
+    'x-change-reason': 'automated end-to-end test',
+  };
   let adminToken: string;
   let customerUserId: Types.ObjectId;
   let subscriptionId: string;

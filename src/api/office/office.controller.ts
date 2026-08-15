@@ -22,6 +22,7 @@ import {
   ApiSuccessResponseWithPagination,
   xApiKey,
   xApiSecret,
+  xChangeReason,
 } from 'src/dto/swagger.dto';
 import { AssignOfficeUserDto } from './dto/assign-office-user.dto';
 import { CreateOfficeDto } from './dto/create-office.dto';
@@ -32,6 +33,7 @@ import { OfficeService } from './office.service';
 @Controller('offices')
 @ApiHeader(xApiKey)
 @ApiHeader(xApiSecret)
+@ApiHeader(xChangeReason)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
 @ApiBearerAuth('access-token')

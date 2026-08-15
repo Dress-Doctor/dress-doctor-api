@@ -27,6 +27,7 @@ import {
   ApiSuccessResponseWithPagination,
   xApiKey,
   xApiSecret,
+  xChangeReason,
 } from 'src/dto/swagger.dto';
 import { CustomerService } from './customer.service';
 import { FindCustomerDto } from './dto/find-customer.dto';
@@ -36,6 +37,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 @Controller('customers')
 @ApiHeader(xApiKey)
 @ApiHeader(xApiSecret)
+@ApiHeader(xChangeReason)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
 @ApiBearerAuth('access-token')

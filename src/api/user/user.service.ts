@@ -11,6 +11,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import type { AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
+import { auditContext } from 'src/helper/service/audit-context';
 import { Customer } from 'src/schema/user/customer.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { UserTypeEum } from 'src/schema/user/user.dto';
@@ -94,7 +95,7 @@ export class UserService {
         { phone: data.phone },
         { ...data, userTypeId },
         {
-          context: { changedBy: userId },
+          context: auditContext(this.req, userId),
           upsert: true,
           returnDocument: 'after',
         } as never,
@@ -106,7 +107,7 @@ export class UserService {
         { userId: (newUser as unknown as User)._id },
         { referralCode, userId: (newUser as unknown as User)._id },
         {
-          context: { changedBy: userId },
+          context: auditContext(this.req, userId),
           upsert: true,
           returnDocument: 'after',
         } as never,
@@ -125,7 +126,7 @@ export class UserService {
         { phone: data.phone },
         { ...data, userTypeId, passwordHash: hashedPassword },
         {
-          context: { changedBy: userId },
+          context: auditContext(this.req, userId),
           upsert: true,
           returnDocument: 'after',
         } as never,
@@ -240,7 +241,7 @@ export class UserService {
       { _id: userId },
       data,
       {
-        context: { changedBy: actorId },
+        context: auditContext(this.req, actorId),
         returnDocument: 'after',
       } as never,
     );
@@ -284,7 +285,7 @@ export class UserService {
       await this.officeUserModel.findOneAndUpdate(
         { userId, roleId, officeId },
         { userId, roleId, officeId, isActive: true },
-        { upsert: true, context: { changedBy: actorId } } as never,
+        { upsert: true, context: auditContext(this.req, actorId) } as never,
       );
       return 'Office role assigned successfully';
     }
@@ -325,7 +326,10 @@ export class UserService {
     await this.userModel.findOneAndUpdate(
       { _id: userId },
       { isActive: false },
-      { context: { changedBy: actorId }, returnDocument: 'after' } as never,
+      {
+        context: auditContext(this.req, actorId),
+        returnDocument: 'after',
+      } as never,
     );
     return 'User deactivated successfully';
   }
