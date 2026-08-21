@@ -3,6 +3,7 @@ import { OrderCurrencyEntity } from './order-currency.entity';
 import { OrderCustomerEntity } from './order-customer.entity';
 import { OrderItemEntity } from './order-item.entity';
 import { OrderOfficeEntity } from './order-office.entity';
+import { OrderPickupEntity } from './order-pickup.entity';
 
 export class OrderWithItemsEntity {
   @ApiProperty({ example: '64b8c9f1e4b0a2d3c4f5g6h' })
@@ -28,6 +29,15 @@ export class OrderWithItemsEntity {
 
   @ApiProperty({ example: '64b8c9f1e4b0a2d3c4f5g6h' })
   pickupRequestId: string;
+
+  @ApiProperty({
+    required: false,
+    type: OrderPickupEntity,
+    description:
+      'The pickup request this order came from, with its status. Absent on ' +
+      'orders taken over the counter.',
+  })
+  pickupRequest?: OrderPickupEntity;
 
   @ApiProperty({ example: 'ORD-0001' })
   orderCode: string;

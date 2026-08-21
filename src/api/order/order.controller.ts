@@ -181,8 +181,21 @@ export class OrderController {
   @ApiOperation({
     summary: 'Create order for a pickup request',
     description:
-      'Accepts an optional `items[]` of garments, booked with the order in ' +
-      'one transaction — see POST /orders.',
+      'Takes the same body as POST /orders — pricing, amounts, note, office, ' +
+      'dates and an optional `items[]` booked in the same transaction — plus ' +
+      'the `pickupRequestId` it is raised against.\n\n' +
+      'Three rules are specific to this path:\n\n' +
+      '- **The pickup must be ASSIGNED** (400 PICKUP_NOT_ASSIGNED). A ' +
+      'collection the customer has not confirmed, or that no agent is going ' +
+      'to, is not an order yet. Who calls this is not restricted — the ' +
+      'counter, a supervisor or the assigned agent may all raise it.\n' +
+      '- **One pickup, one order** (400 PICKUP_ORDER_EXISTS), whatever ' +
+      'status the first one reached.\n' +
+      '- **The pickup must belong to the customer named** (400 ' +
+      'PICKUP_CUSTOMER_MISMATCH).\n\n' +
+      'The customer-wide draft rule applies here too: one open DRAFT per ' +
+      'customer (400 DRAFT_EXISTS). A pickup outside the caller’s office ' +
+      'reads as an invalid id.',
   })
   @CheckAccess(CheckTypeEnum.customerPickup, 'customerId', 'body')
   @ApiResponse({ status: HttpStatus.CREATED, type: OrderCreatedEntity })

@@ -6,6 +6,7 @@ import { OrderCurrencyEntity } from './order-currency.entity';
 import { OrderCustomerEntity } from './order-customer.entity';
 import { OrderItemEntity } from './order-item.entity';
 import { OrderOfficeEntity } from './order-office.entity';
+import { OrderPickupEntity } from './order-pickup.entity';
 
 /**
  * One field the audit trail saw change on the order. `from`/`to` are the
@@ -248,9 +249,10 @@ export class OrderDetailEntity {
 
   @ApiProperty({
     required: false,
+    type: OrderPickupEntity,
     description: 'The pickup request this order came from, with its status',
   })
-  pickupRequest?: Record<string, unknown>;
+  pickupRequest?: OrderPickupEntity;
 
   @ApiProperty({
     required: false,

@@ -239,6 +239,9 @@ export default {
     ...crud(SubjectEnum.OrderItem),
     ...crud(SubjectEnum.Payment),
     ...crud(SubjectEnum.PickupRequest),
+    // Bulk CSV/Excel export of pickups — gated separately from READ so it can
+    // be granted to reporting/oversight roles only.
+    { subject: SubjectEnum.PickupRequest, action: PermissionActionEnum.EXPORT },
     ...crud(SubjectEnum.PickupAssignment),
     ...crud(SubjectEnum.Customer),
     ...crud(SubjectEnum.User),
@@ -283,6 +286,10 @@ export default {
         { subject: SubjectEnum.Order, action: PermissionActionEnum.EXPORT },
         ...crud(SubjectEnum.Payment),
         ...crud(SubjectEnum.PickupRequest),
+        {
+          subject: SubjectEnum.PickupRequest,
+          action: PermissionActionEnum.EXPORT,
+        },
         ...crud(SubjectEnum.Customer),
         ...readUpdate(SubjectEnum.FollowUp),
       ],

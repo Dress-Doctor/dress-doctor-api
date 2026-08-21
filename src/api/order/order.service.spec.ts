@@ -81,6 +81,7 @@ describe('OrderService', () => {
   let promoCodeModel: { updateOne: jest.Mock };
   let customerModel: { findOneAndUpdate: jest.Mock };
   let orderItemHistoryModel: { aggregate: jest.Mock };
+  let pickupRequestModel: { findOne: jest.Mock };
   let pricingService: { priceOrder: jest.Mock };
   let historyLabelService: { labelChanges: jest.Mock };
   let connection: { startSession: jest.Mock };
@@ -174,6 +175,8 @@ describe('OrderService', () => {
     };
     customerModel = { findOneAndUpdate: jest.fn().mockResolvedValue({}) };
     orderItemHistoryModel = { aggregate: jest.fn().mockResolvedValue([]) };
+    // createOrderWithPickup reads the pickup via findOne({...}).populate(...).
+    pickupRequestModel = { findOne: jest.fn() };
     pricingService = { priceOrder: jest.fn() };
     historyLabelService = {
       labelChanges: jest
@@ -234,7 +237,10 @@ describe('OrderService', () => {
         },
         { provide: getModelToken(Office.name), useValue: officeModel },
         { provide: getModelToken(OfficeUser.name), useValue: {} },
-        { provide: getModelToken(PickupRequest.name), useValue: {} },
+        {
+          provide: getModelToken(PickupRequest.name),
+          useValue: pickupRequestModel,
+        },
         { provide: getModelToken(PickupStatus.name), useValue: {} },
         {
           provide: getModelToken(Customer.name),
@@ -506,6 +512,137 @@ describe('OrderService', () => {
 
       // The order.created listeners must not have run for an order that failed.
       expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createOrderWithPickup', () => {
+    const created = {
+      _id: new Types.ObjectId(),
+      orderCode: 'OR-000123',
+      amountPaid: 0,
+      createdAt: new Date('2026-03-04T09:15:00.000Z'),
+    };
+    const customerId = new Types.ObjectId();
+    const pickupRequestId = new Types.ObjectId();
+
+    const dto = (over: Record<string, unknown> = {}) =>
+      ({
+        customerId: customerId.toString(),
+        currencyId: new Types.ObjectId().toString(),
+        pickupRequestId: pickupRequestId.toString(),
+        pricingModel: PricingModelEnum.PER_PIECE,
+        estimatedDeliveryDate: new Date(),
+        ...over,
+      }) as never;
+
+    // The pickup the caller names: assigned, and the customer's own.
+    const setPickup = (over: Record<string, unknown> = {}) =>
+      pickupRequestModel.findOne.mockReturnValue({
+        populate: jest.fn().mockResolvedValue({
+          _id: pickupRequestId,
+          reference: 'PU-A4F92C',
+          customerId,
+          pickupStatusId: { pickupStatusName: 'ASSIGNED' },
+          ...over,
+        }),
+      });
+
+    beforeEach(() => {
+      setPickup();
+      // No order on this pickup, and no open draft for this customer.
+      orderModel.findOne.mockResolvedValue(null);
+      orderModel.findOneAndUpdate.mockResolvedValue(created);
+      orderModel.findById.mockResolvedValue({
+        ...created,
+        pricingModel: PricingModelEnum.PER_PIECE,
+        customerId,
+      });
+      pricingService.priceOrder.mockResolvedValue({
+        lines: [],
+        subtotal: 0,
+        manualDiscount: 0,
+        promoDiscount: 0,
+        total: 0,
+        currencyId: null,
+        promoCodeId: null,
+        subscriptionId: null,
+        quotaConsumed: 0,
+      });
+    });
+
+    it('books the order and its garments, exactly like the no-pickup path', async () => {
+      const line = {
+        itemId: new Types.ObjectId().toString(),
+        serviceTypeId: new Types.ObjectId().toString(),
+        quantity: 2,
+      };
+
+      const res = await service.createOrderWithPickup(dto({ items: [line] }));
+
+      expect(res).toEqual({
+        message: 'Order created successfully',
+        data: { _id: created._id, orderCode: 'OR-000123' },
+      });
+      expect(savedOrderItems).toHaveLength(1);
+      const [, update] = orderModel.findOneAndUpdate.mock.calls[0] as [
+        unknown,
+        Record<string, unknown>,
+      ];
+      expect(update).toMatchObject({ pickupRequestId, customerId });
+      expect(update).not.toHaveProperty('items');
+    });
+
+    it('reads the pickup through the caller scope, not by bare id', async () => {
+      await service.createOrderWithPickup(dto());
+
+      const [filter] = pickupRequestModel.findOne.mock.calls[0] as [
+        Record<string, unknown>,
+      ];
+      expect(filter._id).toEqual(pickupRequestId);
+    });
+
+    it('refuses a pickup that is not ASSIGNED yet', async () => {
+      setPickup({ pickupStatusId: { pickupStatusName: 'CONFIRMED' } });
+
+      await expect(service.createOrderWithPickup(dto())).rejects.toMatchObject({
+        response: { code: 'PICKUP_NOT_ASSIGNED' },
+      });
+      expect(orderModel.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('refuses a second order on the same pickup, whatever status the first reached', async () => {
+      // A DELIVERED order already exists for this pickup.
+      orderModel.findOne.mockResolvedValueOnce({
+        _id: new Types.ObjectId(),
+        orderCode: 'OR-000001',
+      });
+
+      await expect(service.createOrderWithPickup(dto())).rejects.toMatchObject({
+        response: { code: 'PICKUP_ORDER_EXISTS' },
+      });
+      expect(orderModel.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('refuses a pickup that belongs to another customer', async () => {
+      setPickup({ customerId: new Types.ObjectId() });
+
+      await expect(service.createOrderWithPickup(dto())).rejects.toMatchObject({
+        response: { code: 'PICKUP_CUSTOMER_MISMATCH' },
+      });
+      expect(orderModel.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('applies the customer-wide draft rule to this path too', async () => {
+      // First findOne (order on the pickup) finds nothing; the second (open
+      // draft for the customer) finds one.
+      orderModel.findOne
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ _id: new Types.ObjectId() });
+
+      await expect(service.createOrderWithPickup(dto())).rejects.toMatchObject({
+        response: { code: 'DRAFT_EXISTS' },
+      });
+      expect(orderModel.findOneAndUpdate).not.toHaveBeenCalled();
     });
   });
 
@@ -1532,6 +1669,46 @@ describe('OrderService', () => {
       expect(orderStatusModel.findOne).toHaveBeenCalledWith({
         orderStatusName: OrderStatusEnum.READY,
       });
+    });
+
+    it('joins the pickup request, status named, on every row', async () => {
+      orderModel.aggregate
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([{ orderCode: 'OR-1' }]);
+
+      await service.findAll({ page: 1, size: 20 } as never);
+
+      // Second call is the page itself; the first only counts.
+      const [pipeline] = orderModel.aggregate.mock.calls[1] as [
+        Record<string, { from?: string; pipeline?: unknown[] }>[],
+      ];
+      const pickup = pipeline.find(
+        (stage) => stage.$lookup?.from === 'pickup_request',
+      )?.$lookup;
+
+      expect(pickup).toBeDefined();
+      // The status arrives as a name, not another id for the client to resolve.
+      expect(pickup?.pipeline).toContainEqual(
+        expect.objectContaining({
+          $lookup: expect.objectContaining({
+            from: 'pickup_status',
+          }) as unknown,
+        }),
+      );
+
+      const projection = pickup?.pipeline?.find(
+        (stage): stage is { $project: Record<string, unknown> } =>
+          typeof stage === 'object' && stage !== null && '$project' in stage,
+      )?.$project;
+
+      // An allow-list: the pickup's own reference, address, date and status —
+      // never the internal apiClientId.
+      expect(projection).toBeDefined();
+      expect(projection).toHaveProperty('reference');
+      expect(projection).toHaveProperty('pickupAddress');
+      expect(projection).toHaveProperty('pickupDate');
+      expect(projection).toHaveProperty('pickupStatus');
+      expect(projection).not.toHaveProperty('apiClientId');
     });
   });
 

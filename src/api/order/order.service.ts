@@ -185,6 +185,56 @@ const OFFICE_LOOKUP: PipelineStage[] = [
 ];
 
 /**
+ * The pickup request the order came from, with its status named. Shared by the
+ * list and the detail view so both say the same thing about a pickup.
+ *
+ * The projection is an allow-list: where and when we were asked to collect,
+ * and where that request stands. The request also carries `apiClientId`,
+ * `officeId`, `customerId` and `confirmedBy` — the first is internal, the rest
+ * the order already holds.
+ */
+const PICKUP_REQUEST_LOOKUP: PipelineStage[] = [
+  {
+    $lookup: {
+      as: 'pickupRequest',
+      from: 'pickup_request',
+      localField: 'pickupRequestId',
+      foreignField: '_id',
+      pipeline: [
+        {
+          $lookup: {
+            as: 'pickupStatus',
+            from: 'pickup_status',
+            localField: 'pickupStatusId',
+            foreignField: '_id',
+            pipeline: [{ $project: { pickupStatusName: 1 } }],
+          },
+        },
+        {
+          $unwind: {
+            path: '$pickupStatus',
+            preserveNullAndEmptyArrays: true,
+          },
+        },
+        {
+          $project: {
+            note: 1,
+            createdAt: 1,
+            reference: 1,
+            pickupDate: 1,
+            pickupTime: 1,
+            pickupStatus: 1,
+            pickupAddress: 1,
+            pickupStatusId: 1,
+          },
+        },
+      ],
+    },
+  },
+  { $unwind: { path: '$pickupRequest', preserveNullAndEmptyArrays: true } },
+];
+
+/**
  * The order's garment lines, each resolved against the shared catalog: item →
  * service, service type and currency. Shared by the list and the detail view.
  */
@@ -816,7 +866,7 @@ export class OrderService {
     // file, and clearing the weight of an order already priced by the kilo,
     // are the same mistake seen from two directions.
     this.assertWeightForModel(
-      data.pricingModel ?? (order.pricingModel as PricingModelEnum),
+      data.pricingModel ?? order.pricingModel,
       data.totalWeightKg ?? order.totalWeightKg,
     );
 
@@ -1035,8 +1085,13 @@ export class OrderService {
     }
 
     const pickupRequestId = new Types.ObjectId(data.pickupRequestId);
+    // Scoped like every other by-id read: a pickup outside the caller's office
+    // simply isn't found, so its id can't be used to book into another office.
     const pickupRequest = await this.pickupRequestModel
-      .findById(pickupRequestId)
+      .findOne({
+        _id: pickupRequestId,
+        ...scopeFilter(this.req.user.ability, 'READ', 'PickupRequest'),
+      })
       .populate<{
         pickupStatusId: PickupStatus;
       }>({ model: PickupStatus.name, path: 'pickupStatusId' });
@@ -1045,6 +1100,19 @@ export class OrderService {
         `${base} invalid pickup request id ${data.pickupRequestId}`,
       );
       throw new BadRequestException('Invalid pickup request id');
+    }
+
+    // The order is the pickup's order: it must be for the customer who asked
+    // for the collection, whatever customerId the client sent.
+    if (pickupRequest.customerId.toString() !== customerId.toString()) {
+      this.logger.error(
+        `${base} pickup ${pickupRequest.reference} belongs to another customer`,
+      );
+      throw new BadRequestException({
+        code: 'PICKUP_CUSTOMER_MISMATCH',
+        field: 'customerId',
+        message: 'This pickup request belongs to another customer',
+      });
     }
 
     this.assertWeightForModel(data.pricingModel, data.totalWeightKg);
@@ -1061,20 +1129,45 @@ export class OrderService {
       throw new BadRequestException('Order status not found');
     }
 
+    // A pickup is bookable once an agent is on it: CONFIRMED says the customer
+    // wants it, ASSIGNED says someone is going. Anyone may raise the order —
+    // the counter, a supervisor, the agent — it is the pickup's state that
+    // gates it, never who is asking.
     if (
       pickupRequest.pickupStatusId.pickupStatusName !==
       PickupStatusEnum.ASSIGNED.toString()
     ) {
       this.logger.error(
-        `${base} you can only create order for pickup with status ${PickupStatusEnum.ASSIGNED.toString()} `,
+        `${base} pickup ${pickupRequest.reference} is ${pickupRequest.pickupStatusId.pickupStatusName}, not ${PickupStatusEnum.ASSIGNED}`,
       );
-      throw new BadRequestException(
-        `You can only create order for pick with status ${PickupStatusEnum.ASSIGNED.toString()}`,
-      );
+      throw new BadRequestException({
+        code: 'PICKUP_NOT_ASSIGNED',
+        field: 'pickupRequestId',
+        message: `An order can only be created for a pickup in ${PickupStatusEnum.ASSIGNED} status`,
+      });
     }
+
+    // One pickup, one order — at any status, for any customer. The draft check
+    // below would let a second order through the moment the first left DRAFT,
+    // and the collection was only ever going to become one order.
+    const existingPickupOrder = await this.orderModel.findOne({
+      pickupRequestId,
+    });
+    if (existingPickupOrder) {
+      this.logger.error(
+        `${base} pickup ${pickupRequest.reference} already has order ${existingPickupOrder.orderCode}`,
+      );
+      throw new BadRequestException({
+        code: 'PICKUP_ORDER_EXISTS',
+        field: 'pickupRequestId',
+        message: 'This pickup request already has an order',
+      });
+    }
+
+    // Same rule as booking without a pickup: one open draft per customer, so
+    // the two paths cannot be played off against each other to hold two.
     const existingOrder = await this.orderModel.findOne({
       customerId,
-      pickupRequestId,
       orderStatusId: orderStatus._id,
     });
     if (existingOrder) {
@@ -1739,6 +1832,7 @@ export class OrderService {
       },
 
       ...ORDER_ITEMS_LOOKUP,
+      ...PICKUP_REQUEST_LOOKUP,
     ]);
 
     const totalPages = Math.ceil(total / size);
@@ -1838,34 +1932,7 @@ export class OrderService {
       },
 
       ...ORDER_ITEMS_LOOKUP,
-
-      // The pickup request the order came from, with its own status name.
-      {
-        $lookup: {
-          as: 'pickupRequest',
-          from: 'pickup_request',
-          localField: 'pickupRequestId',
-          foreignField: '_id',
-          pipeline: [
-            {
-              $lookup: {
-                as: 'pickupStatus',
-                from: 'pickup_status',
-                localField: 'pickupStatusId',
-                foreignField: '_id',
-                pipeline: [{ $project: { pickupStatusName: 1 } }],
-              },
-            },
-            {
-              $unwind: {
-                path: '$pickupStatus',
-                preserveNullAndEmptyArrays: true,
-              },
-            },
-          ],
-        },
-      },
-      { $unwind: { path: '$pickupRequest', preserveNullAndEmptyArrays: true } },
+      ...PICKUP_REQUEST_LOOKUP,
 
       // What the order was priced against: the applied promo and, for the
       // Subscription model, the enrolment its quota was drawn from.
