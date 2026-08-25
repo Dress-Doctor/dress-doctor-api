@@ -17,7 +17,6 @@ import {
   PipelineStage,
   Types,
 } from 'mongoose';
-import { Workbook } from 'exceljs';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import {
@@ -27,6 +26,11 @@ import {
 import { HistoryActionEnum } from 'src/schema/admin/admin.dto';
 import { scopeFilter, scopePermitsCustomer } from 'src/helper/casl/casl-scope';
 import { AppUtilService } from 'src/helper/service/app-util.service';
+import {
+  buildExportCsv,
+  buildExportExcel,
+  type ExportColumn,
+} from 'src/helper/service/export-file.service';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import {
   HistoryLabelService,
@@ -369,7 +373,7 @@ export type OrderDetail = Record<string, unknown> & {
 };
 
 // One flat row per order for the CSV/Excel export.
-interface OrderExportRow {
+type OrderExportRow = {
   orderCode: string;
   customerName: string;
   customerPhone: string;
@@ -386,11 +390,11 @@ interface OrderExportRow {
   pickedUpBy: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
 // Column order + headers, shared by both CSV and Excel so the two formats stay
 // identical. `key` maps to a field on OrderExportRow.
-const ORDER_EXPORT_COLUMNS: { header: string; key: keyof OrderExportRow }[] = [
+const ORDER_EXPORT_COLUMNS: ExportColumn<OrderExportRow>[] = [
   { header: 'Order Code', key: 'orderCode' },
   { header: 'Customer', key: 'customerName' },
   { header: 'Phone', key: 'customerPhone' },
@@ -2247,14 +2251,14 @@ export class OrderService {
     let result: { buffer: Buffer; filename: string; contentType: string };
     if (format === OrderExportFormatEnum.EXCEL) {
       result = {
-        buffer: await this.buildOrdersExcel(rows),
+        buffer: await buildExportExcel(rows, ORDER_EXPORT_COLUMNS, 'Orders'),
         filename: `orders-export-${stamp}.xlsx`,
         contentType:
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       };
     } else {
       result = {
-        buffer: this.buildOrdersCsv(rows),
+        buffer: buildExportCsv(rows, ORDER_EXPORT_COLUMNS),
         filename: `orders-export-${stamp}.csv`,
         contentType: 'text/csv',
       };
@@ -2262,51 +2266,6 @@ export class OrderService {
 
     this.logger.log(`${logBase} exported ${rows.length} orders as ${format}`);
     return result;
-  }
-
-  // Renders one export cell: dates as YYYY-MM-DD, null/undefined as empty.
-  private formatExportCell(
-    value: OrderExportRow[keyof OrderExportRow],
-  ): string {
-    if (value === null || value === undefined) return '';
-    if (value instanceof Date) return value.toISOString().slice(0, 10);
-    return String(value);
-  }
-
-  private buildOrdersCsv(rows: OrderExportRow[]): Buffer {
-    // RFC-4180 escaping: wrap in quotes and double any embedded quote.
-    const escape = (value: string): string => `"${value.replace(/"/g, '""')}"`;
-    const lines = [
-      ORDER_EXPORT_COLUMNS.map((c) => escape(c.header)).join(','),
-      ...rows.map((row) =>
-        ORDER_EXPORT_COLUMNS.map((c) =>
-          escape(this.formatExportCell(row[c.key])),
-        ).join(','),
-      ),
-    ];
-    // Leading BOM so Excel opens UTF-8 (accented names) correctly.
-    return Buffer.from('﻿' + lines.join('\r\n'), 'utf8');
-  }
-
-  private async buildOrdersExcel(rows: OrderExportRow[]): Promise<Buffer> {
-    const workbook = new Workbook();
-    const sheet = workbook.addWorksheet('Orders');
-    sheet.columns = ORDER_EXPORT_COLUMNS.map((c) => ({
-      header: c.header,
-      key: c.key,
-      width: 18,
-    }));
-    sheet.getRow(1).font = { bold: true };
-    for (const row of rows) {
-      sheet.addRow(
-        ORDER_EXPORT_COLUMNS.reduce<Record<string, string>>((acc, c) => {
-          acc[c.key] = this.formatExportCell(row[c.key]);
-          return acc;
-        }, {}),
-      );
-    }
-    const arrayBuffer = await workbook.xlsx.writeBuffer();
-    return Buffer.from(arrayBuffer);
   }
 
   async createOrderItem(orderId: string, data: CreateOrderItemDto) {

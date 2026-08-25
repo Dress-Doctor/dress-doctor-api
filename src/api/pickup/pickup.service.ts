@@ -6,11 +6,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
-import { Workbook } from 'exceljs';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, QueryFilter, Types } from 'mongoose';
 import type { AppRequestWithUser } from 'src/dto/request-data.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
+import {
+  buildExportCsv,
+  buildExportExcel,
+  type ExportColumn,
+} from 'src/helper/service/export-file.service';
 import { auditContext } from 'src/helper/service/audit-context';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
 import {
@@ -128,7 +132,7 @@ export type PickupDetail = Record<string, unknown> & {
 };
 
 // One flat row per pickup for the CSV/Excel export.
-interface PickupExportRow {
+type PickupExportRow = {
   reference: string;
   customerName: string;
   customerPhone: string;
@@ -141,25 +145,24 @@ interface PickupExportRow {
   confirmedBy: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
 // Column order + headers, shared by both CSV and Excel so the two formats stay
 // identical. `key` maps to a field on PickupExportRow.
-const PICKUP_EXPORT_COLUMNS: { header: string; key: keyof PickupExportRow }[] =
-  [
-    { header: 'Reference', key: 'reference' },
-    { header: 'Customer', key: 'customerName' },
-    { header: 'Phone', key: 'customerPhone' },
-    { header: 'Email', key: 'customerEmail' },
-    { header: 'Office', key: 'office' },
-    { header: 'Status', key: 'status' },
-    { header: 'Pickup Address', key: 'pickupAddress' },
-    { header: 'Pickup Date', key: 'pickupDate' },
-    { header: 'Pickup Time', key: 'pickupTime' },
-    { header: 'Confirmed By', key: 'confirmedBy' },
-    { header: 'Created At', key: 'createdAt' },
-    { header: 'Updated At', key: 'updatedAt' },
-  ];
+const PICKUP_EXPORT_COLUMNS: ExportColumn<PickupExportRow>[] = [
+  { header: 'Reference', key: 'reference' },
+  { header: 'Customer', key: 'customerName' },
+  { header: 'Phone', key: 'customerPhone' },
+  { header: 'Email', key: 'customerEmail' },
+  { header: 'Office', key: 'office' },
+  { header: 'Status', key: 'status' },
+  { header: 'Pickup Address', key: 'pickupAddress' },
+  { header: 'Pickup Date', key: 'pickupDate' },
+  { header: 'Pickup Time', key: 'pickupTime' },
+  { header: 'Confirmed By', key: 'confirmedBy' },
+  { header: 'Created At', key: 'createdAt' },
+  { header: 'Updated At', key: 'updatedAt' },
+];
 
 // Seeded status name → breakdown key. Spelt out rather than lower-cased so the
 // response stays camelCase (PICKED_UP would otherwise land as `picked_up`).
@@ -894,14 +897,14 @@ export class PickupService {
     let result: { buffer: Buffer; filename: string; contentType: string };
     if (format === PickupExportFormatEnum.EXCEL) {
       result = {
-        buffer: await this.buildPickupsExcel(rows),
+        buffer: await buildExportExcel(rows, PICKUP_EXPORT_COLUMNS, 'Pickups'),
         filename: `pickups-export-${stamp}.xlsx`,
         contentType:
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       };
     } else {
       result = {
-        buffer: this.buildPickupsCsv(rows),
+        buffer: buildExportCsv(rows, PICKUP_EXPORT_COLUMNS),
         filename: `pickups-export-${stamp}.csv`,
         contentType: 'text/csv',
       };
@@ -909,51 +912,6 @@ export class PickupService {
 
     this.logger.log(`${logBase} exported ${rows.length} pickups as ${format}`);
     return result;
-  }
-
-  // Renders one export cell: dates as YYYY-MM-DD, null/undefined as empty.
-  private formatExportCell(
-    value: PickupExportRow[keyof PickupExportRow],
-  ): string {
-    if (value === null || value === undefined) return '';
-    if (value instanceof Date) return value.toISOString().slice(0, 10);
-    return String(value);
-  }
-
-  private buildPickupsCsv(rows: PickupExportRow[]): Buffer {
-    // RFC-4180 escaping: wrap in quotes and double any embedded quote.
-    const escape = (value: string): string => `"${value.replace(/"/g, '""')}"`;
-    const lines = [
-      PICKUP_EXPORT_COLUMNS.map((c) => escape(c.header)).join(','),
-      ...rows.map((row) =>
-        PICKUP_EXPORT_COLUMNS.map((c) =>
-          escape(this.formatExportCell(row[c.key])),
-        ).join(','),
-      ),
-    ];
-    // Leading BOM so Excel opens UTF-8 (accented names) correctly.
-    return Buffer.from('﻿' + lines.join('\r\n'), 'utf8');
-  }
-
-  private async buildPickupsExcel(rows: PickupExportRow[]): Promise<Buffer> {
-    const workbook = new Workbook();
-    const sheet = workbook.addWorksheet('Pickups');
-    sheet.columns = PICKUP_EXPORT_COLUMNS.map((c) => ({
-      header: c.header,
-      key: c.key,
-      width: 18,
-    }));
-    sheet.getRow(1).font = { bold: true };
-    for (const row of rows) {
-      sheet.addRow(
-        PICKUP_EXPORT_COLUMNS.reduce<Record<string, string>>((acc, c) => {
-          acc[c.key] = this.formatExportCell(row[c.key]);
-          return acc;
-        }, {}),
-      );
-    }
-    const arrayBuffer = await workbook.xlsx.writeBuffer();
-    return Buffer.from(arrayBuffer);
   }
 
   async findAllPickup({ page, size, ...query }: FindPickupDto) {
