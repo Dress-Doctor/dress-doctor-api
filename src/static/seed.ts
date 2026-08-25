@@ -238,6 +238,9 @@ export default {
     { subject: SubjectEnum.Order, action: PermissionActionEnum.EXPORT },
     ...crud(SubjectEnum.OrderItem),
     ...crud(SubjectEnum.Payment),
+    // Bulk CSV/Excel export of payments — gated separately from READ so it can
+    // be granted to reporting/finance roles only.
+    { subject: SubjectEnum.Payment, action: PermissionActionEnum.EXPORT },
     ...crud(SubjectEnum.PickupRequest),
     // Bulk CSV/Excel export of pickups — gated separately from READ so it can
     // be granted to reporting/oversight roles only.
@@ -285,6 +288,7 @@ export default {
         ...crud(SubjectEnum.Order),
         { subject: SubjectEnum.Order, action: PermissionActionEnum.EXPORT },
         ...crud(SubjectEnum.Payment),
+        { subject: SubjectEnum.Payment, action: PermissionActionEnum.EXPORT },
         ...crud(SubjectEnum.PickupRequest),
         {
           subject: SubjectEnum.PickupRequest,
@@ -342,6 +346,7 @@ export default {
       scope: ScopeEnum.OFFICE,
       permissions: [
         ...crud(SubjectEnum.Payment),
+        { subject: SubjectEnum.Payment, action: PermissionActionEnum.EXPORT },
         ...readUpdate(SubjectEnum.PaymentType),
         ...readUpdate(SubjectEnum.PaymentMethod),
         // Order exports for financial reconciliation (read is implied by export

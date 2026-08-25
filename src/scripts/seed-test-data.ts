@@ -20,6 +20,7 @@
  * it the way the e2e suite does. See the printed summary at the end.
  */
 import { Logger } from '@nestjs/common';
+import { computePaymentPeriod } from './../api/payment/payment-status.util';
 import { systemAuditContext } from 'src/helper/service/audit-context';
 import { NestFactory } from '@nestjs/core';
 import { getModelToken } from '@nestjs/mongoose';
@@ -46,7 +47,6 @@ import { Order } from './../schema/order/order.schema';
 import { PaymentMethod } from './../schema/payment/payment-method.schema';
 import { PaymentType } from './../schema/payment/payment-type.schema';
 import {
-  DebtTypeEnum,
   PaymentMethodEnum,
   PaymentTypeEnum,
 } from './../schema/payment/payment.dto';
@@ -346,8 +346,6 @@ async function bootstrap(): Promise<void> {
       ];
 
       for (const s of scenarios) {
-        const profile = await customerModel.findOne({ userId: s.user._id });
-
         // Two per-garment lines, priced from the catalog (PER_PIECE).
         const lines = items.map((item, i) => {
           const quantity = i === 0 ? 2 : 1;
@@ -437,13 +435,17 @@ async function bootstrap(): Promise<void> {
 
         if (amountPaid > 0) {
           const payment = new paymentModel({
+            reference: await codeService.generatePaymentReference(),
             orderId: order._id,
-            customerId: profile?._id,
+            // The customer *User*, matching what the live payment path copies
+            // off `order.customerId` — not the Customer profile, which is a
+            // different collection and joins to nothing.
+            customerId: s.user._id,
             officeId: office._id,
             paymentMethodId: cash._id,
             paymentTypeId: paymentType._id,
             amount: amountPaid,
-            debtType: DebtTypeEnum.CURRENT,
+            paymentPeriod: computePaymentPeriod(now, order.receivedAt),
             receivedBy: staffUser._id,
             paidAt: now,
             currencyId: xaf._id,

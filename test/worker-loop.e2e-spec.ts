@@ -125,6 +125,7 @@ describe('Worker loop (e2e)', () => {
       pickedUpBy: userId,
     });
     await model('Payment').create({
+      reference: 'PY-TEST01',
       orderId: order._id,
       amount: 1000,
       paidAt: new Date(),

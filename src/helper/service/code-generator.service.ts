@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 import { Model } from 'mongoose';
 import { Office } from 'src/schema/office/office.schema';
 import { Order } from 'src/schema/order/order.schema';
+import { Payment } from 'src/schema/payment/payment.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { Customer } from 'src/schema/user/customer.schema';
 
@@ -17,6 +18,8 @@ export class CodeGeneratorService {
     @InjectModel(Order.name) private readonly orderModel: Model<Order>,
     @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
     @InjectModel(Office.name) private readonly officeModel: Model<Office>,
+
+    @InjectModel(Payment.name) private readonly paymentModel: Model<Payment>,
 
     @InjectModel(PickupRequest.name)
     private readonly pickupRequestModel: Model<PickupRequest>,
@@ -102,6 +105,19 @@ export class CodeGeneratorService {
     do {
       code = this.generateCode(6, 'PU');
       const doc = await this.pickupRequestModel.exists({ reference: code });
+      exists = doc ? true : false;
+    } while (exists);
+
+    return code;
+  }
+
+  async generatePaymentReference() {
+    let code: string;
+    let exists: boolean;
+
+    do {
+      code = this.generateCode(6, 'PY');
+      const doc = await this.paymentModel.exists({ reference: code });
       exists = doc ? true : false;
     } while (exists);
 

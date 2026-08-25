@@ -2,24 +2,15 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   IsDefined,
-  IsEnum,
   IsMongoId,
   IsNumber,
   IsOptional,
   Min,
 } from 'class-validator';
-import { DebtTypeEnum } from 'src/schema/payment/payment.dto';
 
+// `paymentPeriod` is deliberately absent: it is derived from the payment date
+// against the order's own month, so it cannot be asserted by the caller.
 export class CreatePaymentDto {
-  @ApiProperty({
-    required: false,
-    enum: DebtTypeEnum,
-    description: 'Whether this settles the current order or clears old debt',
-  })
-  @IsOptional()
-  @IsEnum(DebtTypeEnum, { message: 'Invalid debtType' })
-  debtType?: DebtTypeEnum;
-
   @ApiProperty({ required: true, description: 'Payment method id' })
   @IsDefined({ message: 'PaymentMethodId is required' })
   @IsMongoId({ message: 'Invalid paymentMethodId' })

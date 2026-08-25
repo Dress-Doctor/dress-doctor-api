@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { ApiSuccessResponse } from 'src/dto/swagger.dto';
 import { HistoryActionEnum } from 'src/schema/admin/admin.dto';
 import { OrderStatusEnum } from 'src/schema/order/order.dto';
+import { PaymentPeriodEnum } from 'src/schema/payment/payment.dto';
 import { OrderCurrencyEntity } from './order-currency.entity';
 import { OrderCustomerEntity } from './order-customer.entity';
 import { OrderItemEntity } from './order-item.entity';
@@ -96,8 +97,8 @@ export class OrderPaymentEntity {
   @ApiProperty({ example: 5000, description: 'Integer XAF' })
   amount: number;
 
-  @ApiProperty({ example: 'CURRENT' })
-  debtType: string;
+  @ApiProperty({ example: 'CURRENT', enum: PaymentPeriodEnum })
+  paymentPeriod: PaymentPeriodEnum;
 
   @ApiProperty({ example: '2026-08-08T15:04:00.000Z' })
   paidAt: string;

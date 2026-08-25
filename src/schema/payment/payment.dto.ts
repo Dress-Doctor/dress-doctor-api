@@ -9,9 +9,14 @@ export enum PaymentTypeEnum {
   REFUND = 'REFUND',
 }
 
-// AR-aging distinction preserved from the sheets: a payment either
-// settles the current order balance or clears prior outstanding debt.
-export enum DebtTypeEnum {
-  CURRENT = 'Current',
-  OLD_DEBT = 'Old Debt',
+/**
+ * AR-aging distinction preserved from the sheets: whether a payment lands in
+ * the same accounting month as the order it settles (CURRENT) or clears a
+ * balance carried over from an earlier month (PRIOR).
+ *
+ * Derived from the two dates, never supplied by the caller.
+ */
+export enum PaymentPeriodEnum {
+  CURRENT = 'CURRENT',
+  PRIOR = 'PRIOR',
 }
