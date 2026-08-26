@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsDateString,
   IsEnum,
@@ -22,6 +23,22 @@ export class FindPaymentDto extends PaginationDto {
   // Free text, not an enum: payment methods are catalog rows that can be
   // added without a deploy, so pinning the filter to a fixed list would reject
   // a method the catalog already accepts. An unknown name matches nothing.
+  @ApiProperty({
+    required: false,
+    example: 'CU-A4F92C',
+    description:
+      'Filter by the customer code. Matched through the payment\u2019s order ' +
+      'rather than the payment\u2019s own `customerId`, which the schema ' +
+      'leaves optional \u2014 the order link never is, so no receipt is missed.',
+  })
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
+  @MaxLength(50, { message: 'Invalid customerCode' })
+  customerCode?: string;
+
   @ApiProperty({
     required: false,
     description: 'Filter by payment method name',

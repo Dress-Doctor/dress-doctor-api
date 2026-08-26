@@ -15,6 +15,7 @@ import {
   OrderStatusEnum,
 } from 'src/schema/order/order.dto';
 import { Order } from 'src/schema/order/order.schema';
+import { Customer } from 'src/schema/user/customer.schema';
 import { PaymentMethod } from 'src/schema/payment/payment-method.schema';
 import { PaymentType } from 'src/schema/payment/payment-type.schema';
 import { PaymentTypeEnum } from 'src/schema/payment/payment.dto';
@@ -156,7 +157,12 @@ describe('PaymentService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentService,
-        { provide: AppUtilService, useValue: { parseSortParam: () => ({}) } },
+        {
+          provide: AppUtilService,
+          useValue: Object.assign(new AppUtilService(), {
+            parseSortParam: () => ({}),
+          }),
+        },
         {
           provide: REQUEST,
           useValue: {
@@ -171,6 +177,10 @@ describe('PaymentService', () => {
         },
         { provide: getModelToken(Payment.name), useValue: paymentModel },
         { provide: getModelToken(Order.name), useValue: orderModel },
+        {
+          provide: getModelToken(Customer.name),
+          useValue: { findOne: jest.fn() },
+        },
         {
           provide: getModelToken(PaymentType.name),
           useValue: paymentTypeModel,
@@ -651,7 +661,8 @@ describe('PaymentService', () => {
 
       const { paidAt } = matchOf(paymentModel.aggregate.mock.calls[0]);
       expect(paidAt.$gte).toEqual(new Date('2026-07-01'));
-      expect(paidAt.$lte).toEqual(new Date('2026-08-05'));
+      // A date-only endDate covers the whole day, not up to its midnight.
+      expect(paidAt.$lte).toEqual(new Date('2026-08-05T23:59:59.999Z'));
     });
 
     it('keeps the breakdown across every type while the cards follow the tab', async () => {

@@ -64,3 +64,5 @@ export class Customer extends Document<Types.ObjectId> {
 export const CustomerSchema = SchemaFactory.createForClass(Customer);
 CustomerSchema.index({ lastOrderAt: -1 });
 CustomerSchema.index({ homeOfficeId: 1 });
+// The customers list filters on a registeredAt window and sorts by it.
+CustomerSchema.index({ registeredAt: -1 });

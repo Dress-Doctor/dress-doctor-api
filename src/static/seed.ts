@@ -247,6 +247,9 @@ export default {
     { subject: SubjectEnum.PickupRequest, action: PermissionActionEnum.EXPORT },
     ...crud(SubjectEnum.PickupAssignment),
     ...crud(SubjectEnum.Customer),
+    // Bulk CSV/Excel export of customers — gated separately from READ because
+    // the file is a list of names, phones and addresses leaving the building.
+    { subject: SubjectEnum.Customer, action: PermissionActionEnum.EXPORT },
     ...crud(SubjectEnum.User),
     ...crud(SubjectEnum.Office),
     ...crud(SubjectEnum.Item),
@@ -295,6 +298,7 @@ export default {
           action: PermissionActionEnum.EXPORT,
         },
         ...crud(SubjectEnum.Customer),
+        { subject: SubjectEnum.Customer, action: PermissionActionEnum.EXPORT },
         ...readUpdate(SubjectEnum.FollowUp),
       ],
     },

@@ -9,6 +9,8 @@ import { REQUEST } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, QueryFilter, Types } from 'mongoose';
 import type { AppRequestWithUser } from 'src/dto/request-data.dto';
+import { SAFE_OFFICE_PROJECTION } from 'src/helper/projection/office.projection';
+import { SAFE_USER_PROJECTION } from 'src/helper/projection/user.projection';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import {
   buildExportCsv,
@@ -57,6 +59,7 @@ import {
 import { FindPickupDto } from './dto/find-pickup.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { scopeFilter } from 'src/helper/casl/casl-scope';
+import { phoneQuery, toE164Digits } from 'src/helper/phone';
 
 // Ceiling on the customer prefilter behind `keyword` — a broad term must not
 // pull the whole user collection into the pickup query.
@@ -82,38 +85,6 @@ export type PickupKpis = {
   completionRate: number;
   byPickupStatus: PickupStatusCounts;
 };
-
-/**
- * Allow-list of non-sensitive User fields for any user joined onto a pickup
- * (customer, confirmer, agent, whoever changed it). passwordHash / any secret
- * is never projected — never switch this to an exclusion projection.
- */
-const SAFE_USER_PROJECTION = {
-  firstName: 1,
-  lastName: 1,
-  phone: 1,
-  whatsappPhone: 1,
-  email: 1,
-  gender: 1,
-  preferredLanguage: 1,
-  isActive: 1,
-  userTypeId: 1,
-} as const;
-
-/**
- * Allow-list of Office fields safe to return with a pickup. The office's
- * `signedLink` carries an HMAC and must never be exposed here.
- */
-const SAFE_OFFICE_PROJECTION = {
-  officeTypeId: 1,
-  officeName: 1,
-  officeCode: 1,
-  slug: 1,
-  address: 1,
-  city: 1,
-  region: 1,
-  isActive: 1,
-} as const;
 
 // A detail read is a screen, not a feed: cap the trail it carries.
 const PICKUP_HISTORY_LIMIT = 100;
@@ -242,9 +213,18 @@ export class PickupService {
     });
 
     // Create or update user
+    // Matched on every spelling and written in the normalised one, so a
+    // walk-in cannot open a second account for somebody already on the books.
     const foundedUser = await this.userModel.findOneAndUpdate(
-      { phone: data.phone },
-      { ...data, userTypeId: userType!._id },
+      { phone: phoneQuery(data.phone) },
+      {
+        ...data,
+        phone: toE164Digits(data.phone),
+        ...(data.whatsappPhone
+          ? { whatsappPhone: toE164Digits(data.whatsappPhone) }
+          : {}),
+        userTypeId: userType!._id,
+      },
       { upsert: true, returnDocument: 'after' },
     );
 
@@ -356,7 +336,7 @@ export class PickupService {
     const startDate = query.startDate
       ? new Date(query.startDate)
       : new Date(now.getTime() - DEFAULT_DATE_WINDOW_MS);
-    const endDate = query.endDate ? new Date(query.endDate) : now;
+    const endDate = this.appUtilService.parseRangeEnd(query.endDate) ?? now;
 
     let baseFilter: QueryFilter<PickupRequest> = {
       createdAt: { $gte: startDate, $lte: endDate },

@@ -18,6 +18,7 @@
     "backfill:payment-reference": "ts-node -r tsconfig-paths/register src/scripts/backfill-payment-reference.ts",
     "backfill:payment-period": "ts-node -r tsconfig-paths/register src/scripts/backfill-payment-period.ts",
     "backfill:payment-customer": "ts-node -r tsconfig-paths/register src/scripts/backfill-payment-customer.ts",
+    "backfill:phone-e164": "ts-node -r tsconfig-paths/register src/scripts/backfill-phone-e164.ts",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "lint:ci": "eslint \"{src,apps,libs,test}/**/*.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.build.json",

@@ -16,6 +16,8 @@ import {
   Types,
 } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
+import { SAFE_OFFICE_PROJECTION } from 'src/helper/projection/office.projection';
+import { SAFE_USER_PROJECTION } from 'src/helper/projection/user.projection';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import {
   applyAuditLocals,
@@ -37,6 +39,7 @@ import { Office } from 'src/schema/office/office.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
 import { OrderPaymentStatusEnum } from 'src/schema/order/order.dto';
 import { Order } from 'src/schema/order/order.schema';
+import { Customer } from 'src/schema/user/customer.schema';
 import { PaymentMethod } from 'src/schema/payment/payment-method.schema';
 import { PaymentType } from 'src/schema/payment/payment-type.schema';
 import {
@@ -152,38 +155,6 @@ const PAYMENT_EXPORT_COLUMNS: ExportColumn<PaymentExportRow>[] = [
 ];
 
 /**
- * Allow-list of non-sensitive User fields for any user joined onto a payment
- * (the customer, the staff member who received it). passwordHash / any secret
- * is never projected — never switch this to an exclusion projection.
- */
-const SAFE_USER_PROJECTION = {
-  firstName: 1,
-  lastName: 1,
-  phone: 1,
-  whatsappPhone: 1,
-  email: 1,
-  gender: 1,
-  preferredLanguage: 1,
-  isActive: 1,
-  userTypeId: 1,
-} as const;
-
-/**
- * Allow-list of Office fields safe to return with a payment. The office's
- * `signedLink` carries an HMAC and must never be exposed here.
- */
-const SAFE_OFFICE_PROJECTION = {
-  officeTypeId: 1,
-  officeName: 1,
-  officeCode: 1,
-  slug: 1,
-  address: 1,
-  city: 1,
-  region: 1,
-  isActive: 1,
-} as const;
-
-/**
  * Order join. Like the customer join it runs BEFORE the free-text filter, so
  * `q` can match the order's code — which lives on the order, not the payment.
  *
@@ -230,6 +201,7 @@ export class PaymentService {
     @InjectModel(PaymentType.name)
     private readonly paymentTypeModel: Model<PaymentType>,
     @InjectModel(Order.name) private readonly orderModel: Model<Order>,
+    @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
 
     @Inject(REQUEST) private readonly req: AppRequestWithUser,
 
@@ -320,7 +292,7 @@ export class PaymentService {
     const startDate = query.startDate
       ? new Date(query.startDate)
       : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const endDate = query.endDate ? new Date(query.endDate) : now;
+    const endDate = this.appUtilService.parseRangeEnd(query.endDate) ?? now;
     whereClause['paidAt'] = { $gte: startDate, $lte: endDate };
 
     // Auto-scope: office staff → their office's payments; customer → own.
@@ -358,6 +330,23 @@ export class PaymentService {
       ...ORDER_LOOKUP,
       ...CUSTOMER_LOOKUP,
     ];
+
+    // Narrow to one customer through the order they paid for, not through the
+    // payment's own `customerId`: that field is optional on the schema, while
+    // every payment hangs off exactly one order, so this is the only join that
+    // cannot miss a receipt. An unknown code resolves to an id that matches
+    // nothing, which is an empty list rather than the whole ledger.
+    if (query.customerCode) {
+      const customer = await this.customerModel
+        .findOne({ customerCode: query.customerCode.trim().toUpperCase() })
+        .select('userId')
+        .lean();
+      filterStages.push({
+        $match: {
+          'orderId.customerId': customer?.userId ?? new Types.ObjectId(),
+        },
+      });
+    }
 
     if (query.q && query.q.trim()) {
       const escaped = query.q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

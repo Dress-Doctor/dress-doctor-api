@@ -37,6 +37,7 @@ describe('Customer self-scope + booking (e2e)', () => {
   type Cust = {
     userId: Types.ObjectId;
     customerId: string; // Customer profile _id
+    customerCode: string; // What every by-customer URL is addressed by
     token: string;
   };
   let alice: Cust;
@@ -77,7 +78,12 @@ describe('Customer self-scope + booking (e2e)', () => {
       phone,
       userType: 'CUSTOMER',
     });
-    return { userId: user._id, customerId: profile._id.toString(), token };
+    return {
+      userId: user._id,
+      customerId: profile._id.toString(),
+      customerCode: profile.customerCode,
+      token,
+    };
   };
 
   beforeAll(async () => {
@@ -146,36 +152,97 @@ describe('Customer self-scope + booking (e2e)', () => {
     const get = (path: string) =>
       as(alice.token)(request(app.getHttpServer()).get(path)).expect(200);
 
-    const profile = await get(`/api/v1/customers/${alice.customerId}`);
+    const profile = await get(`/api/v1/customers/${alice.customerCode}`);
     expect(profile.body.data.customerCode).toBe('CU-ALICE1');
 
-    const orders = await get(`/api/v1/customers/${alice.customerId}/orders`);
+    const orders = await get(`/api/v1/customers/${alice.customerCode}/orders`);
     expect(orders.body.success).toBe(true);
 
-    const rewards = await get(`/api/v1/customers/${alice.customerId}/rewards`);
+    const rewards = await get(
+      `/api/v1/customers/${alice.customerCode}/rewards`,
+    );
     expect(rewards.body.data.balance).toBe(0);
 
     const referral = await get(
-      `/api/v1/customers/${alice.customerId}/referral`,
+      `/api/v1/customers/${alice.customerCode}/referral`,
     );
     expect(referral.body.data.referralCode).toBe('RF-ALICE1');
     expect(referral.body.data.referredCount).toBe(0);
 
-    const balance = await get(`/api/v1/customers/${alice.customerId}/balance`);
+    const balance = await get(
+      `/api/v1/customers/${alice.customerCode}/balance`,
+    );
     expect(balance.body.data.outstanding).toBe(0);
 
-    const sub = await get(`/api/v1/customers/${alice.customerId}/subscription`);
+    const sub = await get(
+      `/api/v1/customers/${alice.customerCode}/subscription`,
+    );
     expect(sub.body.data.subscription).toBeNull();
+
+    // The detail dashboard's own reads. A customer with nothing on the books
+    // must come back as zeros, not as empty cards or a 500.
+    const summary = await get(
+      `/api/v1/customers/${alice.customerCode}/summary`,
+    );
+    expect(summary.body.data.orders).toEqual({
+      total: 0,
+      cancelled: 0,
+      withoutPickup: 0,
+      paidInFull: 0,
+    });
+    expect(summary.body.data.spend).toEqual({
+      ordered: 0,
+      paid: 0,
+      outstanding: 0,
+      outstandingOrders: 0,
+    });
+    // Never ordered: a lead, not a risk.
+    expect(summary.body.data.activity.atRisk).toBe(false);
+    // The seeded Customer role reads payments but not pickups, so the pickup
+    // count comes back absent rather than as a zero the reader would take for
+    // a fact, while the payment side is a real empty.
+    expect(summary.body.data.totalPickups).toBeNull();
+    expect(summary.body.data.methods).toEqual([]);
+    expect(summary.body.data.payments.count).toBe(0);
+
+    const trend = await get(
+      `/api/v1/customers/${alice.customerCode}/spend-trend?months=3`,
+    );
+    // Every month present, even the empty ones — a chart that skips quiet
+    // months shows a steady customer where there was a pause.
+    expect(trend.body.data.months).toHaveLength(3);
+    expect(trend.body.data.months[0].paid).toBe(0);
+
+    const timeline = await get(
+      `/api/v1/customers/${alice.customerCode}/timeline`,
+    );
+    expect(timeline.body.data).toEqual([]);
+  });
+
+  it('the dedicated pickup view refuses a role that cannot read pickups', async () => {
+    // Unlike the dashboard summary, which drops the section it may not show,
+    // this endpoint exists to serve one collection: a caller who cannot read
+    // it is told so rather than handed an empty list reading as "none".
+    const res = await as(alice.token)(
+      request(app.getHttpServer()).get(
+        `/api/v1/customers/${alice.customerCode}/pickups`,
+      ),
+    );
+    expect(res.status).toBe(400);
   });
 
   it("cross-customer access is a 404 on EVERY self view (Alice → Bob's ids)", async () => {
     for (const path of [
-      `/api/v1/customers/${bob.customerId}`,
-      `/api/v1/customers/${bob.customerId}/orders`,
-      `/api/v1/customers/${bob.customerId}/rewards`,
-      `/api/v1/customers/${bob.customerId}/referral`,
-      `/api/v1/customers/${bob.customerId}/balance`,
-      `/api/v1/customers/${bob.customerId}/subscription`,
+      `/api/v1/customers/${bob.customerCode}`,
+      `/api/v1/customers/${bob.customerCode}/orders`,
+      `/api/v1/customers/${bob.customerCode}/rewards`,
+      `/api/v1/customers/${bob.customerCode}/referral`,
+      `/api/v1/customers/${bob.customerCode}/balance`,
+      `/api/v1/customers/${bob.customerCode}/subscription`,
+      `/api/v1/customers/${bob.customerCode}/summary`,
+      `/api/v1/customers/${bob.customerCode}/spend-trend`,
+      `/api/v1/customers/${bob.customerCode}/history`,
+      `/api/v1/customers/${bob.customerCode}/timeline`,
     ]) {
       const res = await as(alice.token)(request(app.getHttpServer()).get(path));
       expect([404]).toContain(res.status);
@@ -216,7 +283,7 @@ describe('Customer self-scope + booking (e2e)', () => {
     // Their own order shows up in their history…
     const orders = await as(alice.token)(
       request(app.getHttpServer()).get(
-        `/api/v1/customers/${alice.customerId}/orders`,
+        `/api/v1/customers/${alice.customerCode}/orders`,
       ),
     ).expect(200);
     expect(orders.body.total).toBe(1);
@@ -255,7 +322,7 @@ describe('Customer self-scope + booking (e2e)', () => {
   it('self-service profile edit updates contact + opt-in; cross-customer PATCH is 404', async () => {
     await as(alice.token)(
       request(app.getHttpServer()).patch(
-        `/api/v1/customers/${alice.customerId}`,
+        `/api/v1/customers/${alice.customerCode}`,
       ),
     )
       .send({
@@ -272,8 +339,36 @@ describe('Customer self-scope + booking (e2e)', () => {
     expect(profile.notificationsOptIn).toBe(false);
     expect(profile.pickupAddress).toBe('Bonapriso, Douala');
 
+    // The edit is on the trail, with the reason that was given for it — the
+    // half of an audit entry that says why, not just what.
+    const history = await as(alice.token)(
+      request(app.getHttpServer()).get(
+        `/api/v1/customers/${alice.customerCode}/history`,
+      ),
+    ).expect(200);
+
+    const entries = history.body.data as {
+      source: string;
+      reason?: string;
+      changes: { field: string }[];
+    }[];
+    expect(entries.length).toBeGreaterThan(0);
+    // Both records moved, and the trail says which one each entry came from.
+    expect(entries.map((entry) => entry.source)).toEqual(
+      expect.arrayContaining(['customer', 'user']),
+    );
+    expect(
+      entries.some((entry) =>
+        entry.changes.some((change) => change.field === 'pickupAddress'),
+      ),
+    ).toBe(true);
+    // The stored snapshot never leaves the server.
+    expect(entries[0]).not.toHaveProperty('snapshot');
+
     await as(alice.token)(
-      request(app.getHttpServer()).patch(`/api/v1/customers/${bob.customerId}`),
+      request(app.getHttpServer()).patch(
+        `/api/v1/customers/${bob.customerCode}`,
+      ),
     )
       .send({ whatsappPhone: '237600000000' })
       .expect(404);

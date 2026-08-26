@@ -18,6 +18,8 @@ import {
   Types,
 } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
+import { SAFE_OFFICE_PROJECTION } from 'src/helper/projection/office.projection';
+import { SAFE_USER_PROJECTION } from 'src/helper/projection/user.projection';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import {
   applyAuditLocals,
@@ -123,38 +125,6 @@ export type OrderKpis = {
    */
   byOrderStatus: OrderStatusCounts;
 };
-
-/**
- * Allow-list of non-sensitive User fields for any user joined into an order
- * (customer, creator, pickup agent). passwordHash / any secret is never
- * projected — never switch this to an exclusion projection.
- */
-const SAFE_USER_PROJECTION = {
-  firstName: 1,
-  lastName: 1,
-  phone: 1,
-  whatsappPhone: 1,
-  email: 1,
-  gender: 1,
-  preferredLanguage: 1,
-  isActive: 1,
-  userTypeId: 1,
-} as const;
-
-/**
- * Allow-list of Office fields safe to return with an order. The office's
- * `signedLink` carries an HMAC and must never be exposed here.
- */
-const SAFE_OFFICE_PROJECTION = {
-  officeTypeId: 1,
-  officeName: 1,
-  officeCode: 1,
-  slug: 1,
-  address: 1,
-  city: 1,
-  region: 1,
-  isActive: 1,
-} as const;
 
 /**
  * Customer join. On the list it runs BEFORE the keyword filter so free-text
@@ -1585,7 +1555,7 @@ export class OrderService {
     const startDate = query.startDate
       ? new Date(query.startDate)
       : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const endDate = query.endDate ? new Date(query.endDate) : now;
+    const endDate = this.appUtilService.parseRangeEnd(query.endDate) ?? now;
     whereClause['receivedAt'] = { $gte: startDate, $lte: endDate };
 
     // Auto-scope: office staff see their office's orders; a customer sees only

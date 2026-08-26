@@ -57,7 +57,7 @@ describe('PickupService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PickupService,
-        { provide: AppUtilService, useValue: {} },
+        { provide: AppUtilService, useValue: new AppUtilService() },
         { provide: CodeGeneratorService, useValue: {} },
         {
           provide: HistoryLabelService,

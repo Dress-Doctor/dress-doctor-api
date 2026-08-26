@@ -27,6 +27,7 @@ import {
 import { OTPChannelEnum, OTPPurposeEnum } from 'src/schema/otp/otp.dto';
 import { UserTypeEum } from 'src/schema/user/user.dto';
 import { maskPhone } from 'src/helper/pii';
+import { phoneQuery } from 'src/helper/phone';
 
 /** Just the user fields OTP delivery needs — works for populated or raw docs. */
 type OtpTarget = Pick<User, 'phone' | 'firstName' | 'email' | 'whatsappPhone'>;
@@ -159,11 +160,22 @@ export class AuthService {
    */
   private resolveLoginIdentity(identifier: string): {
     channel: OTPChannelEnum;
-    query: Record<string, string>;
+    query: Record<string, unknown>;
   } {
-    return identifier.includes('@')
-      ? { channel: OTPChannelEnum.EMAIL, query: { email: identifier } }
-      : { channel: OTPChannelEnum.WHATSAPP, query: { phone: identifier } };
+    if (identifier.includes('@')) {
+      return { channel: OTPChannelEnum.EMAIL, query: { email: identifier } };
+    }
+
+    /**
+     * Matched against every stored spelling, not one: phones are now kept with
+     * their country code, while rows written before that carry bare national
+     * digits. Somebody signing in with the 9 digits they have always typed must
+     * still find their account, whether or not the backfill has been run.
+     */
+    return {
+      channel: OTPChannelEnum.WHATSAPP,
+      query: { phone: phoneQuery(identifier) },
+    };
   }
 
   /**

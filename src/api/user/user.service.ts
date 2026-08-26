@@ -26,6 +26,20 @@ import { Office } from 'src/schema/office/office.schema';
 import { OfficeUser } from 'src/schema/office/office-user.schema';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AssignRoleDto } from './dto/assign-role.dto';
+import { phoneQuery, toE164Digits } from 'src/helper/phone';
+
+/**
+ * The two numbers in their stored form — digits with the country code — so an
+ * upsert cannot write the bare national spelling back over a normalised row.
+ */
+function normalisedPhones(data: { phone: string; whatsappPhone?: string }) {
+  return {
+    phone: toE164Digits(data.phone),
+    ...(data.whatsappPhone
+      ? { whatsappPhone: toE164Digits(data.whatsappPhone) }
+      : {}),
+  };
+}
 
 @Injectable()
 export class UserService {
@@ -76,7 +90,10 @@ export class UserService {
       throw new BadRequestException('Invalid user type id');
     }
 
-    const userExists = await this.userModel.findOne({ phone: data.phone });
+    // Every spelling, so a legacy row is found before a duplicate is written.
+    const userExists = await this.userModel.findOne({
+      phone: phoneQuery(data.phone),
+    });
     if (userExists) {
       const log = `[${platform}] ${phone} this user ${data.phone} already exists.`;
       this.logger.error(log);
@@ -92,8 +109,8 @@ export class UserService {
 
     if (userTypeExists.userTypeName === UserTypeEum.CUSTOMER.toString()) {
       const newUser = await this.userModel.findOneAndUpdate(
-        { phone: data.phone },
-        { ...data, userTypeId },
+        { phone: phoneQuery(data.phone) },
+        { ...data, ...normalisedPhones(data), userTypeId },
         {
           context: auditContext(this.req, userId),
           upsert: true,
@@ -123,8 +140,13 @@ export class UserService {
 
       const hashedPassword = await this.codeService.hashPlainText(password);
       await this.userModel.findOneAndUpdate(
-        { phone: data.phone },
-        { ...data, userTypeId, passwordHash: hashedPassword },
+        { phone: phoneQuery(data.phone) },
+        {
+          ...data,
+          ...normalisedPhones(data),
+          userTypeId,
+          passwordHash: hashedPassword,
+        },
         {
           context: auditContext(this.req, userId),
           upsert: true,

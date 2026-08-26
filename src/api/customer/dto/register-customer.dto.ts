@@ -11,7 +11,15 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { PHONE_MAX_DIGITS, PHONE_MIN_DIGITS } from 'src/helper/phone';
 import { GenderEnum } from 'src/schema/user/user.dto';
+
+const PHONE_LENGTH_MESSAGE =
+  `Phone must be ${PHONE_MIN_DIGITS}-${PHONE_MAX_DIGITS} digits, ` +
+  'country code included';
+const WHATSAPP_LENGTH_MESSAGE =
+  `WhatsApp phone must be ${PHONE_MIN_DIGITS}-${PHONE_MAX_DIGITS} digits, ` +
+  'country code included';
 
 export class RegisterCustomerDto {
   @ApiProperty({ required: true, example: 'John' })
@@ -28,18 +36,30 @@ export class RegisterCustomerDto {
   @MaxLength(50, { message: 'Last name must be less than 50 characters' })
   lastName: string;
 
-  @ApiProperty({ required: true, example: '698765294' })
+  @ApiProperty({
+    required: true,
+    example: '237698765294',
+    description:
+      'Digits with the country code, no symbols. A bare 9-digit number is ' +
+      'taken as Cameroonian and stored with 237 in front of it.',
+  })
   @IsDefined({ message: 'Phone is required' })
   @IsNumberString({ no_symbols: true })
-  @MaxLength(9, { message: 'Phone must be 9 digit long' })
-  @MinLength(9, { message: 'Phone must be 9 digit long' })
+  @MinLength(PHONE_MIN_DIGITS, { message: PHONE_LENGTH_MESSAGE })
+  @MaxLength(PHONE_MAX_DIGITS, { message: PHONE_LENGTH_MESSAGE })
   phone: string;
 
-  @ApiProperty({ required: true, example: '698765294' })
+  @ApiProperty({
+    required: true,
+    example: '12025550123',
+    description:
+      'Digits with the country code, no symbols. Need not share a country ' +
+      'with `phone` — a customer in Douala may keep a foreign WhatsApp number.',
+  })
   @IsDefined({ message: 'WhatsApp phone is required' })
   @IsNumberString({ no_symbols: true })
-  @MaxLength(9, { message: 'WhatsApp phone must be 9 digit long' })
-  @MinLength(9, { message: 'WhatsApp phone must be 9 digit long' })
+  @MinLength(PHONE_MIN_DIGITS, { message: WHATSAPP_LENGTH_MESSAGE })
+  @MaxLength(PHONE_MAX_DIGITS, { message: WHATSAPP_LENGTH_MESSAGE })
   whatsappPhone: string;
 
   @ApiProperty({ required: false, example: 'john@example.com' })

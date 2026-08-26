@@ -205,9 +205,11 @@ describe('OrderService', () => {
         },
         {
           provide: AppUtilService,
-          useValue: {
+          // The real helper with the sort stubbed: the date-window parsing is
+          // shared logic the list depends on, not something worth re-faking.
+          useValue: Object.assign(new AppUtilService(), {
             parseSortParam: jest.fn().mockReturnValue({ receivedAt: -1 }),
-          },
+          }),
         },
         { provide: PricingService, useValue: pricingService },
         { provide: HistoryLabelService, useValue: historyLabelService },
