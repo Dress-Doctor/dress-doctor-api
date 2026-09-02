@@ -3,6 +3,7 @@ import {
   InternalServerErrorException,
   Logger,
   OnModuleInit,
+  Optional,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import * as fs from 'fs';
@@ -31,6 +32,9 @@ import { QueueProcessor, Queues } from 'src/queue/queue.dto';
 import { Queue } from 'bullmq';
 import constant from '../constant';
 import { OTPChannelEnum } from 'src/schema/otp/otp.dto';
+import { ProviderMetricsService } from '../metrics/provider-metrics.service';
+
+export const SMTP_PROVIDER_NAME = 'smtp';
 
 @Injectable()
 export class NotificationService implements OnModuleInit {
@@ -52,6 +56,10 @@ export class NotificationService implements OnModuleInit {
     private readonly whatsappProvider: WhatsAppProvider,
 
     @InjectQueue(Queues.notification) private notificationsQueue: Queue,
+
+    // Optional so the unit specs can construct the service directly; the
+    // global MetricsModule always provides it in the app.
+    @Optional() private readonly providerMetrics?: ProviderMetricsService,
   ) {}
 
   onModuleInit() {
@@ -66,6 +74,19 @@ export class NotificationService implements OnModuleInit {
       // so the processor's concurrency can't trip the provider's own limit.
       pool: true,
       maxConnections: 5,
+      // Google's relay answers a throttled connection by simply not replying
+      // (or by closing it mid-session), and nodemailer's defaults then wait
+      // 2 min to connect / 10 min on the socket. That is the "email took
+      // forever" symptom: one stalled attempt holding the job. Fail fast
+      // instead and let BullMQ retry against a fresh connection.
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 30_000,
+      // Stay under the relay's per-connection and per-second limits rather
+      // than being told to go away with a 421.
+      maxMessages: 50,
+      rateDelta: 1_000,
+      rateLimit: 5,
     });
   }
 
@@ -173,10 +194,27 @@ export class NotificationService implements OnModuleInit {
       to: data.recipients,
     };
 
-    // Nothing is caught here on purpose: an SMTP failure has to reach the
+    // Nothing is swallowed here on purpose: an SMTP failure has to reach the
     // processor so BullMQ retries it and /metrics counts it. Swallowing it
-    // marked the job COMPLETED and the mail simply never arrived.
-    const result: unknown = await this.transport.sendMail(options);
+    // marked the job COMPLETED and the mail simply never arrived. The catch
+    // only records the timing before re-throwing.
+    const startedAt = Date.now();
+    let result: unknown;
+    try {
+      result = await this.transport.sendMail(options);
+    } catch (err) {
+      await this.providerMetrics?.recordCall(
+        SMTP_PROVIDER_NAME,
+        Date.now() - startedAt,
+        false,
+      );
+      throw err;
+    }
+    await this.providerMetrics?.recordCall(
+      SMTP_PROVIDER_NAME,
+      Date.now() - startedAt,
+      true,
+    );
 
     for (const [index, recipient] of data.recipients.entries()) {
       const user = await this.userModel.findOne({ email: recipient.address });
@@ -281,10 +319,14 @@ export class NotificationService implements OnModuleInit {
     // delivery-log index is the durable second one. BullMQ forbids ':' in
     // custom job ids (its Redis key separator), so the id is the dedupKey
     // with ':' flattened — same uniqueness, valid id.
-    await this.notificationsQueue.add(
-      QueueProcessor.notification,
-      data,
-      data.dedupKey ? { jobId: data.dedupKey.replace(/:/g, '-') } : undefined,
-    );
+    // The queue-wide default (3 attempts, 2s base) is tuned for a bug, not for
+    // a provider saying "try again later": a 421 needs to be re-tried further
+    // apart and for longer. 5 attempts on a 10s exponential spans ~2.5 min,
+    // inside the OTP validity window.
+    await this.notificationsQueue.add(QueueProcessor.notification, data, {
+      attempts: 5,
+      backoff: { type: 'exponential', delay: 10_000 },
+      ...(data.dedupKey ? { jobId: data.dedupKey.replace(/:/g, '-') } : {}),
+    });
   }
 }

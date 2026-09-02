@@ -11,6 +11,7 @@ import {
   ProviderMetrics,
 } from 'src/helper/metrics/provider-metrics.service';
 import { WHATSAPP_PROVIDER_NAME } from 'src/helper/service/whatsapp.provider';
+import { SMTP_PROVIDER_NAME } from 'src/helper/service/notification.service';
 import { Setting, SettingKeys } from 'src/schema/settings/settings.schema';
 
 // Cron is overdue when the last COMPLETED run is older than ~3 intervals —
@@ -131,7 +132,14 @@ export class MetricsService {
       );
     }
 
-    return { queues, cron, providers: { whatsapp }, alerts };
+    // SMTP is the channel actually in use, so its failure rate and latency
+    // belong beside WhatsApp's rather than only in the log file.
+    const smtp = await this.providerMetrics.read(SMTP_PROVIDER_NAME);
+    if (smtp.failures > 0) {
+      alerts.push(`provider-failures: smtp ${smtp.failures}/${smtp.calls}`);
+    }
+
+    return { queues, cron, providers: { whatsapp, smtp }, alerts };
   }
 
   /** Wait time of the head of the waiting list — FIFO, so the oldest job. */

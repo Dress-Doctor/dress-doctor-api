@@ -95,17 +95,33 @@ describe('NotificationService (WhatsApp dispatch)', () => {
       expect(queue.add).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({ dedupKey: 'order-status:o1:READY' }),
-        { jobId: 'order-status-o1-READY' },
+        expect.objectContaining({ jobId: 'order-status-o1-READY' }),
       );
     });
 
     it('enqueues without a jobId when there is no dedupKey', async () => {
       await service.addToQueue(data);
 
+      const [, , opts] = queue.add.mock.calls[0] as [
+        string,
+        unknown,
+        Record<string, unknown>,
+      ];
+      expect(opts).not.toHaveProperty('jobId');
+    });
+
+    // A 421 "try again later" needs re-trying further apart than the
+    // queue-wide default, and for longer than three attempts.
+    it('enqueues with the throttle-tolerant retry budget', async () => {
+      await service.addToQueue(data);
+
       expect(queue.add).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ templateName: data.templateName }),
-        undefined,
+        expect.anything(),
+        expect.objectContaining({
+          attempts: 5,
+          backoff: { type: 'exponential', delay: 10_000 },
+        }),
       );
     });
   });
