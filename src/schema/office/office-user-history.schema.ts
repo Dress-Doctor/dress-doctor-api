@@ -11,8 +11,14 @@ export class OfficeUserHistory extends Document<Types.ObjectId> {
   @Prop({ required: true, type: Types.ObjectId, ref: OfficeUser.name })
   officeUserId: Types.ObjectId;
 
-  @Prop({ required: true, index: true, type: Types.ObjectId, ref: User.name })
-  userId: Types.ObjectId;
+  /**
+   * The staff member the assignment is about. Optional so a history row is
+   * never rejected for a missing field — the trail is written by a post-save
+   * hook that only knows the assignment's own `_id`, and the snapshot below
+   * carries the user either way.
+   */
+  @Prop({ required: false, index: true, type: Types.ObjectId, ref: User.name })
+  userId?: Types.ObjectId;
 
   @Prop({ required: false, type: Object, default: {} })
   changedFields?: Record<string, ChangedFieldDto>;

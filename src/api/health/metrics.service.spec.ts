@@ -12,15 +12,16 @@ describe('MetricsService', () => {
   let failedSize: jest.Mock;
   let providerRead: jest.Mock;
 
-  const makeQueue = () =>
+  const makeQueue = (waiting: { timestamp: number }[] = []) =>
     ({
       getJobCounts: jest.fn().mockResolvedValue({
-        waiting: 0,
+        waiting: waiting.length,
         active: 0,
         completed: 5,
         failed: 0,
         delayed: 0,
       }),
+      getWaiting: jest.fn().mockResolvedValue(waiting),
     }) as unknown as Queue;
 
   beforeEach(() => {

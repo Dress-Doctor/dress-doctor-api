@@ -14,6 +14,7 @@ import request from 'supertest';
 import { HTTPExceptionFilter } from '../src/helper/exception-filters/http.exception-filter';
 import { HTTPResponseInterceptor } from '../src/helper/interceptor/http.interceptor';
 import { AppValidationPipe } from '../src/helper/pipe/app-validation.pipe';
+import { redisTestEnv } from './redis-test-env';
 
 /**
  * Subscription module over HTTP (§2.2): plan catalog, lifecycle, and the
@@ -46,9 +47,7 @@ describe('Subscriptions + pieces overage (e2e)', () => {
     rs = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
     Object.assign(process.env, {
       DATABASE_URL: rs.getUri('subs-e2e'),
-      REDIS_HOST: process.env.REDIS_HOST ?? '127.0.0.1',
-      REDIS_PORT: process.env.REDIS_PORT ?? '6379',
-      REDIS_NAME: `subs-e2e-${Date.now()}`,
+      ...redisTestEnv('subs'),
       JWT_SECRET: 'e2e-secret-min-16-chars',
       JWT_ACCESS_TTL: '15m',
       SALT: bcrypt.genSaltSync(10),
@@ -64,8 +63,14 @@ describe('Subscriptions + pieces overage (e2e)', () => {
     });
 
     const { AppModule } = require('../src/app.module');
+    const {
+      QueueProcessorModule,
+    } = require('../src/queue/queue-processor.module');
     const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
+      // AppModule is the API half only — processors run in the worker
+      // (src/worker.module.ts). A spec that exercises the real queue loop has
+      // to stand both halves up, the way api + worker do in deployment.
+      imports: [AppModule, QueueProcessorModule],
     }).compile();
 
     app = moduleRef.createNestApplication();

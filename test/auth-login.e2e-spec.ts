@@ -13,6 +13,7 @@ import request from 'supertest';
 import { HTTPExceptionFilter } from '../src/helper/exception-filters/http.exception-filter';
 import { HTTPResponseInterceptor } from '../src/helper/interceptor/http.interceptor';
 import { AppValidationPipe } from '../src/helper/pipe/app-validation.pipe';
+import { redisTestEnv } from './redis-test-env';
 
 /**
  * The deferred pre-portal gate (Phase 3 §0): the OTP login flows proven over
@@ -57,9 +58,7 @@ describe('OTP login over HTTP (e2e)', () => {
     rs = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
     Object.assign(process.env, {
       DATABASE_URL: rs.getUri('test'),
-      REDIS_HOST: process.env.REDIS_HOST ?? '127.0.0.1',
-      REDIS_PORT: process.env.REDIS_PORT ?? '6379',
-      REDIS_NAME: 'e2e-auth',
+      ...redisTestEnv('auth-login'),
       JWT_SECRET: 'e2e-secret-min-16-chars',
       JWT_ACCESS_TTL: '15m',
       SALT: bcrypt.genSaltSync(10),
@@ -78,6 +77,9 @@ describe('OTP login over HTTP (e2e)', () => {
     // BullModule.forRoot(process.env.REDIS_*) and the config schema.
     const { AppModule } = require('../src/app.module');
     const {
+      QueueProcessorModule,
+    } = require('../src/queue/queue-processor.module');
+    const {
       NotificationService,
     } = require('../src/helper/service/notification.service');
 
@@ -91,7 +93,10 @@ describe('OTP login over HTTP (e2e)', () => {
       });
 
     const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
+      // AppModule is the API half only — processors run in the worker
+      // (src/worker.module.ts). A spec that exercises the real queue loop has
+      // to stand both halves up, the way api + worker do in deployment.
+      imports: [AppModule, QueueProcessorModule],
     }).compile();
 
     // Mirror src/main.ts so routes + envelope match production.

@@ -228,6 +228,9 @@ export class SeederService {
     const ttlDays = Number(process.env.OFFICE_LINK_TTL_DAYS) || 365;
     for (const office of seed.offices) {
       const { officeType, ...data } = office;
+      // The seed carries an empty `signedLink` placeholder. Setting it would
+      // blank a real link, so it never reaches the update.
+      delete (data as { signedLink?: string }).signedLink;
       const exp = Date.now() + ttlDays * 24 * 60 * 60 * 1000;
       const sig = this.codeService.signOfficeLink(office.slug, exp);
       const signedLink = `${url}/o/${office.slug}?sig=${sig}&exp=${exp}`;
@@ -237,13 +240,21 @@ export class SeederService {
       });
       const officeTypeId = officeTypeDoc?._id;
 
+      /*
+       * The link is minted on insert only.
+       *
+       * Re-minting it on every boot invalidated the previous one each time the
+       * API restarted — so a QR code printed for a branch died overnight, and
+       * the office's audit trail filled up with link rotations nobody made.
+       * Rotating a link is a deliberate act; it belongs to
+       * `POST /offices/:officeCode/link`, not to a seed.
+       */
       await this.officeModel.findOneAndUpdate(
         { slug: data.slug },
-        { ...data, officeTypeId, signedLink },
+        { $set: { ...data, officeTypeId }, $setOnInsert: { signedLink } },
         { upsert: true },
       );
     }
-    // await this.officeModel.bulkWrite(operations);
     this.logger.log(`🌱 Done seeding ${seed.offices.length} data for Office`);
   }
 

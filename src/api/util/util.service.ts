@@ -13,11 +13,13 @@ import {
 } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
+import { Role } from 'src/schema/admin/role.schema';
 import { Category } from 'src/schema/catalog/category.schema';
 import { Item } from 'src/schema/catalog/item.schema';
 import { ServiceType } from 'src/schema/catalog/service-type.schema';
 import { Service } from 'src/schema/catalog/service.schema';
 import { SubCategory } from 'src/schema/catalog/sub-category.schema';
+import { OfficeType } from 'src/schema/office/office-type.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { Currency } from 'src/schema/catalog/currency.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
@@ -34,6 +36,7 @@ export class UtilService {
     private readonly appUtilService: AppUtilService,
     @Inject(REQUEST) private readonly req: AppRequestWithUser,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    @InjectModel(Role.name) private readonly roleModel: Model<Role>,
     @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
     @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
     @InjectModel(SubCategory.name)
@@ -45,6 +48,9 @@ export class UtilService {
 
     @InjectModel(Currency.name)
     private readonly currencyModel: Model<Currency>,
+
+    @InjectModel(OfficeType.name)
+    private readonly officeTypeModel: Model<OfficeType>,
 
     @InjectModel(PickupStatus.name)
     private readonly pickupStatusModel: Model<PickupStatus>,
@@ -120,6 +126,65 @@ export class UtilService {
 
     this.logger.log(`${logBase} has successfully retrieve all pickup statuses`);
     return { total: totalPickupStatus, data: pickupStatuses, nextPage };
+  }
+
+  /**
+   * The office types (FACTORY, OFFICE). A lookup rather than an enum on the
+   * wire: `POST /offices` takes `officeTypeId`, so a form has to be able to
+   * turn the name it shows into the id the API stores.
+   */
+  async findAllOfficeTypes({ page, size, ...query }: PaginationDto) {
+    this.can('READ', 'OfficeType');
+
+    const platform = this.req.data.platform;
+    const phone = this.req.user.phone;
+    const logBase = `[${platform}] ${phone}`;
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(query.sort);
+
+    const totalOfficeTypes = await this.officeTypeModel.countDocuments();
+    const officeTypes = await this.officeTypeModel
+      .find()
+      .sort(sort)
+      .skip(skip)
+      .limit(size)
+      .lean();
+
+    const totalPages = Math.ceil(totalOfficeTypes / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(`${logBase} has successfully retrieve all office types`);
+    return { total: totalOfficeTypes, data: officeTypes, nextPage };
+  }
+
+  /**
+   * The roles a staff member can hold. Read-only: roles are seeded, and the
+   * office staff picker only needs their names and ids.
+   */
+  async findAllRoles({ page, size, ...query }: PaginationDto) {
+    this.can('READ', 'Role');
+
+    const platform = this.req.data.platform;
+    const phone = this.req.user.phone;
+    const logBase = `[${platform}] ${phone}`;
+
+    const skip = (page - 1) * size;
+    const sort = this.appUtilService.parseSortParam(query.sort);
+
+    const totalRoles = await this.roleModel.countDocuments();
+    const roles = await this.roleModel
+      .find()
+      .sort(sort)
+      .skip(skip)
+      .limit(size)
+      .lean();
+
+    const totalPages = Math.ceil(totalRoles / size);
+    const nextPage = page < totalPages ? page + 1 : null;
+
+    this.logger.log(`${logBase} has successfully retrieve all roles`);
+    return { total: totalRoles, data: roles, nextPage };
   }
 
   async findAllCurrencies({ page, size, ...query }: PaginationDto) {

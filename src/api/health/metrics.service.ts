@@ -22,6 +22,10 @@ const DEFAULT_INACTIVITY_OVERDUE_H = 26; // nightly cron
 interface QueueMetrics {
   counts: Record<string, number>;
   failedSetSize: number;
+  // Age of the job that has been waiting longest, or null when nothing is
+  // waiting. Depth alone can't tell a queue that is briefly busy from one
+  // that is stuck — this can.
+  oldestWaitingMs: number | null;
 }
 
 interface CronMetrics {
@@ -81,7 +85,11 @@ export class MetricsService {
         'delayed',
       );
       const failedSetSize = await this.failedJobs.size(name);
-      queues[name] = { counts, failedSetSize };
+      queues[name] = {
+        counts,
+        failedSetSize,
+        oldestWaitingMs: await this.oldestWaitingMs(queue),
+      };
       if (failedSetSize > 0) {
         alerts.push(
           `failed-set: ${name} has ${failedSetSize} exhausted job(s)`,
@@ -124,6 +132,13 @@ export class MetricsService {
     }
 
     return { queues, cron, providers: { whatsapp }, alerts };
+  }
+
+  /** Wait time of the head of the waiting list — FIFO, so the oldest job. */
+  private async oldestWaitingMs(queue: Queue): Promise<number | null> {
+    const [oldest] = await queue.getWaiting(0, 0);
+    if (!oldest?.timestamp) return null;
+    return Math.max(0, Date.now() - oldest.timestamp);
   }
 
   private async cronMetrics(

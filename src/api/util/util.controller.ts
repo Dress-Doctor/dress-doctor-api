@@ -74,6 +74,45 @@ export class UtilController {
     return await this.utilService.findAllPickupStatuses(query);
   }
 
+  @Get('office-types')
+  @HttpCode(HttpStatus.OK)
+  @ApiResponse({ status: HttpStatus.OK })
+  @ApiOperation({ summary: 'Get all office types' })
+  async findAllOfficeTypes(
+    @Query() query: PaginationDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const platform = req.data.platform;
+    const phone = req.user.phone;
+
+    const log = `[${platform}] ${phone} is getting all office types with query ${JSON.stringify(query)}`;
+    this.logger.log(log);
+
+    return await this.utilService.findAllOfficeTypes(query);
+  }
+
+  @Get('roles')
+  @HttpCode(HttpStatus.OK)
+  @ApiResponse({ status: HttpStatus.OK })
+  @ApiOperation({
+    summary: 'Get all staff roles',
+    description:
+      'The lookup behind every role picker. Assigning someone to an office ' +
+      'takes a `roleId`, so the list has to be reachable before the write.',
+  })
+  async findAllRoles(
+    @Query() query: PaginationDto,
+    @Req() req: AppRequestWithUser,
+  ) {
+    const platform = req.data.platform;
+    const phone = req.user.phone;
+
+    const log = `[${platform}] ${phone} is getting all roles with query ${JSON.stringify(query)}`;
+    this.logger.log(log);
+
+    return await this.utilService.findAllRoles(query);
+  }
+
   @Get('categories')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all categories' })

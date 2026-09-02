@@ -61,6 +61,11 @@ export class NotificationService implements OnModuleInit {
       replyTo: process.env.MAIL_FROM,
       port: Number(process.env.SMTP_PORT),
       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      // Reuse connections: one TCP+TLS+AUTH handshake per pooled socket
+      // instead of one per message. maxConnections caps the parallel sockets
+      // so the processor's concurrency can't trip the provider's own limit.
+      pool: true,
+      maxConnections: 5,
     });
   }
 
@@ -130,50 +135,75 @@ export class NotificationService implements OnModuleInit {
   private async sendEmail(data: SendEmailDto) {
     const template = await this.getTemplate(data.templateName, data.otpChannel);
 
-    try {
-      const html = this.getHTML(data);
-      // From
-      const appName = appConfig.appName;
-      const mailFrom = process.env.MAIL_FROM!;
-      const from = data.from ?? { name: appName, address: mailFrom };
+    // Durable idempotency (§2.5). The BullMQ jobId stops a duplicate *enqueue*;
+    // this stops a duplicate *send* — a job that threw after the mail left
+    // (delivery-log write failed, provider timed out on the response) is
+    // retried, and must not put a second copy in the customer's inbox.
+    if (
+      data.dedupKey &&
+      (await this.notificationModel.exists({ dedupKey: data.dedupKey }))
+    ) {
+      this.logger.log(
+        this.appUtilService.getLogText({
+          STATUS: 'SKIPPED_DUPLICATE',
+          TEMPLATE_NAME: data.templateName,
+          RECIPIENTS: maskRecipients(data.recipients),
+        }),
+      );
+      return;
+    }
 
-      // Subject
-      const english = data.language === LanguageEum.EN;
-      const title = english ? template.titleEn : template.titleFr;
-      const subject = data.variables
-        ? this.appUtilService.renderTemplate(title, data.variables)
-        : title;
+    const html = this.getHTML(data);
+    // From
+    const appName = appConfig.appName;
+    const mailFrom = process.env.MAIL_FROM!;
+    const from = data.from ?? { name: appName, address: mailFrom };
 
-      const options: Mail.Options = {
-        from,
-        html,
-        subject,
-        to: data.recipients,
-      };
+    // Subject
+    const english = data.language === LanguageEum.EN;
+    const title = english ? template.titleEn : template.titleFr;
+    const subject = data.variables
+      ? this.appUtilService.renderTemplate(title, data.variables)
+      : title;
 
-      const result: unknown = await this.transport.sendMail(options);
-      for (const recipient of data.recipients) {
-        const user = await this.userModel.findOne({ email: recipient.address });
-        if (!user) {
-          this.logger.error(`This user ${recipient.address} doesn't exist`);
-          throw new Error(`This user ${recipient.address} doesn't exist`);
-        }
+    const options: Mail.Options = {
+      from,
+      html,
+      subject,
+      to: data.recipients,
+    };
 
-        await this.notificationModel.create({
-          userId: user._id,
-          sentAt: new Date(),
-          title: options.subject,
-          language: data.language,
-          channel: template.channel,
-          variables: data.variables,
-          dedupKey: data.dedupKey,
-          body: JSON.stringify(options.html),
-          status: NotificationStatusEnum.SEND,
-          providerResponse: JSON.stringify(result),
-        });
+    // Nothing is caught here on purpose: an SMTP failure has to reach the
+    // processor so BullMQ retries it and /metrics counts it. Swallowing it
+    // marked the job COMPLETED and the mail simply never arrived.
+    const result: unknown = await this.transport.sendMail(options);
+
+    for (const [index, recipient] of data.recipients.entries()) {
+      const user = await this.userModel.findOne({ email: recipient.address });
+      if (!user) {
+        // The mail has already left. A recipient with no user row is a data
+        // problem, not a send failure — throwing here would retry the job and
+        // send the message again, forever. Log it and skip the log row.
+        this.logger.error(
+          `No user for recipient ${maskRecipients([recipient])} — delivery log row skipped`,
+        );
+        continue;
       }
-    } catch (error) {
-      this.logger.error(error);
+
+      await this.notificationModel.create({
+        userId: user._id,
+        sentAt: new Date(),
+        title: options.subject,
+        language: data.language,
+        channel: template.channel,
+        variables: data.variables,
+        // dedupKey is unique-indexed, so it can only sit on one row: the
+        // first recipient carries it and answers the exists-check above.
+        dedupKey: index === 0 ? data.dedupKey : undefined,
+        body: JSON.stringify(options.html),
+        status: NotificationStatusEnum.SEND,
+        providerResponse: JSON.stringify(result),
+      });
     }
   }
 

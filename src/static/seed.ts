@@ -252,10 +252,19 @@ export default {
     { subject: SubjectEnum.Customer, action: PermissionActionEnum.EXPORT },
     ...crud(SubjectEnum.User),
     ...crud(SubjectEnum.Office),
+    // Bulk CSV/Excel export of offices — gated separately from READ so it can
+    // be granted to reporting/oversight roles only.
+    { subject: SubjectEnum.Office, action: PermissionActionEnum.EXPORT },
     ...crud(SubjectEnum.Item),
     ...crud(SubjectEnum.Promo),
     ...crud(SubjectEnum.AffiliatePartner),
     ...crud(SubjectEnum.AffiliateTransaction),
+    // Read-only lookup: `POST /offices` takes an `officeTypeId`, so any role
+    // that may open a branch has to be able to list the types first.
+    ...readUpdate(SubjectEnum.OfficeType),
+    // Same reason for roles: assigning someone to an office takes a `roleId`,
+    // so the picker behind it has to be able to list them.
+    { subject: SubjectEnum.Role, action: PermissionActionEnum.READ },
     ...readUpdate(SubjectEnum.OrderStatus),
     ...readUpdate(SubjectEnum.PickupStatus),
     ...readUpdate(SubjectEnum.PaymentType),

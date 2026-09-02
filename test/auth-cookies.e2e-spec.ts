@@ -6,6 +6,7 @@ import * as bcrypt from 'bcrypt';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { Types } from 'mongoose';
 import request from 'supertest';
+import { redisTestEnv } from './redis-test-env';
 
 /**
  * The browser session contract: tokens must arrive as HttpOnly cookies and be
@@ -51,9 +52,7 @@ describe('cookie session (e2e)', () => {
     rs = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
     Object.assign(process.env, {
       DATABASE_URL: rs.getUri('test'),
-      REDIS_HOST: process.env.REDIS_HOST ?? '127.0.0.1',
-      REDIS_PORT: process.env.REDIS_PORT ?? '6379',
-      REDIS_NAME: 'e2e-cookies',
+      ...redisTestEnv('auth-cookies'),
       JWT_SECRET: 'e2e-secret-min-16-chars',
       JWT_ACCESS_TTL: '15m',
       SALT: bcrypt.genSaltSync(10),
@@ -69,6 +68,9 @@ describe('cookie session (e2e)', () => {
     });
 
     const { AppModule } = require('../src/app.module');
+    const {
+      QueueProcessorModule,
+    } = require('../src/queue/queue-processor.module');
     const { configureApp } = require('../src/config/app-setup');
     const {
       NotificationService,
@@ -82,7 +84,10 @@ describe('cookie session (e2e)', () => {
       });
 
     const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
+      // AppModule is the API half only — processors run in the worker
+      // (src/worker.module.ts). A spec that exercises the real queue loop has
+      // to stand both halves up, the way api + worker do in deployment.
+      imports: [AppModule, QueueProcessorModule],
     }).compile();
 
     app = configureApp(moduleRef.createNestApplication());

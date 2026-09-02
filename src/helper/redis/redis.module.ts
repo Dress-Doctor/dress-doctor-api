@@ -1,9 +1,11 @@
 import { Global, Module } from '@nestjs/common';
 import Redis from 'ioredis';
+import { infraKeyPrefix, redisConnection } from '../../config/redis.config';
 
 // Shared raw ioredis client for infra that needs Redis directly (leader lock,
-// queue failed-set). Distinct connection from BullMQ's own. Same host/port as
-// the worker's Bull connection; a separate logical namespace via key prefixes.
+// queue failed-set). Distinct connection from BullMQ's own. Same host/port/db
+// as the worker's Bull connection; a separate logical namespace via key
+// prefixes — see src/config/redis.config.ts for the layout.
 export const REDIS_CLIENT = 'REDIS_CLIENT';
 
 @Global()
@@ -13,10 +15,9 @@ export const REDIS_CLIENT = 'REDIS_CLIENT';
       provide: REDIS_CLIENT,
       useFactory: () =>
         new Redis({
-          host: process.env.REDIS_HOST,
-          port: Number(process.env.REDIS_PORT),
+          ...redisConnection(),
           maxRetriesPerRequest: null,
-          keyPrefix: `dress-doctor-${process.env.REDIS_NAME}:infra:`,
+          keyPrefix: infraKeyPrefix(),
         }),
     },
   ],

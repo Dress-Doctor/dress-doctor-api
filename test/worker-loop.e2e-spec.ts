@@ -5,6 +5,7 @@ import { getQueueToken } from '@nestjs/bullmq';
 import { Test } from '@nestjs/testing';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { Types } from 'mongoose';
+import { redisTestEnv } from './redis-test-env';
 
 /**
  * Phase 2 close-out A: the live worker loop against a REAL Redis (CI service
@@ -40,10 +41,7 @@ describe('Worker loop (e2e)', () => {
     rs = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
     Object.assign(process.env, {
       DATABASE_URL: rs.getUri('worker-e2e'),
-      REDIS_HOST: process.env.REDIS_HOST ?? '127.0.0.1',
-      REDIS_PORT: process.env.REDIS_PORT ?? '6379',
-      // Distinct prefix so queues never collide with the HTTP e2e run.
-      REDIS_NAME: `worker-e2e-${Date.now()}`,
+      ...redisTestEnv('worker'),
       JWT_SECRET: 'e2e-secret-min-16-chars',
       JWT_ACCESS_TTL: '15m',
       SALT: '$2b$10$C6UzMDM.H6dfI/f/IKcEeO',

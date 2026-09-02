@@ -14,6 +14,9 @@ export const envValidationSchema = Joi.object({
   REDIS_HOST: Joi.string().required(),
   REDIS_PORT: Joi.number().port().required(),
   REDIS_NAME: Joi.string().required(),
+  // Logical database index. Real environments stay on 0; the e2e suites move
+  // to their own db so test keys can never sit beside dev/stage data.
+  REDIS_DB: Joi.number().min(0).max(15).default(0),
 
   // Auth
   JWT_SECRET: Joi.string().min(16).required(),

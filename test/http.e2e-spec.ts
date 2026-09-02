@@ -14,6 +14,7 @@ import request from 'supertest';
 import { HTTPExceptionFilter } from '../src/helper/exception-filters/http.exception-filter';
 import { HTTPResponseInterceptor } from '../src/helper/interceptor/http.interceptor';
 import { AppValidationPipe } from '../src/helper/pipe/app-validation.pipe';
+import { redisTestEnv } from './redis-test-env';
 
 /**
  * Core HTTP e2e against the booted app: a REAL Redis (BullMQ) — provided by a CI
@@ -39,9 +40,7 @@ describe('HTTP contract (e2e)', () => {
     rs = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
     Object.assign(process.env, {
       DATABASE_URL: rs.getUri('test'),
-      REDIS_HOST: process.env.REDIS_HOST ?? '127.0.0.1',
-      REDIS_PORT: process.env.REDIS_PORT ?? '6379',
-      REDIS_NAME: 'e2e',
+      ...redisTestEnv('http'),
       JWT_SECRET: 'e2e-secret-min-16-chars',
       JWT_ACCESS_TTL: '15m',
       // CodeGeneratorService passes SALT straight to bcrypt.hash, so it must be a
@@ -61,8 +60,14 @@ describe('HTTP contract (e2e)', () => {
     // require (not import) so the env above is set before AppModule evaluates
     // BullModule.forRoot(process.env.REDIS_*) and the config schema.
     const { AppModule } = require('../src/app.module');
+    const {
+      QueueProcessorModule,
+    } = require('../src/queue/queue-processor.module');
     const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
+      // AppModule is the API half only — processors run in the worker
+      // (src/worker.module.ts). A spec that exercises the real queue loop has
+      // to stand both halves up, the way api + worker do in deployment.
+      imports: [AppModule, QueueProcessorModule],
     }).compile();
 
     // Mirror src/main.ts so routes + envelope match production.

@@ -39,8 +39,8 @@ import { EventsModule } from './events/events.module';
 import { MetricsModule } from './helper/metrics/metrics.module';
 import { BullModule } from '@nestjs/bullmq';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { QueueProcessorModule } from './queue/queue-processor.module';
 import { envValidationSchema } from './config/env.validation';
+import { bullPrefix, redisConnection } from './config/redis.config';
 
 @Module({
   imports: [
@@ -66,18 +66,18 @@ import { envValidationSchema } from './config/env.validation';
     SubscriptionModule,
     EventsModule,
     MetricsModule,
-    QueueProcessorModule,
+    // No QueueProcessorModule here on purpose: the API only *produces* jobs
+    // (via QueueProducerModule, imported where jobs are enqueued). Processors
+    // run in the worker (src/worker.module.ts), so a request never competes
+    // with an SMTP send for this process' event loop.
     ConfigModule.forRoot({
       isGlobal: true,
       validationSchema: envValidationSchema,
       validationOptions: { abortEarly: false },
     }),
     BullModule.forRoot({
-      connection: {
-        host: process.env.REDIS_HOST,
-        port: Number(process.env.REDIS_PORT),
-      },
-      prefix: `dress-doctor-${process.env.REDIS_NAME}`,
+      connection: redisConnection(),
+      prefix: bullPrefix(),
       defaultJobOptions: {
         attempts: 3,
         removeOnFail: true,
