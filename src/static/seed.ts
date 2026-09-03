@@ -251,6 +251,11 @@ export default {
     // the file is a list of names, phones and addresses leaving the building.
     { subject: SubjectEnum.Customer, action: PermissionActionEnum.EXPORT },
     ...crud(SubjectEnum.User),
+    // User types are reference data, but they are now editable from the
+    // reference screen, so the write actions have to exist as permission rows
+    // before any role can be granted them. Seeding the row grants nobody
+    // anything on its own — that is what `rolePermissionMap` below does.
+    ...crud(SubjectEnum.UserType),
     ...crud(SubjectEnum.Office),
     // Bulk CSV/Excel export of offices — gated separately from READ so it can
     // be granted to reporting/oversight roles only.
@@ -259,16 +264,27 @@ export default {
     ...crud(SubjectEnum.Promo),
     ...crud(SubjectEnum.AffiliatePartner),
     ...crud(SubjectEnum.AffiliateTransaction),
-    // Read-only lookup: `POST /offices` takes an `officeTypeId`, so any role
-    // that may open a branch has to be able to list the types first.
-    ...readUpdate(SubjectEnum.OfficeType),
+    // `POST /offices` takes an `officeTypeId`, so any role that may open a
+    // branch has to be able to list the types first. Editable from the
+    // reference screen now — name included — so the write actions have to
+    // exist as permission rows before any role can be granted them.
+    ...crud(SubjectEnum.OfficeType),
     // Same reason for roles: assigning someone to an office takes a `roleId`,
     // so the picker behind it has to be able to list them.
     { subject: SubjectEnum.Role, action: PermissionActionEnum.READ },
-    ...readUpdate(SubjectEnum.OrderStatus),
-    ...readUpdate(SubjectEnum.PickupStatus),
-    ...readUpdate(SubjectEnum.PaymentType),
-    ...readUpdate(SubjectEnum.PaymentMethod),
+    // Order statuses are editable from the reference screen now, so the write
+    // actions have to exist as permission rows before any role can be granted
+    // them. Seeding the row grants nobody anything on its own.
+    ...crud(SubjectEnum.OrderStatus),
+    // Pickup statuses are editable from the reference screen now, so the
+    // write actions have to exist as permission rows before any role can be
+    // granted them. Seeding the row grants nobody anything on its own.
+    ...crud(SubjectEnum.PickupStatus),
+    // Payment types and methods are editable from the reference screen now, so
+    // the write actions have to exist as permission rows before any role can
+    // be granted them. Seeding the row grants nobody anything on its own.
+    ...crud(SubjectEnum.PaymentType),
+    ...crud(SubjectEnum.PaymentMethod),
     ...readUpdate(SubjectEnum.Category),
     ...readUpdate(SubjectEnum.SubCategory),
     ...readUpdate(SubjectEnum.Service),

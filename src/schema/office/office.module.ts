@@ -3,6 +3,10 @@ import { getModelToken, MongooseModule } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { attachHistoryHooks } from 'src/helper/mongoose-history.hook';
 import { OfficeHistory, OfficeHistorySchema } from './office-history.schema';
+import {
+  OfficeTypeHistory,
+  OfficeTypeHistorySchema,
+} from './office-type-history.schema';
 import { OfficeType, OfficeTypeSchema } from './office-type.schema';
 import { OfficeUser, OfficeUserSchema } from './office-user.schema';
 import {
@@ -40,11 +44,25 @@ import { Office, OfficeSchema } from './office.schema';
             resourceName: OfficeUser.name,
           }),
       },
+
+      // Reference data, but editable from the reference screen now — name
+      // included — so its edits are recorded like any other domain write.
+      {
+        name: OfficeType.name,
+        inject: [getModelToken(OfficeTypeHistory.name)],
+        useFactory: (historyModel: Model<OfficeTypeHistory>) =>
+          attachHistoryHooks({
+            historyModel,
+            idField: 'officeTypeId',
+            schema: OfficeTypeSchema,
+            resourceName: OfficeType.name,
+          }),
+      },
     ]),
     MongooseModule.forFeature([
-      { name: OfficeType.name, schema: OfficeTypeSchema },
       { name: OfficeHistory.name, schema: OfficeHistorySchema },
       { name: OfficeUserHistory.name, schema: OfficeUserHistorySchema },
+      { name: OfficeTypeHistory.name, schema: OfficeTypeHistorySchema },
     ]),
   ],
   exports: [MongooseModule],

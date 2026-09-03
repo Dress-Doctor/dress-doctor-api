@@ -4,11 +4,17 @@ import * as bcrypt from 'bcrypt';
 import { Chance } from 'chance';
 import * as crypto from 'crypto';
 import { Model } from 'mongoose';
+import { OfficeType } from 'src/schema/office/office-type.schema';
 import { Office } from 'src/schema/office/office.schema';
+import { OrderStatus } from 'src/schema/order/order-status.schema';
 import { Order } from 'src/schema/order/order.schema';
+import { PaymentMethod } from 'src/schema/payment/payment-method.schema';
+import { PaymentType } from 'src/schema/payment/payment-type.schema';
 import { Payment } from 'src/schema/payment/payment.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
+import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { Customer } from 'src/schema/user/customer.schema';
+import { UserType } from 'src/schema/user/user-type.schema';
 
 @Injectable()
 export class CodeGeneratorService {
@@ -23,6 +29,24 @@ export class CodeGeneratorService {
 
     @InjectModel(PickupRequest.name)
     private readonly pickupRequestModel: Model<PickupRequest>,
+
+    @InjectModel(UserType.name)
+    private readonly userTypeModel: Model<UserType>,
+
+    @InjectModel(PickupStatus.name)
+    private readonly pickupStatusModel: Model<PickupStatus>,
+
+    @InjectModel(OrderStatus.name)
+    private readonly orderStatusModel: Model<OrderStatus>,
+
+    @InjectModel(OfficeType.name)
+    private readonly officeTypeModel: Model<OfficeType>,
+
+    @InjectModel(PaymentMethod.name)
+    private readonly paymentMethodModel: Model<PaymentMethod>,
+
+    @InjectModel(PaymentType.name)
+    private readonly paymentTypeModel: Model<PaymentType>,
   ) {}
 
   private generateCode(len: number, prefix?: string) {
@@ -118,6 +142,94 @@ export class CodeGeneratorService {
     do {
       code = this.generateCode(6, 'PY');
       const doc = await this.paymentModel.exists({ reference: code });
+      exists = doc ? true : false;
+    } while (exists);
+
+    return code;
+  }
+
+  /**
+   * The reference every user-type row is addressed by. Reference data is
+   * small and rarely written, so the same collision-retry loop as the rest is
+   * more than enough.
+   */
+  async generateUserTypeReference() {
+    let code: string;
+    let exists: boolean;
+
+    do {
+      code = this.generateCode(6, 'UT');
+      const doc = await this.userTypeModel.exists({ reference: code });
+      exists = doc ? true : false;
+    } while (exists);
+
+    return code;
+  }
+
+  /** The reference every pickup-status row is addressed by. */
+  async generatePickupStatusReference() {
+    let code: string;
+    let exists: boolean;
+
+    do {
+      code = this.generateCode(6, 'PS');
+      const doc = await this.pickupStatusModel.exists({ reference: code });
+      exists = doc ? true : false;
+    } while (exists);
+
+    return code;
+  }
+
+  /** The reference every order-status row is addressed by. */
+  async generateOrderStatusReference() {
+    let code: string;
+    let exists: boolean;
+
+    do {
+      code = this.generateCode(6, 'OS');
+      const doc = await this.orderStatusModel.exists({ reference: code });
+      exists = doc ? true : false;
+    } while (exists);
+
+    return code;
+  }
+
+  /** The reference every office-type row is addressed by. */
+  async generateOfficeTypeReference() {
+    let code: string;
+    let exists: boolean;
+
+    do {
+      code = this.generateCode(6, 'OT');
+      const doc = await this.officeTypeModel.exists({ reference: code });
+      exists = doc ? true : false;
+    } while (exists);
+
+    return code;
+  }
+
+  /** The reference every payment-method row is addressed by. */
+  async generatePaymentMethodReference() {
+    let code: string;
+    let exists: boolean;
+
+    do {
+      code = this.generateCode(6, 'PM');
+      const doc = await this.paymentMethodModel.exists({ reference: code });
+      exists = doc ? true : false;
+    } while (exists);
+
+    return code;
+  }
+
+  /** The reference every payment-type row is addressed by. */
+  async generatePaymentTypeReference() {
+    let code: string;
+    let exists: boolean;
+
+    do {
+      code = this.generateCode(6, 'PT');
+      const doc = await this.paymentTypeModel.exists({ reference: code });
       exists = doc ? true : false;
     } while (exists);
 

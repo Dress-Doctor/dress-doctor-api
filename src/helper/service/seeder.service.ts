@@ -134,13 +134,23 @@ export class SeederService {
   ) {}
 
   private async seedUserType() {
-    const operations = seed.userType.map((userType) => ({
-      updateOne: {
-        filter: { userTypeName: userType.userTypeName },
-        update: { $set: userType },
-        upsert: true,
-      },
-    }));
+    // `reference` is minted per row and written with `$setOnInsert`, so a
+    // re-run leaves the reference an existing row already carries alone —
+    // it is the id the reference screen and its URLs are built on, and it
+    // must not change under anyone. Generated one at a time rather than in
+    // parallel: the generator checks the database for a clash, and two
+    // concurrent calls could pick the same code before either had saved.
+    const operations: Parameters<typeof this.userTypeModel.bulkWrite>[0] = [];
+    for (const userType of seed.userType) {
+      const reference = await this.codeService.generateUserTypeReference();
+      operations.push({
+        updateOne: {
+          filter: { userTypeName: userType.userTypeName },
+          update: { $set: userType, $setOnInsert: { reference } },
+          upsert: true,
+        },
+      });
+    }
 
     await this.userTypeModel.bulkWrite(operations);
     this.logger.log(
@@ -149,13 +159,23 @@ export class SeederService {
   }
 
   private async seedOfficeType() {
-    const operations = seed.officeType.map((officeType) => ({
-      updateOne: {
-        filter: { officeTypeName: officeType.officeTypeName },
-        update: { $set: officeType },
-        upsert: true,
-      },
-    }));
+    // `reference` is minted per row and written with `$setOnInsert`, the same
+    // way the statuses are: it is the id the reference screen and its URLs are
+    // built on, so a re-run must leave an existing row's alone. Generated one
+    // at a time rather than in parallel — the generator checks the database
+    // for a clash, and two concurrent calls could pick the same code before
+    // either had saved.
+    const operations: Parameters<typeof this.officeTypeModel.bulkWrite>[0] = [];
+    for (const officeType of seed.officeType) {
+      const reference = await this.codeService.generateOfficeTypeReference();
+      operations.push({
+        updateOne: {
+          filter: { officeTypeName: officeType.officeTypeName },
+          update: { $set: officeType, $setOnInsert: { reference } },
+          upsert: true,
+        },
+      });
+    }
 
     await this.officeTypeModel.bulkWrite(operations);
     this.logger.log(
@@ -164,13 +184,24 @@ export class SeederService {
   }
 
   private async seedPickupStatus() {
-    const operations = seed.pickupStatus.map((pickupStatus) => ({
-      updateOne: {
-        filter: { pickupStatusName: pickupStatus.pickupStatusName },
-        update: { $set: pickupStatus },
-        upsert: true,
-      },
-    }));
+    // `reference` is minted per row and written with `$setOnInsert`, the same
+    // way the user types are: it is the id the reference screen and its URLs
+    // are built on, so a re-run must leave an existing row's alone. Generated
+    // one at a time rather than in parallel — the generator checks the
+    // database for a clash, and two concurrent calls could pick the same code
+    // before either had saved.
+    const operations: Parameters<typeof this.pickupStatusModel.bulkWrite>[0] =
+      [];
+    for (const pickupStatus of seed.pickupStatus) {
+      const reference = await this.codeService.generatePickupStatusReference();
+      operations.push({
+        updateOne: {
+          filter: { pickupStatusName: pickupStatus.pickupStatusName },
+          update: { $set: pickupStatus, $setOnInsert: { reference } },
+          upsert: true,
+        },
+      });
+    }
 
     await this.pickupStatusModel.bulkWrite(operations);
     this.logger.log(
@@ -179,13 +210,24 @@ export class SeederService {
   }
 
   private async seedOrderStatus() {
-    const operations = seed.orderStatus.map((orderStatus) => ({
-      updateOne: {
-        filter: { orderStatusName: orderStatus.orderStatusName },
-        update: { $set: orderStatus },
-        upsert: true,
-      },
-    }));
+    // `reference` is minted per row and written with `$setOnInsert`, the same
+    // way the pickup statuses are: it is the id the reference screen and its
+    // URLs are built on, so a re-run must leave an existing row's alone.
+    // Generated one at a time rather than in parallel — the generator checks
+    // the database for a clash, and two concurrent calls could pick the same
+    // code before either had saved.
+    const operations: Parameters<typeof this.orderStatusModel.bulkWrite>[0] =
+      [];
+    for (const orderStatus of seed.orderStatus) {
+      const reference = await this.codeService.generateOrderStatusReference();
+      operations.push({
+        updateOne: {
+          filter: { orderStatusName: orderStatus.orderStatusName },
+          update: { $set: orderStatus, $setOnInsert: { reference } },
+          upsert: true,
+        },
+      });
+    }
 
     await this.orderStatusModel.bulkWrite(operations);
     this.logger.log(
@@ -194,13 +236,24 @@ export class SeederService {
   }
 
   private async seedPaymentMethod() {
-    const operations = seed.paymentMethod.map((paymentMethod) => ({
-      updateOne: {
-        filter: { paymentMethodName: paymentMethod.paymentMethodName },
-        update: { $set: paymentMethod },
-        upsert: true,
-      },
-    }));
+    // `reference` is minted per row and written with `$setOnInsert`, the same
+    // way the other reference collections are: it is the id the reference
+    // screen and its URLs are built on, so a re-run must leave an existing
+    // row's alone. Generated one at a time rather than in parallel — the
+    // generator checks the database for a clash, and two concurrent calls
+    // could pick the same code before either had saved.
+    const operations: Parameters<typeof this.paymentMethodModel.bulkWrite>[0] =
+      [];
+    for (const paymentMethod of seed.paymentMethod) {
+      const reference = await this.codeService.generatePaymentMethodReference();
+      operations.push({
+        updateOne: {
+          filter: { paymentMethodName: paymentMethod.paymentMethodName },
+          update: { $set: paymentMethod, $setOnInsert: { reference } },
+          upsert: true,
+        },
+      });
+    }
 
     await this.paymentMethodModel.bulkWrite(operations);
     this.logger.log(
@@ -209,13 +262,20 @@ export class SeederService {
   }
 
   private async seedPaymentType() {
-    const operations = seed.paymentType.map((paymentType) => ({
-      updateOne: {
-        filter: { paymentTypeName: paymentType.paymentTypeName },
-        update: { $set: paymentType },
-        upsert: true,
-      },
-    }));
+    // Same one-at-a-time minting as the payment methods above, and for the
+    // same reason.
+    const operations: Parameters<typeof this.paymentTypeModel.bulkWrite>[0] =
+      [];
+    for (const paymentType of seed.paymentType) {
+      const reference = await this.codeService.generatePaymentTypeReference();
+      operations.push({
+        updateOne: {
+          filter: { paymentTypeName: paymentType.paymentTypeName },
+          update: { $set: paymentType, $setOnInsert: { reference } },
+          upsert: true,
+        },
+      });
+    }
 
     await this.paymentTypeModel.bulkWrite(operations);
     this.logger.log(

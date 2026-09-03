@@ -10,6 +10,10 @@ import { Customer, CustomerSchema } from './customer.schema';
 import { Referral, ReferralSchema } from './referral.schema';
 import { RefreshToken, RefreshTokenSchema } from './refresh-token.schema';
 import { UserHistory, UserHistorySchema } from './user-history.schema';
+import {
+  UserTypeHistory,
+  UserTypeHistorySchema,
+} from './user-type-history.schema';
 import { UserType, UserTypeSchema } from './user-type.schema';
 import { User, UserSchema } from './user.schema';
 
@@ -45,13 +49,28 @@ import { User, UserSchema } from './user.schema';
           });
         },
       },
+
+      // User types are reference data, and reference data is edited rarely
+      // but consequentially — a rename or a deactivation changes what the
+      // rest of the platform means. So the trail is kept here too.
+      {
+        name: UserType.name,
+        inject: [getModelToken(UserTypeHistory.name)],
+        useFactory: (historyModel: Model<UserTypeHistory>) =>
+          attachHistoryHooks({
+            historyModel,
+            idField: 'userTypeId',
+            schema: UserTypeSchema,
+            resourceName: UserType.name,
+          }),
+      },
     ]),
     MongooseModule.forFeature([
-      { name: UserType.name, schema: UserTypeSchema },
       { name: Referral.name, schema: ReferralSchema },
       { name: RefreshToken.name, schema: RefreshTokenSchema },
       { name: UserHistory.name, schema: UserHistorySchema },
       { name: CustomerHistory.name, schema: CustomerHistorySchema },
+      { name: UserTypeHistory.name, schema: UserTypeHistorySchema },
     ]),
   ],
   exports: [MongooseModule],
