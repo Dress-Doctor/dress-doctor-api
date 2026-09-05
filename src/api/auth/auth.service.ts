@@ -27,6 +27,8 @@ import {
 import { OTPChannelEnum, OTPPurposeEnum } from 'src/schema/otp/otp.dto';
 import { UserTypeEum } from 'src/schema/user/user.dto';
 import { maskPhone } from 'src/helper/pii';
+import { ActivityService } from 'src/helper/service/activity.service';
+import { ActivityOutcomeEnum } from 'src/schema/activity/activity.dto';
 import { phoneQuery } from 'src/helper/phone';
 
 /** Just the user fields OTP delivery needs — works for populated or raw docs. */
@@ -48,6 +50,7 @@ export class AuthService {
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(RefreshToken.name)
     private readonly refreshTokenModel: Model<RefreshToken>,
+    private readonly activityService: ActivityService,
   ) {}
 
   private async signToken(user: TokenUser, userType: string) {
@@ -246,6 +249,11 @@ export class AuthService {
 
   async initiateLogin(data: InitiateLoginDto) {
     const { user, channel } = await this.authenticateForOtp(data);
+    await this.activityService.recordAuth(this.req, {
+      action: 'auth.otp_requested',
+      userId: user._id,
+      metadata: { channel },
+    });
     return await this.issueLoginOtp(user, channel);
   }
 
@@ -271,6 +279,17 @@ export class AuthService {
       this.logger.warn(
         `[${platform}] verify for unknown identifier ${maskPhone(data.identifier)}`,
       );
+      // A sign-in attempt against an identifier nobody holds is exactly the
+      // pattern a reviewer wants to find later, so it is recorded even though
+      // there is no user to hang it on.
+      await this.activityService.recordAuth(this.req, {
+        action: 'auth.login',
+        outcome: ActivityOutcomeEnum.FAILURE,
+        metadata: {
+          reason: 'UNKNOWN_IDENTIFIER',
+          identifier: maskPhone(data.identifier),
+        },
+      });
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
         message: 'Invalid login credentials',
@@ -293,6 +312,11 @@ export class AuthService {
     this.logger.log(
       `[${platform}] ${maskPhone(data.identifier)} have successfully login`,
     );
+    await this.activityService.recordAuth(this.req, {
+      action: 'auth.login',
+      userId: foundedUser._id,
+      metadata: { userType },
+    });
     return { accessToken, refreshToken, message: 'Login successful' };
   }
 
@@ -354,16 +378,29 @@ export class AuthService {
     this.logger.log(
       `[${platform}] ${maskPhone(user.phone)} rotated a refresh token`,
     );
+    await this.activityService.recordAuth(this.req, {
+      action: 'auth.refresh',
+      userId: user._id,
+    });
     return tokens;
   }
 
   /** Revoke a single refresh token (idempotent — unknown tokens are a no-op). */
   async logout(refreshToken: string) {
     const tokenHash = this.hashRefreshToken(refreshToken);
-    await this.refreshTokenModel.updateOne(
+    const stored = await this.refreshTokenModel.findOneAndUpdate(
       { tokenHash, revokedAt: { $exists: false } },
       { revokedAt: new Date() },
     );
+
+    // Idempotent by contract: an unknown or already-revoked token is a no-op,
+    // and there is no session to attribute the row to.
+    if (stored) {
+      await this.activityService.recordAuth(this.req, {
+        action: 'auth.logout',
+        userId: stored.userId,
+      });
+    }
     return { message: 'Logged out successfully' };
   }
 

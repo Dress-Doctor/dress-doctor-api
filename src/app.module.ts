@@ -37,6 +37,8 @@ import { RewardModule } from './api/reward/reward.module';
 import { SubscriptionModule } from './api/subscription/subscription.module';
 import { EventsModule } from './events/events.module';
 import { MetricsModule } from './helper/metrics/metrics.module';
+import { ActivityRecorderModule } from './helper/activity/activity.module';
+import { ActivityModule } from './api/activity/activity.module';
 import { BullModule } from '@nestjs/bullmq';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { envValidationSchema } from './config/env.validation';
@@ -66,6 +68,8 @@ import { bullPrefix, redisConnection } from './config/redis.config';
     SubscriptionModule,
     EventsModule,
     MetricsModule,
+    ActivityRecorderModule,
+    ActivityModule,
     // No QueueProcessorModule here on purpose: the API only *produces* jobs
     // (via QueueProducerModule, imported where jobs are enqueued). Processors
     // run in the worker (src/worker.module.ts), so a request never competes

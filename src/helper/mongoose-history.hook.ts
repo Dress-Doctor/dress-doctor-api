@@ -2,6 +2,8 @@ import { Logger } from '@nestjs/common';
 import { ClientSession, Model, Query, Schema, Types, Document } from 'mongoose';
 import { HistoryActionEnum } from '../schema/admin/admin.dto';
 import { ChangedFieldDto } from '../schema/user/user.dto';
+import { ActivityKindEnum } from '../schema/activity/activity.dto';
+import { recordActivity } from './activity-recorder';
 
 interface QueryWithPrevious<T> extends Query<T, T> {
   _previous?: T;
@@ -91,6 +93,65 @@ function isEqual(a: any, b: any): boolean {
  * @returns The modified schema
  */
 
+/**
+ * Mirror an audit entry into the per-actor trail.
+ *
+ * The history row answers "what happened to this record"; this answers "what
+ * did this person do", which no per-record table can without a fan-out across
+ * every history collection. It joins the same transaction as the write, so a
+ * rollback takes both entries with it.
+ *
+ * Never throws: the trail is an observer of the write, not a participant in
+ * whether it succeeds.
+ */
+async function mirrorToActivity(input: {
+  resourceName: string;
+  action: HistoryActionEnum;
+  changedBy?: Types.ObjectId;
+  reason?: string;
+  resourceId?: Types.ObjectId;
+  resourceRef?: string;
+  session?: ClientSession;
+  logger: Logger;
+}): Promise<void> {
+  // A write with no actor is a seed or a migration repair. Those are recorded
+  // on the history row, but they are nobody's activity.
+  if (!input.changedBy) return;
+
+  try {
+    await recordActivity({
+      userId: input.changedBy,
+      kind: ActivityKindEnum.WRITE,
+      action: `${input.resourceName.toLowerCase()}.${input.action.toLowerCase()}`,
+      resource: input.resourceName,
+      resourceId: input.resourceId,
+      resourceRef: input.resourceRef,
+      reason: input.reason,
+      session: input.session,
+    });
+  } catch (error) {
+    input.logger.error(
+      `Failed to mirror ${input.resourceName} ${input.action} into the activity trail: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+/**
+ * The human reference a record is addressed by, when it has one. Every
+ * code-bearing schema names it differently (`orderCode`, `reference`,
+ * `officeCode`), so the trail takes the first that is a string rather than
+ * asking 26 call sites to say which theirs is.
+ */
+function referenceOf(doc: Record<string, unknown>): string | undefined {
+  for (const key of ['reference', 'orderCode', 'officeCode', 'code']) {
+    const value = doc[key];
+    if (typeof value === 'string' && value) return value;
+  }
+  return undefined;
+}
+
 type Props<T> = {
   schema: Schema<T>;
   idField: string;
@@ -138,6 +199,16 @@ export function attachHistoryHooks<T extends Document>(
         { session: doc.$session() ?? undefined },
       );
       logger.log(`History recorded for ${resourceName} CREATE`);
+      await mirrorToActivity({
+        logger,
+        changedBy,
+        reason,
+        resourceName,
+        action: HistoryActionEnum.CREATE,
+        resourceId: doc._id,
+        resourceRef: referenceOf(doc.toObject() as Record<string, unknown>),
+        session: doc.$session() ?? undefined,
+      });
     } catch (error) {
       logger.error(
         `Failed to save history for ${resourceName} CREATE: ${error instanceof Error ? error.message : String(error)}`,
@@ -177,6 +248,16 @@ export function attachHistoryHooks<T extends Document>(
           { session },
         );
         logger.log(`History recorded for ${resourceName} CREATE (via update)`);
+        await mirrorToActivity({
+          logger,
+          session,
+          resourceName,
+          changedBy: context?.changedBy,
+          reason: context?.reason,
+          action: HistoryActionEnum.CREATE,
+          resourceId: doc._id,
+          resourceRef: referenceOf(doc.toObject() as Record<string, unknown>),
+        });
         return next();
       }
 
@@ -238,6 +319,16 @@ export function attachHistoryHooks<T extends Document>(
       );
 
       logger.log(`History recorded for ${resourceName} ${action}`);
+      await mirrorToActivity({
+        logger,
+        action,
+        session,
+        resourceName,
+        changedBy: context?.changedBy,
+        reason: context?.reason,
+        resourceId: doc._id,
+        resourceRef: referenceOf(doc.toObject() as Record<string, unknown>),
+      });
     } catch (error) {
       logger.error(
         `Failed to save history for ${resourceName} UPDATE: ${error instanceof Error ? error.message : String(error)}`,
@@ -268,6 +359,16 @@ export function attachHistoryHooks<T extends Document>(
       );
 
       logger.log(`History recorded for ${resourceName} DELETE`);
+      await mirrorToActivity({
+        logger,
+        resourceName,
+        changedBy: context?.changedBy,
+        reason: context?.reason,
+        action: HistoryActionEnum.DELETE,
+        resourceId: doc._id,
+        resourceRef: referenceOf(doc.toObject() as Record<string, unknown>),
+        session: sessionOf(query),
+      });
     } catch (error) {
       logger.error(
         `Failed to save history for ${resourceName} DELETE: ${error instanceof Error ? error.message : String(error)}`,

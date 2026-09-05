@@ -11,6 +11,7 @@ import { RefreshToken } from 'src/schema/user/refresh-token.schema';
 import { UserTypeEum } from 'src/schema/user/user.dto';
 import { User } from 'src/schema/user/user.schema';
 import { AuthService } from './auth.service';
+import { ActivityService } from 'src/helper/service/activity.service';
 
 type MockUser = {
   phone: string;
@@ -35,7 +36,13 @@ describe('AuthService', () => {
     create: jest.Mock;
     findOne: jest.Mock;
     updateOne: jest.Mock;
+    findOneAndUpdate: jest.Mock;
     updateMany: jest.Mock;
+  };
+  let activityService: {
+    record: jest.Mock;
+    recordAuth: jest.Mock;
+    recordFromRequest: jest.Mock;
   };
 
   const buildUser = (over: Partial<MockUser> = {}): MockUser => ({
@@ -57,10 +64,16 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     userModel = { findOne: jest.fn(), findById: jest.fn() };
+    activityService = {
+      record: jest.fn().mockResolvedValue(undefined),
+      recordAuth: jest.fn().mockResolvedValue(undefined),
+      recordFromRequest: jest.fn().mockResolvedValue(undefined),
+    };
     refreshTokenModel = {
       create: jest.fn().mockResolvedValue(undefined),
       findOne: jest.fn(),
       updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
+      findOneAndUpdate: jest.fn().mockResolvedValue({ userId: 'user-1' }),
       updateMany: jest.fn().mockResolvedValue({ modifiedCount: 2 }),
     };
     otpService = {
@@ -79,6 +92,8 @@ describe('AuthService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // The trail observes these services; it never changes what they do.
+        { provide: ActivityService, useValue: activityService },
         AuthService,
         {
           provide: JwtService,
@@ -351,16 +366,37 @@ describe('AuthService', () => {
   });
 
   describe('logout', () => {
+    // findOneAndUpdate rather than updateOne: revoking is the same write, but
+    // the trail needs the row back to know whose session ended.
     it('revokes the presented refresh token', async () => {
       await service.logout('raw-token');
-      expect(refreshTokenModel.updateOne).toHaveBeenCalledTimes(1);
-      const [filter, update] = refreshTokenModel.updateOne.mock.calls[0] as [
+      expect(refreshTokenModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      const [filter, update] = refreshTokenModel.findOneAndUpdate.mock
+        .calls[0] as [
         { tokenHash: string; revokedAt: { $exists: boolean } },
         { revokedAt: Date },
       ];
       expect(filter.revokedAt).toEqual({ $exists: false });
       expect(typeof filter.tokenHash).toBe('string');
       expect(update.revokedAt).toBeInstanceOf(Date);
+    });
+
+    it('records the sign-out against the session it revoked', async () => {
+      await service.logout('raw-token');
+
+      expect(activityService.recordAuth).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ action: 'auth.logout', userId: 'user-1' }),
+      );
+    });
+
+    // Nothing was revoked, so nobody signed out.
+    it('records nothing for an unknown token', async () => {
+      refreshTokenModel.findOneAndUpdate.mockResolvedValue(null);
+
+      await service.logout('raw-token');
+
+      expect(activityService.recordAuth).not.toHaveBeenCalled();
     });
   });
 });

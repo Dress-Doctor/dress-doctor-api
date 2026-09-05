@@ -300,6 +300,70 @@ describe('OTP login over HTTP (e2e)', () => {
     });
   });
 
+  // §9: the who-did-what trail. Proves the wiring end to end — the row is
+  // written by the real service, through the real request, with the request
+  // context (platform, correlation id) filled in off the wire rather than by
+  // the caller.
+  describe('activity trail', () => {
+    // `model` in beforeAll is scoped to it; the trail is read through the
+    // same app instance here.
+    const activityFor = async (action: string) => {
+      const activityModel = app.get(getModelToken('Activity'));
+      return await activityModel
+        .find({ action })
+        .sort({ createdAt: -1 })
+        .lean();
+    };
+
+    it('records a completed sign-in against the user who signed in', async () => {
+      const res = await post('/api/v1/auth/initiate-login')
+        .send({ identifier: CUSTOMER_PHONE })
+        .expect(201);
+
+      await post('/api/v1/auth/complete-login')
+        .send({
+          identifier: CUSTOMER_PHONE,
+          otpRef: res.body.data.otpRef,
+          code: lastOtpCode(),
+        })
+        .expect(200);
+
+      const rows = await activityFor('auth.login');
+      const success = rows.find(
+        (row: { outcome: string }) => row.outcome === 'SUCCESS',
+      );
+
+      expect(success).toBeDefined();
+      expect(success.kind).toBe('AUTH');
+      expect(success.platform).toBeDefined();
+      expect(success.requestId).toBeDefined();
+    });
+
+    // The attempt nobody can attribute is exactly the one worth keeping.
+    it('records a sign-in attempt against an identifier nobody holds', async () => {
+      // otpRef has to be a well-formed uuid or the DTO rejects the call at
+      // the pipe, before the service ever sees the unknown identifier.
+      await post('/api/v1/auth/complete-login')
+        .send({
+          identifier: '699999999',
+          otpRef: '3d617878-7c58-4963-9a5f-f709a6133653',
+          code: '123456',
+        })
+        .expect(401);
+
+      const rows = await activityFor('auth.login');
+      const failure = rows.find(
+        (row: { outcome: string }) => row.outcome === 'FAILURE',
+      );
+
+      expect(failure).toBeDefined();
+      expect(failure.metadata.reason).toBe('UNKNOWN_IDENTIFIER');
+      // The identifier is masked on the way in — a trail must not become the
+      // place raw phone numbers are kept.
+      expect(failure.metadata.identifier).not.toBe('699999999');
+    });
+  });
+
   it('login for an unknown identifier fails with INVALID_CREDENTIALS semantics (401)', async () => {
     const res = await post('/api/v1/auth/initiate-login')
       .send({ identifier: '699999999' })

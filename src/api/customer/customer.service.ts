@@ -16,6 +16,8 @@ import {
   auditContext,
 } from 'src/helper/service/audit-context';
 import { AppUtilService } from 'src/helper/service/app-util.service';
+import { ActivityService } from 'src/helper/service/activity.service';
+import { ActivityKindEnum } from 'src/schema/activity/activity.dto';
 import {
   buildExportCsv,
   buildExportExcel,
@@ -413,6 +415,7 @@ export class CustomerService {
     private readonly rewardTierModel: Model<RewardTier>,
     private readonly historyLabelService: HistoryLabelService,
     private readonly rewardService: RewardService,
+    private readonly activityService: ActivityService,
   ) {}
 
   private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
@@ -983,6 +986,16 @@ export class CustomerService {
     this.logger.log(
       `[${platform}] ${phone} exported ${rows.length} customers as ${format}`,
     );
+    // A bulk pull leaves no trace on any record — the rows are only read — so
+    // the trail is the only place it is ever visible.
+    await this.activityService.recordFromRequest(this.req, {
+      userId: new Types.ObjectId(this.req.user.userId),
+      kind: ActivityKindEnum.EXPORT,
+      action: 'customer.export',
+      resource: 'Customer',
+      metadata: { format, rows: rows.length },
+    });
+
     return result;
   }
 

@@ -25,6 +25,7 @@ import { OrderEvents } from '../order/order.events';
 import { PaymentEvents } from './payment.events';
 import { PaymentExportFormatEnum } from './dto/export-payment.dto';
 import { PaymentService } from './payment.service';
+import { ActivityService } from 'src/helper/service/activity.service';
 
 // Real unrestricted ability so scopeFilter's rulesToQuery yields {} here.
 const manageAllAbility = () => {
@@ -156,6 +157,15 @@ describe('PaymentService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // The trail observes these services; it never changes what they do.
+        {
+          provide: ActivityService,
+          useValue: {
+            record: jest.fn().mockResolvedValue(undefined),
+            recordAuth: jest.fn().mockResolvedValue(undefined),
+            recordFromRequest: jest.fn().mockResolvedValue(undefined),
+          },
+        },
         PaymentService,
         {
           provide: AppUtilService,

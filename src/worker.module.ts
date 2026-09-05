@@ -8,6 +8,7 @@ import { SchemaModule } from './schema/schema.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { QueueProcessorModule } from './queue/queue-processor.module';
 import { MetricsModule } from './helper/metrics/metrics.module';
+import { ActivityRecorderModule } from './helper/activity/activity.module';
 
 // Background-only counterpart to AppModule: no controllers, guards, or
 // HTTP middleware — queue processors + cron, same image, no user traffic.
@@ -21,6 +22,7 @@ import { MetricsModule } from './helper/metrics/metrics.module';
     SchemaModule,
     SchedulerModule,
     MetricsModule,
+    ActivityRecorderModule,
     QueueProcessorModule,
     i18nModule,
     BullModule.forRoot({

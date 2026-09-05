@@ -31,6 +31,7 @@ import {
   ExportCustomerDto,
 } from './dto/export-customer.dto';
 import { FindCustomerDto } from './dto/find-customer.dto';
+import { ActivityService } from 'src/helper/service/activity.service';
 
 // A constructor mock that also carries Mongoose statics (exists/findOne/...).
 type DocFactory = (data: Record<string, unknown>) => Record<string, unknown>;
@@ -147,6 +148,15 @@ describe('CustomerService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // The trail observes these services; it never changes what they do.
+        {
+          provide: ActivityService,
+          useValue: {
+            record: jest.fn().mockResolvedValue(undefined),
+            recordAuth: jest.fn().mockResolvedValue(undefined),
+            recordFromRequest: jest.fn().mockResolvedValue(undefined),
+          },
+        },
         CustomerService,
         {
           provide: AppUtilService,

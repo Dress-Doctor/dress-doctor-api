@@ -232,6 +232,11 @@ export default {
       description: 'Full system access',
       action: PermissionActionEnum.MANAGE,
     },
+    // The who-did-what trail is read-only by design: rows are written by the
+    // audit hook and the auth/export paths, never by a request. There is no
+    // CREATE/UPDATE/DELETE to grant, and granting one would be a way to edit
+    // the record of what happened.
+    { subject: SubjectEnum.Activity, action: PermissionActionEnum.READ },
     ...crud(SubjectEnum.Order),
     // Bulk CSV/Excel export of orders — gated separately from READ so it can be
     // granted to reporting/oversight roles only.
@@ -325,6 +330,9 @@ export default {
         ...crud(SubjectEnum.Customer),
         { subject: SubjectEnum.Customer, action: PermissionActionEnum.EXPORT },
         ...readUpdate(SubjectEnum.FollowUp),
+        // Office-scoped by OFFICE_OWNED, so a branch manager reviews their own
+        // branch's trail and no one else's.
+        { subject: SubjectEnum.Activity, action: PermissionActionEnum.READ },
       ],
     },
     {

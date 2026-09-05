@@ -96,6 +96,9 @@ export enum SubjectEnum {
   // subscriptions
   Subscription = 'Subscription',
   SubscriptionPlan = 'SubscriptionPlan',
+
+  // who-did-what trail
+  Activity = 'Activity',
 }
 
 export enum RoleEnum {

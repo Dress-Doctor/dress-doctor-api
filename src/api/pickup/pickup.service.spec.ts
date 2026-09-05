@@ -18,6 +18,7 @@ import { Customer } from 'src/schema/user/customer.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { User } from 'src/schema/user/user.schema';
 import { PickupService } from './pickup.service';
+import { ActivityService } from 'src/helper/service/activity.service';
 
 // A real (unrestricted) ability so scopeFilter's rulesToQuery works and yields
 // an empty (unrestricted) filter in these tests.
@@ -56,6 +57,15 @@ describe('PickupService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // The trail observes these services; it never changes what they do.
+        {
+          provide: ActivityService,
+          useValue: {
+            record: jest.fn().mockResolvedValue(undefined),
+            recordAuth: jest.fn().mockResolvedValue(undefined),
+            recordFromRequest: jest.fn().mockResolvedValue(undefined),
+          },
+        },
         PickupService,
         { provide: AppUtilService, useValue: new AppUtilService() },
         { provide: CodeGeneratorService, useValue: {} },

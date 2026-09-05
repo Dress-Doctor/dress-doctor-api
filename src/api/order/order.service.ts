@@ -28,6 +28,8 @@ import {
 import { HistoryActionEnum } from 'src/schema/admin/admin.dto';
 import { scopeFilter, scopePermitsCustomer } from 'src/helper/casl/casl-scope';
 import { AppUtilService } from 'src/helper/service/app-util.service';
+import { ActivityService } from 'src/helper/service/activity.service';
+import { ActivityKindEnum } from 'src/schema/activity/activity.dto';
 import {
   buildExportCsv,
   buildExportExcel,
@@ -520,6 +522,7 @@ export class OrderService {
     private readonly pricingService: PricingService,
     private readonly historyLabelService: HistoryLabelService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly activityService: ActivityService,
   ) {}
 
   /**
@@ -2235,6 +2238,16 @@ export class OrderService {
     }
 
     this.logger.log(`${logBase} exported ${rows.length} orders as ${format}`);
+    // A bulk pull leaves no trace on any record — the rows are only read — so
+    // the trail is the only place it is ever visible.
+    await this.activityService.recordFromRequest(this.req, {
+      userId: new Types.ObjectId(this.req.user.userId),
+      kind: ActivityKindEnum.EXPORT,
+      action: 'order.export',
+      resource: 'Order',
+      metadata: { format, rows: rows.length },
+    });
+
     return result;
   }
 

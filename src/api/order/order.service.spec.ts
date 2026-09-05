@@ -36,6 +36,7 @@ import { PricingService } from '../pricing/pricing.service';
 import { AppAbility } from 'src/helper/casl/casl.dto';
 import { HistoryActionEnum } from 'src/schema/admin/admin.dto';
 import { OrderEvents } from './order.events';
+import { ActivityService } from 'src/helper/service/activity.service';
 import {
   OrderService,
   TransitionKindEnum,
@@ -196,6 +197,15 @@ describe('OrderService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // The trail observes these services; it never changes what they do.
+        {
+          provide: ActivityService,
+          useValue: {
+            record: jest.fn().mockResolvedValue(undefined),
+            recordAuth: jest.fn().mockResolvedValue(undefined),
+            recordFromRequest: jest.fn().mockResolvedValue(undefined),
+          },
+        },
         OrderService,
         {
           provide: CodeGeneratorService,

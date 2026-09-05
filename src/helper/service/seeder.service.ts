@@ -354,6 +354,9 @@ export class SeederService {
     SubjectEnum.Payment,
     SubjectEnum.PickupRequest,
     SubjectEnum.PickupAssignment,
+    // Activity rows carry the office the actor was working in, so an
+    // OFFICE-scoped reviewer is confined to their own branch's trail.
+    SubjectEnum.Activity,
   ]);
 
   private async upsertRolePermission(

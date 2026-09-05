@@ -12,6 +12,8 @@ import type { AppRequestWithUser } from 'src/dto/request-data.dto';
 import { SAFE_OFFICE_PROJECTION } from 'src/helper/projection/office.projection';
 import { SAFE_USER_PROJECTION } from 'src/helper/projection/user.projection';
 import { AppUtilService } from 'src/helper/service/app-util.service';
+import { ActivityService } from 'src/helper/service/activity.service';
+import { ActivityKindEnum } from 'src/schema/activity/activity.dto';
 import {
   buildExportCsv,
   buildExportExcel,
@@ -176,6 +178,7 @@ export class PickupService {
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
     @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
+    private readonly activityService: ActivityService,
   ) {}
 
   private can(action: CaslActionsDto, subject: CaslSubjectsDto) {
@@ -891,6 +894,16 @@ export class PickupService {
     }
 
     this.logger.log(`${logBase} exported ${rows.length} pickups as ${format}`);
+    // A bulk pull leaves no trace on any record — the rows are only read — so
+    // the trail is the only place it is ever visible.
+    await this.activityService.recordFromRequest(this.req, {
+      userId: new Types.ObjectId(this.req.user.userId),
+      kind: ActivityKindEnum.EXPORT,
+      action: 'pickuprequest.export',
+      resource: 'PickupRequest',
+      metadata: { format, rows: rows.length },
+    });
+
     return result;
   }
 

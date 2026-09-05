@@ -27,6 +27,7 @@ import { CreateOfficeDto } from './dto/create-office.dto';
 import { OfficeExportFormatEnum } from './dto/export-office.dto';
 import { OfficeIntervalEnum, OfficeMetricEnum } from './dto/office-detail.dto';
 import { OfficeService } from './office.service';
+import { ActivityService } from 'src/helper/service/activity.service';
 
 type DocFactory = (data: Record<string, unknown>) => Record<string, unknown>;
 const modelMock = (factory?: DocFactory) => {
@@ -164,6 +165,15 @@ describe('OfficeService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // The trail observes these services; it never changes what they do.
+        {
+          provide: ActivityService,
+          useValue: {
+            record: jest.fn().mockResolvedValue(undefined),
+            recordAuth: jest.fn().mockResolvedValue(undefined),
+            recordFromRequest: jest.fn().mockResolvedValue(undefined),
+          },
+        },
         OfficeService,
         {
           provide: AppUtilService,

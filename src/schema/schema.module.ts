@@ -16,6 +16,7 @@ import { SubscriptionSchemaModule } from './subscription/subscription.module';
 import { JobRunSchemaModule } from './job-run/job-run.module';
 import { FollowUpSchemaModule } from './follow-up/follow-up.module';
 import { RewardSchemaModule } from './reward/reward.module';
+import { ActivitySchemaModule } from './activity/activity.module';
 
 @Global()
 @Module({
@@ -39,6 +40,7 @@ import { RewardSchemaModule } from './reward/reward.module';
     JobRunSchemaModule,
     FollowUpSchemaModule,
     RewardSchemaModule,
+    ActivitySchemaModule,
   ],
   exports: [MongooseModule],
 })

@@ -18,6 +18,12 @@ export const envValidationSchema = Joi.object({
   // to their own db so test keys can never sit beside dev/stage data.
   REDIS_DB: Joi.number().min(0).max(15).default(0),
 
+  // How long the who-did-what trail is kept, in days. Read when the Activity
+  // schema builds its TTL index, so changing it only affects a collection
+  // that does not exist yet — moving an existing horizon needs a collMod
+  // migration on expireAfterSeconds.
+  ACTIVITY_RETENTION_DAYS: Joi.number().min(1).default(730),
+
   // Auth
   JWT_SECRET: Joi.string().min(16).required(),
   // Access token stays short-lived (stolen access tokens aren't revocable);

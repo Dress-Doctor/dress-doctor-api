@@ -92,6 +92,9 @@ describe('Worker loop (e2e)', () => {
     const ready =
       (await orderStatusModel.findOne({ orderStatusName: 'READY' })) ??
       (await orderStatusModel.create({
+        // Lookup rows are addressed by reference since 7f908e2, and the field
+        // is required — a fixture has to state one the way a seed does.
+        reference: 'OS-READY',
         orderStatusName: 'READY',
         isActive: true,
       }));
@@ -276,7 +279,10 @@ describe('Worker loop (e2e)', () => {
     const userTypeModel = model('UserType');
     const customerType =
       (await userTypeModel.findOne({ userTypeName: 'CUSTOMER' })) ??
-      (await userTypeModel.create({ userTypeName: 'CUSTOMER' }));
+      (await userTypeModel.create({
+        reference: 'UT-CUSTOMER',
+        userTypeName: 'CUSTOMER',
+      }));
     const user = await model('User').create({
       firstName: 'Marie',
       phone: '690000001',
