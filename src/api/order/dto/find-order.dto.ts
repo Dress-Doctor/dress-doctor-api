@@ -121,4 +121,16 @@ export class FindOrderDto extends PaginationDto {
   @IsOptional()
   @IsMongoId({ message: 'Invalid pickedUpBy' })
   pickedUpBy?: string;
+
+  @ApiProperty({
+    required: false,
+    example: 'US-8KQTMR',
+    description:
+      'Filter by the staff member who opened the order, addressed by user ' +
+      'reference the way the rest of the platform addresses a user. An ' +
+      'unknown reference returns nothing, never everything.',
+  })
+  @IsOptional()
+  @IsString()
+  createdByReference?: string;
 }

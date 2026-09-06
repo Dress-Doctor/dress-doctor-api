@@ -1540,6 +1540,18 @@ export class OrderService {
     if (query.pickedUpBy)
       whereClause['pickedUpBy'] = new Types.ObjectId(query.pickedUpBy);
 
+    // Who opened the order, by user reference rather than raw id — this is
+    // what the staff file's Orders tab asks. An unknown reference resolves to
+    // an id nothing carries, because dropping the clause would widen the
+    // query instead of narrowing it: a typo would answer with every order.
+    if (query.createdByReference) {
+      const author = await this.userModel
+        .findOne({ reference: query.createdByReference })
+        .select('_id')
+        .lean();
+      whereClause['createdBy'] = author?._id ?? new Types.ObjectId();
+    }
+
     // Office by human-readable code, resolved to its id so the match rides the
     // officeId indexes. An unknown code yields an id that matches nothing,
     // which is the same shape of answer as an office with no orders.

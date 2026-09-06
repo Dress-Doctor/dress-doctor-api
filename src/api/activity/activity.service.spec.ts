@@ -10,7 +10,11 @@ import { FindActivityDto } from './dto/find-activity.dto';
 
 describe('ActivityReadService', () => {
   let service: ActivityReadService;
-  let activityModel: { countDocuments: jest.Mock; aggregate: jest.Mock };
+  let activityModel: {
+    countDocuments: jest.Mock;
+    aggregate: jest.Mock;
+    distinct: jest.Mock;
+  };
   let userModel: { findOne: jest.Mock };
 
   const officeId = new Types.ObjectId();
@@ -50,6 +54,7 @@ describe('ActivityReadService', () => {
     activityModel = {
       countDocuments: jest.fn().mockResolvedValue(2),
       aggregate: jest.fn().mockResolvedValue([]),
+      distinct: jest.fn().mockResolvedValue([]),
     };
     userModel = { findOne: jest.fn(() => lean({ _id: actorId })) };
     build();
@@ -145,6 +150,51 @@ describe('ActivityReadService', () => {
     await service.findAll(query());
 
     expect(JSON.stringify(matchOf())).toContain(officeId.toString());
+  });
+
+  describe('resourcesForUser', () => {
+    it('offers every resource in the trail, sorted, without the blanks', async () => {
+      // A row written before `resource` was mandatory has none. Mongo hands
+      // the empty back as its own value; nobody can filter on it.
+      activityModel.distinct.mockResolvedValue(['Order', '', 'Customer']);
+
+      const result = await service.resourcesForUser('US-4B2C');
+
+      expect(activityModel.distinct).toHaveBeenCalledWith(
+        'resource',
+        expect.objectContaining({ userId: actorId }),
+      );
+      expect(result).toEqual({ resources: ['Customer', 'Order'] });
+    });
+
+    // The list is what the filter offers, so it must not narrow with the
+    // filter: only the actor and the caller's own scope may bound it.
+    it('bounds the list by the caller`s office scope', async () => {
+      build(makeAbility({ officeId: officeId.toString() }));
+
+      await service.resourcesForUser('US-4B2C');
+
+      const calls = activityModel.distinct.mock.calls as [string, object][];
+      expect(JSON.stringify(calls[0][1])).toContain(officeId.toString());
+    });
+
+    it('refuses a caller without READ Activity', async () => {
+      const { build: buildAbility } = new AbilityBuilder(AppAbility);
+      build(buildAbility());
+
+      await expect(service.resourcesForUser('US-4B2C')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(activityModel.distinct).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown reference', async () => {
+      userModel.findOne.mockReturnValue(lean(null));
+
+      await expect(service.resourcesForUser('US-NOPE')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
   });
 
   it('returns the pagination envelope', async () => {

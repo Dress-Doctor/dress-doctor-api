@@ -121,6 +121,19 @@ export class ActivityReadService {
           officeId: 1,
           platform: 1,
           requestId: 1,
+          /**
+           * Where the actor was sitting and what they were sitting at.
+           *
+           * These are the two fields on the row that describe the person
+           * rather than the act, and they are returned to anyone who may read
+           * the trail at all — which, for an OFFICE-scoped reviewer, means a
+           * colleague's home address to a street and the device they own.
+           * Returned deliberately, so a reviewer can tell one session apart
+           * from another; narrow READ Activity rather than this projection if
+           * that is too much for a role.
+           */
+          ip: 1,
+          userAgent: 1,
           metadata: 1,
           createdAt: 1,
           actor: {
@@ -144,10 +157,56 @@ export class ActivityReadService {
   }
 
   /**
+   * Every kind of record this person has touched, in alphabetical order.
+   *
+   * A read of its own, deliberately. The resource filter has to offer the
+   * whole set whichever narrowing is already on: derived from the page on
+   * screen, the list collapsed to the one value that was selected, so
+   * picking a second resource meant clearing the first.
+   *
+   * Filtered by the same CASL scope the trail itself uses, so an
+   * office-scoped reviewer is offered what they may actually read and
+   * nothing more. `distinct` rides the `{ userId, createdAt }` index and
+   * comes back as a handful of short strings, so it is cheap enough to hold
+   * for the life of a tab.
+   */
+  async resourcesForUser(reference: string): Promise<{ resources: string[] }> {
+    this.can('READ', 'Activity');
+
+    const actor = await this.findActor(reference);
+    const where = {
+      ...scopeFilter(this.req.user.ability, 'READ', 'Activity'),
+      userId: actor._id,
+    };
+
+    const resources: string[] = await this.activityModel.distinct(
+      'resource',
+      where,
+    );
+
+    // `resources`, not `data`: the response interceptor reads a top-level
+    // `data` as the pagination envelope and would rewrite it.
+    return { resources: resources.filter(Boolean).sort() };
+  }
+
+  /**
    * Everything one actor did, addressed the way the rest of the platform
    * addresses a user — by reference, never by raw id.
    */
   async findForUser(reference: string, query: FindActivityDto) {
+    await this.findActor(reference);
+
+    return await this.findAll({ ...query, userReference: reference });
+  }
+
+  /**
+   * The actor behind a reference, or a 400.
+   *
+   * An unknown reference must not read as an empty trail: "this person did
+   * nothing" and "there is no such person" are different answers, and a typo
+   * should get the second one.
+   */
+  private async findActor(reference: string) {
     const actor = await this.userModel
       .findOne({ reference })
       .select('_id')
@@ -160,6 +219,6 @@ export class ActivityReadService {
       });
     }
 
-    return await this.findAll({ ...query, userReference: reference });
+    return actor;
   }
 }

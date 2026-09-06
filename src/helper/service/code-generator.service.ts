@@ -15,6 +15,7 @@ import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { Customer } from 'src/schema/user/customer.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
+import { User } from 'src/schema/user/user.schema';
 
 @Injectable()
 export class CodeGeneratorService {
@@ -29,6 +30,8 @@ export class CodeGeneratorService {
 
     @InjectModel(PickupRequest.name)
     private readonly pickupRequestModel: Model<PickupRequest>,
+
+    @InjectModel(User.name) private readonly userModel: Model<User>,
 
     @InjectModel(UserType.name)
     private readonly userTypeModel: Model<UserType>,
@@ -142,6 +145,25 @@ export class CodeGeneratorService {
     do {
       code = this.generateCode(6, 'PY');
       const doc = await this.paymentModel.exists({ reference: code });
+      exists = doc ? true : false;
+    } while (exists);
+
+    return code;
+  }
+
+  /**
+   * The reference every user is addressed by (`US-8KQTMR`).
+   *
+   * Six characters rather than four: there are far more users than offices,
+   * and the retry loop below is cheapest when collisions are rare.
+   */
+  async generateUserReference() {
+    let code: string;
+    let exists: boolean;
+
+    do {
+      code = this.generateCode(6, 'US');
+      const doc = await this.userModel.exists({ reference: code });
       exists = doc ? true : false;
     } while (exists);
 

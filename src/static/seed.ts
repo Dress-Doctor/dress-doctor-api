@@ -256,6 +256,9 @@ export default {
     // the file is a list of names, phones and addresses leaving the building.
     { subject: SubjectEnum.Customer, action: PermissionActionEnum.EXPORT },
     ...crud(SubjectEnum.User),
+    // Bulk CSV/Excel export of users — gated separately from READ because the
+    // file is a list of names, phones and emails leaving the building.
+    { subject: SubjectEnum.User, action: PermissionActionEnum.EXPORT },
     // User types are reference data, but they are now editable from the
     // reference screen, so the write actions have to exist as permission rows
     // before any role can be granted them. Seeding the row grants nobody

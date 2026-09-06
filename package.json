@@ -19,6 +19,7 @@
     "backfill:payment-period": "ts-node -r tsconfig-paths/register src/scripts/backfill-payment-period.ts",
     "backfill:payment-customer": "ts-node -r tsconfig-paths/register src/scripts/backfill-payment-customer.ts",
     "backfill:phone-e164": "ts-node -r tsconfig-paths/register src/scripts/backfill-phone-e164.ts",
+    "backfill:user-reference": "ts-node -r tsconfig-paths/register src/scripts/backfill-user-reference.ts",
     "backfill:user-type-reference": "ts-node -r tsconfig-paths/register src/scripts/backfill-user-type-reference.ts",
     "backfill:pickup-status-reference": "ts-node -r tsconfig-paths/register src/scripts/backfill-pickup-status-reference.ts",
     "backfill:order-status-reference": "ts-node -r tsconfig-paths/register src/scripts/backfill-order-status-reference.ts",

@@ -53,6 +53,30 @@ export class FindPickupDto extends PaginationDto {
 
   @ApiProperty({
     required: false,
+    example: 'US-8KQTMR',
+    description:
+      'The staff member who confirmed the request, by user reference. The ' +
+      'reference-addressed twin of `confirmedById`; an unknown reference ' +
+      'returns nothing, never everything.',
+  })
+  @IsOptional()
+  @IsString()
+  confirmedByReference?: string;
+
+  @ApiProperty({
+    required: false,
+    example: 'US-8KQTMR',
+    description:
+      'The agent the pickup was assigned to, by user reference — what the ' +
+      'staff file means by "pickups handled". Assignment lives in its own ' +
+      'collection, so this resolves through it.',
+  })
+  @IsOptional()
+  @IsString()
+  agentReference?: string;
+
+  @ApiProperty({
+    required: false,
     example: 'DLA-01',
     description: 'Office code',
   })

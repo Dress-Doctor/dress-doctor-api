@@ -387,6 +387,42 @@ export class PickupService {
         confirmedBy: new Types.ObjectId(query.confirmedById),
       };
 
+    // The same question asked by reference, which is how the staff file asks
+    // it. An unknown reference resolves to an id nothing carries: dropping
+    // the clause would widen the query, so a typo would answer with every
+    // pickup rather than with none.
+    if (query.confirmedByReference) {
+      const staff = await this.userModel
+        .findOne({ reference: query.confirmedByReference })
+        .select('_id')
+        .lean();
+      baseFilter = {
+        ...baseFilter,
+        confirmedBy: staff?._id ?? new Types.ObjectId(),
+      };
+    }
+
+    // Pickups this agent was sent on. The assignment is its own record, so
+    // this is a prefilter: collect the requests assigned to them, then match
+    // on those ids. Same shape as the keyword prefilter below.
+    if (query.agentReference) {
+      const agent = await this.userModel
+        .findOne({ reference: query.agentReference })
+        .select('_id')
+        .lean();
+
+      const assignments = agent
+        ? await this.pickupAssignmentModel
+            .find({ agentId: agent._id })
+            .select('pickupRequestId')
+            .lean()
+        : [];
+
+      andClauses.push({
+        _id: { $in: assignments.map((row) => row.pickupRequestId) },
+      });
+    }
+
     // Office Filter
     if (query.officeCode) {
       const office = await this.officeModel.findOne({

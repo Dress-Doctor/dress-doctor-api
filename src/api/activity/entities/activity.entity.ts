@@ -67,6 +67,24 @@ export class ActivityEntity {
   })
   requestId?: string;
 
+  @ApiProperty({
+    required: false,
+    example: '102.244.18.7',
+    description:
+      'The address the request came from. Returned to anyone who may read ' +
+      'the trail, so it is a colleague`s whereabouts as much as an audit ' +
+      'fact — narrow READ Activity, not this field, if a role should not ' +
+      'see it.',
+  })
+  ip?: string;
+
+  @ApiProperty({
+    required: false,
+    example: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/141.0',
+    description: 'The browser or app the actor used, verbatim.',
+  })
+  userAgent?: string;
+
   @ApiProperty({ type: ActivityActorEntity })
   actor: ActivityActorEntity;
 
