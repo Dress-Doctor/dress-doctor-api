@@ -32,6 +32,7 @@
     "backfill:category-reference": "ts-node -r tsconfig-paths/register src/scripts/backfill-category-reference.ts",
     "backfill:sub-category-reference": "ts-node -r tsconfig-paths/register src/scripts/backfill-sub-category-reference.ts",
     "backfill:currency-reference": "ts-node -r tsconfig-paths/register src/scripts/backfill-currency-reference.ts",
+    "backfill:item-derived": "ts-node -r tsconfig-paths/register src/scripts/backfill-item-derived.ts",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "lint:ci": "eslint \"{src,apps,libs,test}/**/*.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.build.json",

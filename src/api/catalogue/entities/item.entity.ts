@@ -26,6 +26,15 @@ export class ItemEntity {
   itemName: string;
 
   @ApiProperty({
+    example: 'Jeans (Men - Bottoms)',
+    description:
+      'The item qualified by what it is filed under, built by the API and ' +
+      'never accepted on a write. Several categories join with a comma, and ' +
+      'the bracket is dropped when the item is filed under nothing.',
+  })
+  displayName: string;
+
+  @ApiProperty({
     type: ServiceEntity,
     description: 'The service itself, resolved. `serviceId` carries the id.',
   })
@@ -48,6 +57,15 @@ export class ItemEntity {
 
   @ApiProperty({ example: 1000 })
   priceHigh: number;
+
+  @ApiProperty({
+    example: 750,
+    description:
+      'Midpoint of the range above, rounded to a whole unit. Built by the ' +
+      'API and never accepted on a write. Not `OrderItem.unitPrice`, which ' +
+      'records what a line was actually charged.',
+  })
+  unitPrice: number;
 
   @ApiProperty({ default: true, example: true })
   isActive: boolean;

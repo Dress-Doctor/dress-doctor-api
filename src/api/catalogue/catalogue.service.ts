@@ -18,6 +18,10 @@ import {
   auditContext,
 } from 'src/helper/service/audit-context';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
+import {
+  itemDisplayName,
+  itemUnitPrice,
+} from 'src/helper/catalog/item-derived';
 import { HistoryLabelService } from 'src/helper/service/history-label.service';
 import type {
   ReferenceHistoryEntry,
@@ -783,6 +787,17 @@ export class CatalogueService {
       } as never,
     );
 
+    // A rename rewrites the display name of every item filed under this
+    // category. Only on a rename: switching one off changes no label.
+    if (data.categoryName) {
+      const itemIds = await this.itemIdsLinkedTo(
+        this.itemCategoryModel,
+        'categoryId',
+        category._id,
+      );
+      await this.recomputeItemDerived(itemIds);
+    }
+
     this.logger.log(`${this.logBase} updated category ${category.reference}`);
     return updated;
   }
@@ -898,6 +913,16 @@ export class CatalogueService {
         context: auditContext(this.req, actorId),
       } as never,
     );
+
+    // Same fan-out as the categories: a rename moves every label under it.
+    if (data.subCategoryName) {
+      const itemIds = await this.itemIdsLinkedTo(
+        this.itemSubCategoryModel,
+        'subCategoryId',
+        subCategory._id,
+      );
+      await this.recomputeItemDerived(itemIds);
+    }
 
     this.logger.log(
       `${this.logBase} updated sub category ${subCategory.reference}`,
@@ -1162,7 +1187,14 @@ export class CatalogueService {
     base: Record<string, unknown>;
     status?: Record<string, unknown>;
   }> {
-    const { base, status } = this.buildFilter(query, ['reference', 'itemName']);
+    // `displayName` as well as `itemName`, which is the point of storing it:
+    // "Men" finds every item filed under that category without the caller
+    // having to know the category's reference.
+    const { base, status } = this.buildFilter(query, [
+      'reference',
+      'itemName',
+      'displayName',
+    ]);
 
     if (query.serviceReference) {
       const service = await this.serviceModel
@@ -1426,6 +1458,128 @@ export class CatalogueService {
   }
 
   /**
+   * Rewrites an item's two derived fields from what it currently points at.
+   *
+   * The single place either field is ever written. Both are stored, so both
+   * can go stale, and there are only three ways that happens: the item's own
+   * name or prices change, its category links change, or a category or sub
+   * category is renamed underneath it. Every one of those calls this.
+   *
+   * Written without an audit context on purpose. A derived field is not a
+   * change anyone made — it is the record catching up with a change already
+   * on the trail — so the item's history would otherwise carry a second,
+   * authorless entry saying `displayName` moved, right beside the entry that
+   * says why. `timestamps: false` for the same reason: an item is not
+   * "updated" because the category above it was reworded.
+   *
+   * Returns nothing and throws nothing. A derived label failing must never
+   * fail the write that triggered it.
+   */
+  private async recomputeItemDerived(itemIds: Types.ObjectId[]) {
+    if (!itemIds.length) return;
+
+    try {
+      const rows = await this.itemModel.aggregate<{
+        _id: Types.ObjectId;
+        itemName: string;
+        priceLow: number;
+        priceHigh: number;
+        categoryNames: string[];
+        subCategoryNames: string[];
+      }>([
+        { $match: { _id: { $in: itemIds } } },
+        {
+          $lookup: {
+            localField: '_id',
+            as: 'itemCategories',
+            foreignField: 'itemId',
+            from: itemCategorySchemaName,
+          },
+        },
+        {
+          $lookup: {
+            as: 'categories',
+            foreignField: '_id',
+            from: categorySchemaName,
+            localField: 'itemCategories.categoryId',
+          },
+        },
+        {
+          $lookup: {
+            localField: '_id',
+            foreignField: 'itemId',
+            as: 'itemSubCategories',
+            from: itemSubCategorySchemaName,
+          },
+        },
+        {
+          $lookup: {
+            foreignField: '_id',
+            as: 'subCategories',
+            from: subCategorySchemaName,
+            localField: 'itemSubCategories.subCategoryId',
+          },
+        },
+        {
+          $project: {
+            itemName: 1,
+            priceLow: 1,
+            priceHigh: 1,
+            categoryNames: '$categories.categoryName',
+            subCategoryNames: '$subCategories.subCategoryName',
+          },
+        },
+      ]);
+
+      if (!rows.length) return;
+
+      await this.itemModel.bulkWrite(
+        rows.map((row) => ({
+          updateOne: {
+            filter: { _id: row._id },
+            update: {
+              $set: {
+                unitPrice: itemUnitPrice(row.priceLow, row.priceHigh),
+                displayName: itemDisplayName({
+                  itemName: row.itemName,
+                  categoryNames: row.categoryNames,
+                  subCategoryNames: row.subCategoryNames,
+                }),
+              },
+            },
+            timestamps: false,
+          },
+        })),
+        // No audit context: see the note above.
+        { timestamps: false },
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to recompute the derived fields of ${itemIds.length} item(s): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  /**
+   * The items filed under one category or sub category, for the fan-out after
+   * a rename. Ids only — the recompute reads everything else itself.
+   */
+  private async itemIdsLinkedTo<TLink>(
+    linkModel: Model<TLink>,
+    field: string,
+    targetId: Types.ObjectId,
+  ): Promise<Types.ObjectId[]> {
+    const links = await linkModel
+      .find({ [field]: targetId } as never)
+      .select('itemId')
+      .lean<{ itemId: Types.ObjectId }[]>();
+
+    return links.map((link) => link.itemId);
+  }
+
+  /**
    * Adds an item.
    *
    * The three links are named by reference and resolved here, the price pair
@@ -1494,8 +1648,12 @@ export class CatalogueService {
       );
     }
 
+    // Last, not first: the display name reads the links, and the links only
+    // exist once the item they point at does.
+    await this.recomputeItemDerived([item._id]);
+
     this.logger.log(`${this.logBase} created item ${reference}`);
-    return item;
+    return await this.itemModel.findById(item._id);
   }
 
   /**
@@ -1541,12 +1699,14 @@ export class CatalogueService {
     if (links.currencyId) patch.currencyId = links.currencyId;
     if (links.serviceTypeId) patch.serviceTypeId = links.serviceTypeId;
 
-    const updated = Object.keys(patch).length
-      ? await this.itemModel.findOneAndUpdate({ _id: item._id }, patch, {
-          returnDocument: 'after',
-          context: auditContext(this.req, actorId),
-        } as never)
-      : item;
+    // The result is deliberately not kept: the derived fields are rewritten
+    // below, so the row is re-read at the end and this copy would be stale.
+    if (Object.keys(patch).length) {
+      await this.itemModel.findOneAndUpdate({ _id: item._id }, patch, {
+        returnDocument: 'after',
+        context: auditContext(this.req, actorId),
+      } as never);
+    }
 
     // The link lists are absent unless the operator sent them, and an absent
     // list leaves the links alone. An empty one clears them — that is a
@@ -1614,8 +1774,13 @@ export class CatalogueService {
       });
     }
 
+    // After the fields AND the links, since either can move the label.
+    await this.recomputeItemDerived([item._id]);
+
     this.logger.log(`${this.logBase} updated item ${item.reference}`);
-    return updated;
+    // Re-read: `updated` was captured before the recompute, so returning it
+    // would hand back the row with its old display name and unit price.
+    return await this.itemModel.findById(item._id);
   }
 
   /**

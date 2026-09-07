@@ -22,7 +22,9 @@ export class FindItemDto extends PaginationDto {
   @ApiProperty({
     required: false,
     example: 'Polo Shirt',
-    description: 'Free-text search across reference and itemName',
+    description:
+      'Free-text search across reference, itemName and displayName — so a ' +
+      'category name finds the items filed under it.',
   })
   @IsOptional()
   @IsString()

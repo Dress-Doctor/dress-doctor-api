@@ -10,6 +10,7 @@ import { PaymentType } from 'src/schema/payment/payment-type.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import seed from 'src/static/seed';
+import { itemDisplayName, itemUnitPrice } from '../catalog/item-derived';
 import { CodeGeneratorService } from './code-generator.service';
 import { User } from 'src/schema/user/user.schema';
 import {
@@ -727,6 +728,25 @@ export class SeederService {
         { itemId, subCategoryId: subCategory._id },
         { upsert: true },
       );
+
+      // The two derived fields, written last because the display name reads
+      // the links above. Seeded rather than left to the backfill so a fresh
+      // database is complete the moment it is seeded. `timestamps: false`:
+      // a derived field is not an edit anyone made.
+      await this.itemModel.updateOne(
+        { _id: itemId },
+        {
+          $set: {
+            unitPrice: itemUnitPrice(item.priceLow, item.priceHigh),
+            displayName: itemDisplayName({
+              itemName: item.itemName,
+              categoryNames: [category.categoryName],
+              subCategoryNames: [subCategory.subCategoryName],
+            }),
+          },
+        },
+        { timestamps: false },
+      );
     }
 
     this.logger.log(`🌱 Done seeding ${itemData.length} data for Item`);
@@ -891,6 +911,25 @@ export class SeederService {
             itemId: (newItem as unknown as Item)._id,
           });
         }
+
+        // Same as the static catalogue above: derived last, because the
+        // display name reads the links this loop has just written.
+        const priceLow = Number(item['price low (xaf)'].replaceAll(',', ''));
+        const priceHigh = Number(item['price high (xaf)'].replaceAll(',', ''));
+        await this.itemModel.updateOne(
+          { _id: (newItem as unknown as Item)._id },
+          {
+            $set: {
+              unitPrice: itemUnitPrice(priceLow, priceHigh),
+              displayName: itemDisplayName({
+                itemName: item.item,
+                categoryNames: [item.category],
+                subCategoryNames: [item.subcategory],
+              }),
+            },
+          },
+          { timestamps: false },
+        );
       }
 
       this.logger.log(`🌱 Done seeding ${items.length} data for Item`);
