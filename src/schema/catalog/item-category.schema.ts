@@ -3,7 +3,9 @@ import { Document, Types } from 'mongoose';
 import { Category } from './category.schema';
 import { Item } from './item.schema';
 
-@Schema({ timestamps: true, collection: 'item_category' })
+export const itemCategorySchemaName = 'item_category';
+
+@Schema({ timestamps: true, collection: itemCategorySchemaName })
 export class ItemCategory extends Document<Types.ObjectId> {
   @Prop({ required: true, type: Types.ObjectId, ref: Item.name, index: true })
   itemId: Types.ObjectId;

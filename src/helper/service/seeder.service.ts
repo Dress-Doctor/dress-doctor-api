@@ -549,39 +549,70 @@ export class SeederService {
   }
 
   private async seedCurrency() {
-    const operations = currencyData.map((currency) => ({
-      updateOne: {
-        filter: { isoCode: currency.isoCode },
-        update: { $set: currency },
-        upsert: true,
-      },
-    }));
+    // `reference` is minted per row and written with `$setOnInsert`, the same
+    // way the reference collections above are: it is the id the catalogue
+    // screen and its URLs are built on, so a re-run must leave an existing
+    // row's alone. Generated one at a time rather than in parallel — the
+    // generator checks the database for a clash, and two concurrent calls
+    // could pick the same code before either had saved.
+    const operations: Parameters<typeof this.currencyModel.bulkWrite>[0] = [];
+    for (const currency of currencyData) {
+      const reference = await this.codeService.generateCurrencyReference();
+      operations.push({
+        updateOne: {
+          filter: { isoCode: currency.isoCode },
+          update: { $set: currency, $setOnInsert: { reference } },
+          upsert: true,
+        },
+      });
+    }
 
     await this.currencyModel.bulkWrite(operations);
     this.logger.log(`🌱 Done seeding ${currencyData.length} data for Currency`);
   }
 
   private async seedCategory() {
-    const operations = categoryData.map((category) => ({
-      updateOne: {
-        filter: { categoryName: category.categoryName },
-        update: { $set: category },
-        upsert: true,
-      },
-    }));
+    // `reference` is minted per row and written with `$setOnInsert`, the same
+    // way the reference collections above are: it is the id the catalogue
+    // screen and its URLs are built on, so a re-run must leave an existing
+    // row's alone. Generated one at a time rather than in parallel — the
+    // generator checks the database for a clash, and two concurrent calls
+    // could pick the same code before either had saved.
+    const operations: Parameters<typeof this.categoryModel.bulkWrite>[0] = [];
+    for (const category of categoryData) {
+      const reference = await this.codeService.generateCategoryReference();
+      operations.push({
+        updateOne: {
+          filter: { categoryName: category.categoryName },
+          update: { $set: category, $setOnInsert: { reference } },
+          upsert: true,
+        },
+      });
+    }
 
     await this.categoryModel.bulkWrite(operations);
     this.logger.log(`🌱 Done seeding ${categoryData.length} data for Category`);
   }
 
   private async seedSubCategory() {
-    const operations = subCategoryData.map((subCategory) => ({
-      updateOne: {
-        filter: { subCategoryName: subCategory.subCategoryName },
-        update: { $set: subCategory },
-        upsert: true,
-      },
-    }));
+    // `reference` is minted per row and written with `$setOnInsert`, the same
+    // way the reference collections above are: it is the id the catalogue
+    // screen and its URLs are built on, so a re-run must leave an existing
+    // row's alone. Generated one at a time rather than in parallel — the
+    // generator checks the database for a clash, and two concurrent calls
+    // could pick the same code before either had saved.
+    const operations: Parameters<typeof this.subCategoryModel.bulkWrite>[0] =
+      [];
+    for (const subCategory of subCategoryData) {
+      const reference = await this.codeService.generateSubCategoryReference();
+      operations.push({
+        updateOne: {
+          filter: { subCategoryName: subCategory.subCategoryName },
+          update: { $set: subCategory, $setOnInsert: { reference } },
+          upsert: true,
+        },
+      });
+    }
 
     await this.subCategoryModel.bulkWrite(operations);
     this.logger.log(
@@ -590,26 +621,47 @@ export class SeederService {
   }
 
   private async seedService() {
-    const operations = serviceData.map((service) => ({
-      updateOne: {
-        filter: { serviceName: service.serviceName },
-        update: { $set: service },
-        upsert: true,
-      },
-    }));
+    // `reference` is minted per row and written with `$setOnInsert`, the same
+    // way the reference collections above are: it is the id the catalogue
+    // screen and its URLs are built on, so a re-run must leave an existing
+    // row's alone. Generated one at a time rather than in parallel — the
+    // generator checks the database for a clash, and two concurrent calls
+    // could pick the same code before either had saved.
+    const operations: Parameters<typeof this.serviceModel.bulkWrite>[0] = [];
+    for (const service of serviceData) {
+      const reference = await this.codeService.generateServiceReference();
+      operations.push({
+        updateOne: {
+          filter: { serviceName: service.serviceName },
+          update: { $set: service, $setOnInsert: { reference } },
+          upsert: true,
+        },
+      });
+    }
 
     await this.serviceModel.bulkWrite(operations);
     this.logger.log(`🌱 Done seeding ${serviceData.length} data for Service`);
   }
 
   private async seedServiceType() {
-    const operations = serviceTypeData.map((serviceType) => ({
-      updateOne: {
-        filter: { serviceTypeName: serviceType.serviceTypeName },
-        update: { $set: serviceType },
-        upsert: true,
-      },
-    }));
+    // `reference` is minted per row and written with `$setOnInsert`, the same
+    // way the reference collections above are: it is the id the catalogue
+    // screen and its URLs are built on, so a re-run must leave an existing
+    // row's alone. Generated one at a time rather than in parallel — the
+    // generator checks the database for a clash, and two concurrent calls
+    // could pick the same code before either had saved.
+    const operations: Parameters<typeof this.serviceTypeModel.bulkWrite>[0] =
+      [];
+    for (const serviceType of serviceTypeData) {
+      const reference = await this.codeService.generateServiceTypeReference();
+      operations.push({
+        updateOne: {
+          filter: { serviceTypeName: serviceType.serviceTypeName },
+          update: { $set: serviceType, $setOnInsert: { reference } },
+          upsert: true,
+        },
+      });
+    }
 
     await this.serviceTypeModel.bulkWrite(operations);
     this.logger.log(
@@ -640,15 +692,22 @@ export class SeederService {
         continue;
       }
 
+      // `reference` rides in `$setOnInsert`, so a re-run leaves the one an
+      // existing item already carries alone — it is the id the catalogue
+      // screen and its URLs are built on.
+      const reference = await this.codeService.generateItemReference();
       const itemDoc = await this.itemModel.findOneAndUpdate(
         { itemName: item.itemName },
         {
-          itemName: item.itemName,
-          serviceId: service._id,
-          serviceTypeId: serviceType._id,
-          currencyId: currency?._id,
-          priceLow: item.priceLow,
-          priceHigh: item.priceHigh,
+          $set: {
+            itemName: item.itemName,
+            serviceId: service._id,
+            serviceTypeId: serviceType._id,
+            currencyId: currency?._id,
+            priceLow: item.priceLow,
+            priceHigh: item.priceHigh,
+          },
+          $setOnInsert: { reference },
         },
         {
           context: audit,
@@ -788,15 +847,21 @@ export class SeederService {
           tempServiceType.set(item.type, serviceType._id);
         }
 
+        // Same as the static catalogue above: minted here, but only written
+        // when the row is new.
+        const reference = await this.codeService.generateItemReference();
         const newItem = await this.itemModel.findOneAndUpdate(
           { itemName: item.item },
           {
-            serviceId,
-            serviceTypeId,
-            itemName: item.item,
-            currencyId: currency?._id,
-            priceLow: Number(item['price low (xaf)'].replaceAll(',', '')),
-            priceHigh: Number(item['price high (xaf)'].replaceAll(',', '')),
+            $set: {
+              serviceId,
+              serviceTypeId,
+              itemName: item.item,
+              currencyId: currency?._id,
+              priceLow: Number(item['price low (xaf)'].replaceAll(',', '')),
+              priceHigh: Number(item['price high (xaf)'].replaceAll(',', '')),
+            },
+            $setOnInsert: { reference },
           },
           {
             context: importAudit,

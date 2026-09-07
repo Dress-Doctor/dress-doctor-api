@@ -47,14 +47,11 @@ import { UpdatePickupStatusDto } from './dto/update-pickup-status.dto';
 import { FindUserTypeDto } from './dto/find-user-type.dto';
 import { UpdateUserTypeDto } from './dto/update-user-type.dto';
 import { UserTypeReferenceParamsDto } from './dto/user-type-params.dto';
-import { FindAllCategoryEntity } from './entities/category.entity';
 import {
   FindAllPickupStatusEntity,
   PickupStatusDetailEntity,
   PickupStatusKpiEntity,
 } from './entities/pickup-status.entity';
-import { FindAllCurrencyEntity } from './entities/currency.entity';
-import { FindAllItemEntity } from './entities/item.entity';
 import {
   FindAllPaymentMethodEntity,
   PaymentMethodDetailEntity,
@@ -75,9 +72,6 @@ import {
   OrderStatusDetailEntity,
   OrderStatusKpiEntity,
 } from './entities/order-status.entity';
-import { FindAllServiceTypeEntity } from './entities/service-type.entity';
-import { FindAllServiceEntity } from './entities/service.entity';
-import { FindAllSubCategoryEntity } from './entities/sub-category.entity';
 import {
   FindAllUserTypeEntity,
   UserTypeDetailEntity,
@@ -497,108 +491,6 @@ export class UtilController {
     this.logger.log(log);
 
     return await this.utilService.findAllRoles(query);
-  }
-
-  @Get('categories')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get all categories' })
-  @ApiResponse({ status: HttpStatus.OK, type: FindAllCategoryEntity })
-  async findAllCategories(
-    @Query() query: PaginationDto,
-    @Req() req: AppRequestWithUser,
-  ) {
-    const platform = req.data.platform;
-    const phone = req.user.phone;
-
-    const log = `[${platform}] ${phone} is getting all categories with query ${JSON.stringify(query)}`;
-    this.logger.log(log);
-
-    return await this.utilService.findAllCategories(query);
-  }
-
-  @Get('sub-categories')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get all sub categories' })
-  @ApiResponse({ status: HttpStatus.OK, type: FindAllSubCategoryEntity })
-  async findAllSubCategories(
-    @Query() query: PaginationDto,
-    @Req() req: AppRequestWithUser,
-  ) {
-    const platform = req.data.platform;
-    const phone = req.user.phone;
-
-    const log = `[${platform}] ${phone} is getting all sub categories with query ${JSON.stringify(query)}`;
-    this.logger.log(log);
-
-    return await this.utilService.findAllSubCategories(query);
-  }
-
-  @Get('services')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get all services' })
-  @ApiResponse({ status: HttpStatus.OK, type: FindAllServiceEntity })
-  async findAllServices(
-    @Query() query: PaginationDto,
-    @Req() req: AppRequestWithUser,
-  ) {
-    const platform = req.data.platform;
-    const phone = req.user.phone;
-
-    const log = `[${platform}] ${phone} is getting all services with query ${JSON.stringify(query)}`;
-    this.logger.log(log);
-
-    return await this.utilService.findAllServices(query);
-  }
-
-  @Get('items')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get all items' })
-  @ApiResponse({ status: HttpStatus.OK, type: FindAllItemEntity })
-  async findAllItems(
-    @Query() query: PaginationDto,
-    @Req() req: AppRequestWithUser,
-  ) {
-    const platform = req.data.platform;
-    const phone = req.user.phone;
-
-    const log = `[${platform}] ${phone} is getting all items with query ${JSON.stringify(query)}`;
-    this.logger.log(log);
-
-    return await this.utilService.findAllItems(query);
-  }
-
-  @Get('service-types')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get all service types' })
-  @ApiResponse({ status: HttpStatus.OK, type: FindAllServiceTypeEntity })
-  async findAllServiceTypes(
-    @Query() query: PaginationDto,
-    @Req() req: AppRequestWithUser,
-  ) {
-    const platform = req.data.platform;
-    const phone = req.user.phone;
-
-    const log = `[${platform}] ${phone} is getting all service types with query ${JSON.stringify(query)}`;
-    this.logger.log(log);
-
-    return await this.utilService.findAllServiceTypes(query);
-  }
-
-  @Get('currencies')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get all currencies' })
-  @ApiResponse({ status: HttpStatus.OK, type: FindAllCurrencyEntity })
-  async findAllCurrencies(
-    @Query() query: PaginationDto,
-    @Req() req: AppRequestWithUser,
-  ) {
-    const platform = req.data.platform;
-    const phone = req.user.phone;
-
-    const log = `[${platform}] ${phone} is getting all currencies with query ${JSON.stringify(query)}`;
-    this.logger.log(log);
-
-    return await this.utilService.findAllCurrencies(query);
   }
 
   @Get('order-statuses')

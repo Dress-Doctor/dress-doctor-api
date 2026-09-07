@@ -5,7 +5,9 @@ import { ChangedFieldDto } from '../user/user.dto';
 import { User } from '../user/user.schema';
 import { Item } from './item.schema';
 
-@Schema({ timestamps: true, collection: 'item_history' })
+export const itemHistorySchemaName = 'item_history';
+
+@Schema({ timestamps: true, collection: itemHistorySchemaName })
 export class ItemHistory extends Document<Types.ObjectId> {
   @Prop({ required: true, index: true, type: Types.ObjectId, ref: Item.name })
   itemId: Types.ObjectId;

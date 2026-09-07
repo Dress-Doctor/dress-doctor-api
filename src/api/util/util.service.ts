@@ -21,23 +21,18 @@ import {
   auditContext,
 } from 'src/helper/service/audit-context';
 import { CodeGeneratorService } from 'src/helper/service/code-generator.service';
-import {
-  HistoryLabelService,
-  type HistoryEntryLike,
-} from 'src/helper/service/history-label.service';
+import { HistoryLabelService } from 'src/helper/service/history-label.service';
+import type {
+  ReferenceHistoryEntry,
+  ReferenceKpis,
+} from 'src/helper/types/reference.type';
 import { Role } from 'src/schema/admin/role.schema';
-import { Category } from 'src/schema/catalog/category.schema';
-import { Item } from 'src/schema/catalog/item.schema';
-import { ServiceType } from 'src/schema/catalog/service-type.schema';
-import { Service } from 'src/schema/catalog/service.schema';
-import { SubCategory } from 'src/schema/catalog/sub-category.schema';
 import { officeTypeHistorySchemaName } from 'src/schema/office/office-type-history.schema';
 import { OfficeType } from 'src/schema/office/office-type.schema';
 import { officeSchemaName } from 'src/schema/office/office.schema';
 import { pickupStatusHistorySchemaName } from 'src/schema/pickup/pickup-status-history.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
-import { Currency } from 'src/schema/catalog/currency.schema';
 import { orderStatusHistorySchemaName } from 'src/schema/order/order-status-history.schema';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
 import { orderSchemaName } from 'src/schema/order/order.schema';
@@ -67,33 +62,6 @@ import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { UpdatePickupStatusDto } from './dto/update-pickup-status.dto';
 import { FindUserTypeDto } from './dto/find-user-type.dto';
 import { UpdateUserTypeDto } from './dto/update-user-type.dto';
-
-/**
- * Rows counted per status — what the reference tab strip counts off.
- *
- * Shared by every reference collection: they all split the same three ways,
- * so a second copy of this shape would only be a second thing to keep in step.
- */
-export type ReferenceStatusCounts = {
-  all: number;
-  active: number;
-  inactive: number;
-};
-
-/** Headline figures for one reference tab, over that list's own filters. */
-export type ReferenceKpis = {
-  total: number;
-  totalActive: number;
-  totalInactive: number;
-  byStatus: ReferenceStatusCounts;
-};
-
-/** One entry of the audit trail, flattened for a timeline to render. */
-export type ReferenceHistoryEntry = HistoryEntryLike & {
-  action: string;
-  reason?: string;
-  createdAt: Date;
-};
 
 /** One user type with everything the detail panel shows. */
 export type UserTypeDetail = Record<string, unknown> & {
@@ -156,16 +124,6 @@ export class UtilService {
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Role.name) private readonly roleModel: Model<Role>,
     @InjectModel(UserType.name) private readonly userTypeModel: Model<UserType>,
-    @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
-    @InjectModel(SubCategory.name)
-    private readonly subCategoryModel: Model<SubCategory>,
-    @InjectModel(Service.name) private readonly serviceModel: Model<Service>,
-    @InjectModel(Item.name) private readonly itemModel: Model<Item>,
-    @InjectModel(ServiceType.name)
-    private readonly serviceTypeModel: Model<ServiceType>,
-
-    @InjectModel(Currency.name)
-    private readonly currencyModel: Model<Currency>,
 
     @InjectModel(OfficeType.name)
     private readonly officeTypeModel: Model<OfficeType>,
@@ -1173,225 +1131,6 @@ export class UtilService {
 
     this.logger.log(`${logBase} has successfully retrieve all roles`);
     return { total: totalRoles, data: roles, nextPage };
-  }
-
-  async findAllCurrencies({ page, size, ...query }: PaginationDto) {
-    this.can('READ', 'Currency');
-
-    const platform = this.req.data.platform;
-    const phone = this.req.user.phone;
-    const logBase = `[${platform}] ${phone}`;
-
-    const skip = (page - 1) * size;
-    const sort = this.appUtilService.parseSortParam(query.sort);
-
-    const totalCurrencies = await this.currencyModel.countDocuments();
-    const currencies = await this.currencyModel
-      .find()
-      .sort(sort)
-      .skip(skip)
-      .limit(size)
-      .lean();
-
-    const totalPages = Math.ceil(totalCurrencies / size);
-    const nextPage = page < totalPages ? page + 1 : null;
-
-    this.logger.log(`${logBase} has successfully retrieve all currencies`);
-    return { total: totalCurrencies, data: currencies, nextPage };
-  }
-
-  async findAllCategories({ page, size, ...query }: PaginationDto) {
-    this.can('READ', 'Category');
-
-    const platform = this.req.data.platform;
-    const phone = this.req.user.phone;
-    const logBase = `[${platform}] ${phone}`;
-
-    const skip = (page - 1) * size;
-    const sort = this.appUtilService.parseSortParam(query.sort);
-
-    const categories = await this.categoryModel
-      .find()
-      .sort(sort)
-      .skip(skip)
-      .limit(size)
-      .lean();
-
-    const totalCategories = await this.categoryModel.countDocuments();
-    const totalPages = Math.ceil(totalCategories / size);
-    const nextPage = page < totalPages ? page + 1 : null;
-
-    this.logger.log(`${logBase} has successfully retrieve all categories`);
-    return { total: totalCategories, data: categories, nextPage };
-  }
-
-  async findAllSubCategories({ page, size, ...query }: PaginationDto) {
-    this.can('READ', 'SubCategory');
-
-    const platform = this.req.data.platform;
-    const phone = this.req.user.phone;
-    const logBase = `[${platform}] ${phone}`;
-
-    const skip = (page - 1) * size;
-    const sort = this.appUtilService.parseSortParam(query.sort);
-
-    const subCategories = await this.subCategoryModel
-      .find()
-      .sort(sort)
-      .skip(skip)
-      .limit(size)
-      .lean();
-
-    const totalSubCategories = await this.subCategoryModel.countDocuments();
-    const totalPages = Math.ceil(totalSubCategories / size);
-    const nextPage = page < totalPages ? page + 1 : null;
-
-    this.logger.log(`${logBase} has successfully retrieve all sub categories`);
-    return { total: totalSubCategories, data: subCategories, nextPage };
-  }
-
-  async findAllServices({ page, size, ...query }: PaginationDto) {
-    this.can('READ', 'Service');
-
-    const platform = this.req.data.platform;
-    const phone = this.req.user.phone;
-    const logBase = `[${platform}] ${phone}`;
-
-    const skip = (page - 1) * size;
-    const sort = this.appUtilService.parseSortParam(query.sort);
-
-    const services = await this.serviceModel
-      .find()
-      .sort(sort)
-      .skip(skip)
-      .limit(size)
-      .lean();
-
-    const totalServices = await this.serviceModel.countDocuments();
-    const totalPages = Math.ceil(totalServices / size);
-    const nextPage = page < totalPages ? page + 1 : null;
-
-    this.logger.log(`${logBase} has successfully retrieve all services`);
-    return { total: totalServices, data: services, nextPage };
-  }
-
-  async findAllItems({ page, size, ...query }: PaginationDto) {
-    this.can('READ', 'Item');
-
-    const platform = this.req.data.platform;
-    const phone = this.req.user.phone;
-    const logBase = `[${platform}] ${phone}`;
-
-    const skip = (page - 1) * size;
-    const sort = this.appUtilService.parseSortParam(query.sort);
-
-    const items = await this.itemModel.aggregate([
-      { $sort: sort },
-      { $skip: skip },
-      { $limit: size },
-      {
-        $lookup: {
-          as: 'service',
-          from: 'service',
-          foreignField: '_id',
-          localField: 'serviceId',
-        },
-      },
-
-      { $unwind: { path: '$service', preserveNullAndEmptyArrays: true } },
-
-      {
-        $lookup: {
-          as: 'currency',
-          from: 'currency',
-          foreignField: '_id',
-          localField: 'currencyId',
-        },
-      },
-      { $unwind: { path: '$currency', preserveNullAndEmptyArrays: true } },
-
-      // Service Type
-      {
-        $lookup: {
-          as: 'serviceType',
-          foreignField: '_id',
-          from: 'service_type',
-          localField: 'serviceTypeId',
-        },
-      },
-      { $unwind: { path: '$serviceType', preserveNullAndEmptyArrays: true } },
-
-      // Item → Categories
-      {
-        $lookup: {
-          localField: '_id',
-          from: 'item_category',
-          as: 'itemCategories',
-          foreignField: 'itemId',
-        },
-      },
-
-      {
-        $lookup: {
-          from: 'category',
-          as: 'categories',
-          foreignField: '_id',
-          localField: 'itemCategories.categoryId',
-        },
-      },
-      // Item → Subcategories
-      {
-        $lookup: {
-          localField: '_id',
-          foreignField: 'itemId',
-          as: 'itemSubCategories',
-          from: 'item_sub_category',
-        },
-      },
-
-      {
-        $lookup: {
-          foreignField: '_id',
-          as: 'subCategories',
-          from: 'sub_category',
-          localField: 'itemSubCategories.subCategoryId',
-        },
-      },
-
-      { $project: { itemCategories: 0, itemSubCategories: 0 } },
-    ]);
-
-    const totalItems = await this.itemModel.countDocuments();
-    const totalPages = Math.ceil(totalItems / size);
-    const nextPage = page < totalPages ? page + 1 : null;
-
-    this.logger.log(`${logBase} has successfully retrieve all items`);
-    return { total: totalItems, data: items, nextPage };
-  }
-
-  async findAllServiceTypes({ page, size, ...query }: PaginationDto) {
-    this.can('READ', 'ServiceType');
-
-    const platform = this.req.data.platform;
-    const phone = this.req.user.phone;
-    const logBase = `[${platform}] ${phone}`;
-
-    const skip = (page - 1) * size;
-    const sort = this.appUtilService.parseSortParam(query.sort);
-
-    const serviceTypes = await this.serviceTypeModel
-      .find()
-      .sort(sort)
-      .skip(skip)
-      .limit(size)
-      .lean();
-
-    const totalServiceTypes = await this.serviceTypeModel.countDocuments();
-    const totalPages = Math.ceil(totalServiceTypes / size);
-    const nextPage = page < totalPages ? page + 1 : null;
-
-    this.logger.log(`${logBase} has successfully retrieve all service types`);
-    return { total: totalServiceTypes, data: serviceTypes, nextPage };
   }
 
   /**

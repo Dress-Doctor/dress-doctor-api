@@ -293,11 +293,16 @@ export default {
     // be granted them. Seeding the row grants nobody anything on its own.
     ...crud(SubjectEnum.PaymentType),
     ...crud(SubjectEnum.PaymentMethod),
-    ...readUpdate(SubjectEnum.Category),
-    ...readUpdate(SubjectEnum.SubCategory),
-    ...readUpdate(SubjectEnum.Service),
-    ...readUpdate(SubjectEnum.ServiceType),
-    ...readUpdate(SubjectEnum.Currency),
+    // The catalogue. Editable from the catalogue screen now — added to as
+    // well as reworded — so the write actions have to exist as permission
+    // rows before any role can be granted them. Seeding the row grants nobody
+    // anything on its own; that is what `rolePermissionMap` below does, and
+    // today only MANAGER (`manage all`) holds these.
+    ...crud(SubjectEnum.Category),
+    ...crud(SubjectEnum.SubCategory),
+    ...crud(SubjectEnum.Service),
+    ...crud(SubjectEnum.ServiceType),
+    ...crud(SubjectEnum.Currency),
     ...crud(SubjectEnum.RewardRule),
     ...crud(SubjectEnum.RewardTier),
     ...crud(SubjectEnum.RewardLedger),
