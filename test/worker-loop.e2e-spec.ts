@@ -6,6 +6,7 @@ import { Test } from '@nestjs/testing';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { Types } from 'mongoose';
 import { redisTestEnv } from './redis-test-env';
+import { testUserReference } from './user-reference';
 
 /**
  * Phase 2 close-out A: the live worker loop against a REAL Redis (CI service
@@ -102,6 +103,9 @@ describe('Worker loop (e2e)', () => {
     const currency =
       (await currencyModel.findOne({ isoCode: 'XAF' })) ??
       (await currencyModel.create({
+        // Same reason as the status above: `reference` is required on every
+        // lookup row since 7f908e2, so a fixture has to state one.
+        reference: 'CY-XAF',
         isoCode: 'XAF',
         countryName: 'Cameroon',
         name: 'Central African CFA Franc',
@@ -284,6 +288,7 @@ describe('Worker loop (e2e)', () => {
         userTypeName: 'CUSTOMER',
       }));
     const user = await model('User').create({
+      reference: testUserReference(),
       firstName: 'Marie',
       phone: '690000001',
       whatsappPhone: '237690000001',

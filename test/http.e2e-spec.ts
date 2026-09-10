@@ -15,6 +15,8 @@ import { HTTPExceptionFilter } from '../src/helper/exception-filters/http.except
 import { HTTPResponseInterceptor } from '../src/helper/interceptor/http.interceptor';
 import { AppValidationPipe } from '../src/helper/pipe/app-validation.pipe';
 import { redisTestEnv } from './redis-test-env';
+import { seedBaseline } from './seed-baseline';
+import { testUserReference } from './user-reference';
 
 /**
  * Core HTTP e2e against the booted app: a REAL Redis (BullMQ) — provided by a CI
@@ -87,12 +89,10 @@ describe('HTTP contract (e2e)', () => {
 
     // The seeder runs fire-and-forget on module init. Poll until it has settled
     // (the 'System' api-client is seeded near the end of the run) so the data is
-    // present before tests — without kicking off a second, racing run.
+    // The baseline data no longer seeds itself on boot: ask for it, and
+    // wait for it to finish rather than polling for its last row.
+    await seedBaseline(app as never);
     const apiClientModel = app.get(getModelToken('ApiClient'));
-    for (let i = 0; i < 120; i++) {
-      if (await apiClientModel.findOne({ name: 'System' })) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
 
     // Add a known api-client + an admin (Manager) user for authenticated calls.
     await apiClientModel.create({
@@ -111,6 +111,7 @@ describe('HTTP contract (e2e)', () => {
     const adminType = await userTypeModel.findOne({ userTypeName: 'ADMIN' });
     const manager = await roleModel.findOne({ roleName: 'Manager' });
     const admin = await userModel.create({
+      reference: testUserReference(),
       firstName: 'E2E',
       lastName: 'Admin',
       phone: '690000000',
@@ -198,6 +199,7 @@ describe('HTTP contract (e2e)', () => {
         userTypeName: 'CUSTOMER',
       });
       const customer = await model('User').create({
+        reference: testUserReference(),
         firstName: 'Flow',
         lastName: 'Customer',
         phone: '611111111',
@@ -331,6 +333,7 @@ describe('HTTP contract (e2e)', () => {
     describe('audit trail is written inside the transaction', () => {
       const customer = async (phone: string) =>
         model('User').create({
+          reference: testUserReference(),
           firstName: 'Audit',
           lastName: phone,
           phone,
@@ -415,6 +418,7 @@ describe('HTTP contract (e2e)', () => {
     describe('status workflow: progress, corrections, cancellation', () => {
       const newOrder = async (phone: string) => {
         const buyer = await model('User').create({
+          reference: testUserReference(),
           firstName: 'Flow',
           lastName: phone,
           phone,
@@ -459,17 +463,33 @@ describe('HTTP contract (e2e)', () => {
         }
       });
 
-      it('refuses a skipped step and says what was allowed instead', async () => {
+      /*
+       * Skipping steps is deliberately allowed — staff find a bag two steps
+       * further along than the console says, and walking it there one move at
+       * a time cost more than the ordering bought. So this guards the rule
+       * that IS closed: a live order can never fall back into DRAFT, which
+       * would reopen its garments and let its quota and promo be spent twice.
+       */
+      it('refuses a move back into DRAFT and leaves the order where it was', async () => {
         const { id } = await newOrder('633000002');
         await move(id, 'CONFIRMED').expect(200);
 
-        const res = await move(id, 'READY').expect(409);
+        const res = await move(id, 'DRAFT').expect(409);
 
         expect(res.body.error.code).toBe('INVALID_STATUS_TRANSITION');
         expect(await statusOf(id)).toBe('CONFIRMED');
       });
 
-      it('corrects a status back a step and logs it as a correction', async () => {
+      it('lets a live order skip straight to where it really is', async () => {
+        const { id } = await newOrder('633000009');
+        await move(id, 'CONFIRMED').expect(200);
+
+        // CONFIRMED -> READY skips RECEIVED and WASHING, on purpose.
+        await move(id, 'READY').expect(200);
+        expect(await statusOf(id)).toBe('READY');
+      });
+
+      it('moves a status back a step and records why', async () => {
         const { id, code } = await newOrder('633000003');
         for (const target of ['CONFIRMED', 'RECEIVED', 'WASHING']) {
           await move(id, target).expect(200);
@@ -490,18 +510,23 @@ describe('HTTP contract (e2e)', () => {
           ).expect(200)
         ).body.data;
 
-        // The correction is on the trail as a correction — not as progress —
-        // and carries the words the staff member typed.
-        const corrections = detail.history.filter(
-          (entry: any) => entry.action === 'CORRECT',
+        /*
+         * A move in either direction is one kind of thing — an UPDATE — since
+         * the workflow stopped treating backwards as a special case. What the
+         * trail still owes the reader is the words the staff member typed and
+         * which way the status went.
+         */
+        const back = detail.history.filter((entry: any) =>
+          entry.changes?.some(
+            (c: any) =>
+              c.field === 'orderStatusId' &&
+              c.fromLabel === 'WASHING' &&
+              c.toLabel === 'RECEIVED',
+          ),
         );
-        expect(corrections).toHaveLength(1);
-        expect(corrections[0].reason).toBe('washing had not actually started');
-        const change = corrections[0].changes.find(
-          (c: any) => c.field === 'orderStatusId',
-        );
-        expect(change.fromLabel).toBe('WASHING');
-        expect(change.toLabel).toBe('RECEIVED');
+        expect(back).toHaveLength(1);
+        expect(back[0].action).toBe('UPDATE');
+        expect(back[0].reason).toBe('washing had not actually started');
       });
 
       it('publishes what the order can do next, so clients need no copy of the rules', async () => {
@@ -515,10 +540,10 @@ describe('HTTP contract (e2e)', () => {
           ).expect(200)
         ).body.data;
 
+        // Everything a live order may be set to from here: any status but
+        // its own and DRAFT, in either direction.
         expect(detail.availableTransitions).toEqual({
-          normal: ['WASHING'],
-          correction: ['CONFIRMED'],
-          cancellable: true,
+          allowed: ['CONFIRMED', 'WASHING', 'READY', 'DELIVERED', 'CANCELLED'],
         });
       });
 
@@ -538,11 +563,8 @@ describe('HTTP contract (e2e)', () => {
         expect(
           detail.history.some((entry: any) => entry.action === 'CANCEL'),
         ).toBe(true);
-        expect(detail.availableTransitions).toEqual({
-          normal: [],
-          correction: [],
-          cancellable: false,
-        });
+        // CANCELLED is terminal: nothing moves afterwards.
+        expect(detail.availableTransitions).toEqual({ allowed: [] });
       });
 
       it('will not cancel a delivered order, or move it anywhere else', async () => {
@@ -632,6 +654,7 @@ describe('HTTP contract (e2e)', () => {
     /** One draft per customer is enforced, so every case needs its own. */
     const newCustomer = async (phone: string) => {
       const customer = await model('User').create({
+        reference: testUserReference(),
         firstName: 'Note',
         lastName: 'Probe',
         phone,
@@ -767,6 +790,7 @@ describe('HTTP contract (e2e)', () => {
 
     const newCustomer = async (phone: string) => {
       const customer = await model('User').create({
+        reference: testUserReference(),
         firstName: 'Basket',
         lastName: 'Probe',
         phone,
@@ -909,6 +933,7 @@ describe('HTTP contract (e2e)', () => {
         userTypeName: 'CUSTOMER',
       });
       const customer = await model('User').create({
+        reference: testUserReference(),
         firstName: 'Kpi',
         lastName: 'Probe',
         phone: '633333333',
@@ -1097,7 +1122,7 @@ describe('HTTP contract (e2e)', () => {
 
   describe('by-id office scoping over HTTP', () => {
     let scopedToken: string;
-    let orderBId: string;
+    let outOfScopeOrderId: string;
 
     beforeAll(async () => {
       const [officeA, officeB] = await model('Office').find({}).limit(2);
@@ -1113,6 +1138,7 @@ describe('HTTP contract (e2e)', () => {
 
       // Staff scoped to office A (Office Manager → { officeId: '$office' }).
       const staff = await model('User').create({
+        reference: testUserReference(),
         firstName: 'Scoped',
         lastName: 'Staff',
         phone: '622222222',
@@ -1130,27 +1156,60 @@ describe('HTTP contract (e2e)', () => {
         office: officeA._id.toString(),
       });
 
-      // An order that belongs to office B.
-      const orderB = await model('Order').create({
+      /*
+       * A third office, and an order in it.
+       *
+       * The out-of-scope cases used to borrow office B's order, but a later
+       * test in this block posts this same staff member to office B — so by
+       * the time it ran, the "out-of-scope" order was in scope and the
+       * endpoint refused it for an unrelated reason instead. This office is
+       * nobody's posting, so scope is the only thing under test.
+       *
+       * CONFIRMED rather than DRAFT for the same reason: a draft is refused
+       * before scope is ever consulted, which would hide a scope leak behind
+       * a 400.
+       */
+      const officeType = await model('OfficeType').findOne({});
+      const confirmed = await model('OrderStatus').findOne({
+        orderStatusName: 'CONFIRMED',
+      });
+      const officeC = await model('Office').create({
+        officeCode: 'DD-E2EC',
+        slug: 'e2e-out-of-scope',
+        officeName: 'DD Out Of Scope',
+        signedLink: 'http://localhost:3000/o/e2e-out-of-scope?sig=x&exp=1',
+        address: 'Rue 0, Nowhere',
+        city: 'Douala',
+        region: 'Littoral',
+        officeTypeId: officeType._id,
+      });
+
+      const orderOut = await model('Order').create({
         customerId: new Types.ObjectId(),
         currencyId: new Types.ObjectId(),
-        officeId: officeB._id,
-        orderCode: 'OR-E2E-B',
+        officeId: officeC._id,
+        orderCode: 'OR-E2E-C',
         pricingModel: 'PER_KG',
         estimatedDeliveryDate: new Date(),
-        orderStatusId: draft._id,
+        orderStatusId: confirmed._id,
         createdBy: new Types.ObjectId(),
         pickedUpBy: new Types.ObjectId(),
       });
-      orderBId = orderB._id.toString();
+      outOfScopeOrderId = orderOut._id.toString();
+
+      // Kept for the tests that genuinely want office B.
+      void draft;
+      void officeB;
     });
 
     const scoped = (r: request.Test) =>
       r.set(apiHeaders).set('Authorization', `Bearer ${scopedToken}`);
 
-    it("office-A staff cannot PATCH office B's order (404, not a leak)", async () => {
+    it('cannot PATCH an order in an office they are not posted to (404, not a leak)', async () => {
       await scoped(
-        request(app.getHttpServer()).patch(`/api/v1/orders/${orderBId}`),
+        request(app.getHttpServer()).patch(
+          `/api/v1/orders/${outOfScopeOrderId}`,
+        ),
       )
         .send({ totalWeightKg: 3 })
         .expect(404);
@@ -1162,6 +1221,7 @@ describe('HTTP contract (e2e)', () => {
         userTypeName: 'CUSTOMER',
       });
       return model('User').create({
+        reference: testUserReference(),
         firstName: 'Scoped',
         lastName: 'Booking',
         phone,
@@ -1235,7 +1295,7 @@ describe('HTTP contract (e2e)', () => {
       });
       await scoped(
         request(app.getHttpServer()).post(
-          `/api/v1/orders/${orderBId}/payments`,
+          `/api/v1/orders/${outOfScopeOrderId}/payments`,
         ),
       )
         .send({

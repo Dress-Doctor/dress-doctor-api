@@ -15,6 +15,8 @@ import { HTTPExceptionFilter } from '../src/helper/exception-filters/http.except
 import { HTTPResponseInterceptor } from '../src/helper/interceptor/http.interceptor';
 import { AppValidationPipe } from '../src/helper/pipe/app-validation.pipe';
 import { redisTestEnv } from './redis-test-env';
+import { seedBaseline } from './seed-baseline';
+import { testUserReference } from './user-reference';
 
 /**
  * The pickups list and its KPI companion over HTTP, against the REAL seeded
@@ -78,6 +80,7 @@ describe('Pickups list, filters, KPIs + office scoping (e2e)', () => {
       userTypeName: 'CUSTOMER',
     });
     return await model('User').create({
+      reference: testUserReference(),
       firstName,
       lastName,
       phone,
@@ -97,6 +100,7 @@ describe('Pickups list, filters, KPIs + office scoping (e2e)', () => {
     });
     const role = await model('Role').findOne({ roleName });
     const user = await model('User').create({
+      reference: testUserReference(),
       firstName: roleName,
       lastName: 'Staff',
       phone,
@@ -179,12 +183,10 @@ describe('Pickups list, filters, KPIs + office scoping (e2e)', () => {
     app.useGlobalPipes(AppValidationPipe);
     await app.init();
 
-    // Wait for the boot seed, then add this suite's own api client.
+    // The baseline data no longer seeds itself on boot: ask for it, and
+    // wait for it to finish rather than polling for its last row.
+    await seedBaseline(app as never);
     const apiClientModel = model('ApiClient');
-    for (let i = 0; i < 120; i++) {
-      if (await apiClientModel.findOne({ name: 'System' })) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
     const client = await apiClientModel.create({
       name: 'e2e-pickups',
       key: 'e2e-key',
@@ -453,7 +455,11 @@ describe('Pickups list, filters, KPIs + office scoping (e2e)', () => {
       const res = await as(driverToken)(
         request(app.getHttpServer()).get('/api/v1/pickups/export?format=csv'),
       );
-      expect(res.status).toBe(400);
+
+      // 403 for "you may not", as against the 400 an unsupported format gets
+      // just above — the console needs to tell a refusal from a bad request.
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('FORBIDDEN');
 
       // ...and the same Driver can still read the list.
       await list(driverToken).expect(200);

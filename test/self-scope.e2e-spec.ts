@@ -15,6 +15,8 @@ import { HTTPExceptionFilter } from '../src/helper/exception-filters/http.except
 import { HTTPResponseInterceptor } from '../src/helper/interceptor/http.interceptor';
 import { AppValidationPipe } from '../src/helper/pipe/app-validation.pipe';
 import { redisTestEnv } from './redis-test-env';
+import { seedBaseline } from './seed-baseline';
+import { testUserReference } from './user-reference';
 
 /**
  * §2.3 acceptance over HTTP with the REAL seeded Customer role (not synthetic
@@ -59,6 +61,7 @@ describe('Customer self-scope + booking (e2e)', () => {
     });
     const customerRole = await model('Role').findOne({ roleName: 'Customer' });
     const user = await model('User').create({
+      reference: testUserReference(),
       firstName: name,
       lastName: 'SelfScope',
       phone,
@@ -131,11 +134,10 @@ describe('Customer self-scope + booking (e2e)', () => {
     app.useGlobalPipes(AppValidationPipe);
     await app.init();
 
+    // The baseline data no longer seeds itself on boot: ask for it, and
+    // wait for it to finish rather than polling for its last row.
+    await seedBaseline(app as never);
     const apiClientModel = model('ApiClient');
-    for (let i = 0; i < 120; i++) {
-      if (await apiClientModel.findOne({ name: 'System' })) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
     await apiClientModel.create({
       name: 'e2e',
       key: 'e2e-key',
@@ -233,7 +235,11 @@ describe('Customer self-scope + booking (e2e)', () => {
         `/api/v1/customers/${alice.customerCode}/pickups`,
       ),
     );
-    expect(res.status).toBe(400);
+
+    // 403, not 400: the request was fine, the caller simply may not read
+    // pickups. The console tells the two apart and only toasts the second.
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
   });
 
   it("cross-customer access is a 404 on EVERY self view (Alice → Bob's ids)", async () => {
