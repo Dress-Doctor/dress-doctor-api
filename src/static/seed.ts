@@ -168,59 +168,72 @@ export default {
 
   roles: [
     {
+      seedKey: 'co-founder',
       roleName: RoleEnum.CO_FOUNDER,
       description:
         'Provides strategic direction, oversees company growth, and supports key decision-making across the business.',
     },
     {
+      seedKey: 'manager',
       roleName: RoleEnum.MANAGER,
       description:
         'Manages daily operations, coordinates teams, and ensures business goals are met efficiently.',
     },
     {
+      seedKey: 'office-manager',
       roleName: RoleEnum.OFFICE_MANAGER,
       description:
         'Oversees office administration, staff coordination, and ensures smooth day-to-day office operations.',
     },
     {
+      seedKey: 'factory-manager',
       roleName: RoleEnum.FACTORY_MANAGER,
       description:
         'Supervises factory operations, manages production workflows, and ensures quality and efficiency standards are maintained.',
     },
     {
+      seedKey: 'cashier',
       roleName: RoleEnum.CASHIER,
       description: 'Records payments and reconciles till at an office.',
     },
     {
+      seedKey: 'driver',
       roleName: RoleEnum.DRIVER,
       description: 'Handles pickup and delivery assignments.',
     },
     {
+      seedKey: 'laundry-staff',
       roleName: RoleEnum.LAUNDRY_STAFF,
       description: 'Processes orders through washing/drying/ironing stages.',
     },
     {
+      seedKey: 'customer-service',
       roleName: RoleEnum.CUSTOMER_SERVICE,
       description:
         'Handles customer inquiries, order intake, and pickup scheduling.',
     },
     {
+      seedKey: 'treasurer',
       roleName: RoleEnum.TREASURER,
       description: 'Oversees payments, reconciliation, and financial reports.',
     },
     {
+      seedKey: 'secretary',
       roleName: RoleEnum.SECRETARY,
       description: 'Handles office administration and record-keeping.',
     },
     {
+      seedKey: 'customer',
       roleName: RoleEnum.CUSTOMER,
       description: 'External customer placing and tracking their own orders.',
     },
     {
+      seedKey: 'referrer',
       roleName: RoleEnum.REFERRER,
       description: 'External user who refers new customers.',
     },
     {
+      seedKey: 'affiliate',
       roleName: RoleEnum.AFFILIATE,
       description: 'External partner earning commission on referred orders.',
     },
@@ -330,14 +343,14 @@ export default {
   // belong to the Phase 1 auth-flow work, not this foundational seed.
   rolePermissionMap: [
     {
-      roleName: RoleEnum.MANAGER,
+      roleSeedKey: 'manager',
       scope: ScopeEnum.GLOBAL,
       permissions: [
         { subject: SubjectEnum.All, action: PermissionActionEnum.MANAGE },
       ],
     },
     {
-      roleName: RoleEnum.OFFICE_MANAGER,
+      roleSeedKey: 'office-manager',
       scope: ScopeEnum.OFFICE,
       permissions: [
         ...crud(SubjectEnum.Order),
@@ -379,17 +392,17 @@ export default {
       ],
     },
     {
-      roleName: RoleEnum.FACTORY_MANAGER,
+      roleSeedKey: 'factory-manager',
       scope: ScopeEnum.OFFICE,
       permissions: [...crud(SubjectEnum.Order), ...crud(SubjectEnum.OrderItem)],
     },
     {
-      roleName: RoleEnum.CASHIER,
+      roleSeedKey: 'cashier',
       scope: ScopeEnum.OFFICE,
       permissions: [...crud(SubjectEnum.Payment)],
     },
     {
-      roleName: RoleEnum.DRIVER,
+      roleSeedKey: 'driver',
       scope: ScopeEnum.OFFICE,
       permissions: [
         ...readUpdate(SubjectEnum.PickupRequest),
@@ -397,7 +410,7 @@ export default {
       ],
     },
     {
-      roleName: RoleEnum.LAUNDRY_STAFF,
+      roleSeedKey: 'laundry-staff',
       scope: ScopeEnum.OFFICE,
       permissions: [
         ...readUpdate(SubjectEnum.Order),
@@ -405,7 +418,7 @@ export default {
       ],
     },
     {
-      roleName: RoleEnum.CUSTOMER_SERVICE,
+      roleSeedKey: 'customer-service',
       scope: ScopeEnum.OFFICE,
       permissions: [
         ...crud(SubjectEnum.Customer),
@@ -422,7 +435,7 @@ export default {
       ],
     },
     {
-      roleName: RoleEnum.TREASURER,
+      roleSeedKey: 'treasurer',
       scope: ScopeEnum.OFFICE,
       permissions: [
         ...crud(SubjectEnum.Payment),
@@ -436,7 +449,7 @@ export default {
       ],
     },
     {
-      roleName: RoleEnum.SECRETARY,
+      roleSeedKey: 'secretary',
       scope: ScopeEnum.OFFICE,
       permissions: [
         ...readUpdate(SubjectEnum.Office),
@@ -450,7 +463,7 @@ export default {
   // someone else's record simply returns nothing).
   selfRolePermissionMap: [
     {
-      roleName: RoleEnum.CUSTOMER,
+      roleSeedKey: 'customer',
       scope: ScopeEnum.GLOBAL,
       permissions: [
         {
@@ -563,7 +576,7 @@ export default {
       ],
     },
     {
-      roleName: RoleEnum.REFERRER,
+      roleSeedKey: 'referrer',
       scope: ScopeEnum.GLOBAL,
       permissions: [
         {
@@ -574,7 +587,7 @@ export default {
       ],
     },
     {
-      roleName: RoleEnum.AFFILIATE,
+      roleSeedKey: 'affiliate',
       scope: ScopeEnum.GLOBAL,
       permissions: [
         {

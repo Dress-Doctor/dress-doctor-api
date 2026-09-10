@@ -70,7 +70,7 @@ export class Payment extends Document<Types.ObjectId> {
 }
 
 export const PaymentSchema = SchemaFactory.createForClass(Payment);
-PaymentSchema.index({ reference: 1 }, { unique: true, sparse: true });
+PaymentSchema.index({ reference: 1 }, { unique: true });
 PaymentSchema.index({ orderId: 1 });
 PaymentSchema.index({ customerId: 1 });
 PaymentSchema.index({ officeId: 1, paidAt: -1 });

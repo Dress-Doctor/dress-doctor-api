@@ -31,6 +31,4 @@ export class PickupStatus extends Document<Types.ObjectId> {
 
 export const PickupStatusSchema = SchemaFactory.createForClass(PickupStatus);
 
-// Sparse, so the unique index can be built over rows written before
-// `reference` existed. `npm run backfill:pickup-status-reference` fills those in.
-PickupStatusSchema.index({ reference: 1 }, { unique: true, sparse: true });
+PickupStatusSchema.index({ reference: 1 }, { unique: true });

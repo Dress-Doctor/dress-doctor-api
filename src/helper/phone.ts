@@ -4,10 +4,9 @@
  * the shape the profile edit already allowed (`MaxLength(15)`), so it is the one
  * every write path now normalises to.
  *
- * Rows written before this exist as bare national digits (`670678660`), because
- * Cameroon was the only market. `phoneVariants` is what lets both shapes find
- * the same person while `npm run backfill:phone-e164` has yet to run — or never
- * runs at all.
+ * People still type the bare national number (`670678660`), because Cameroon is
+ * the market almost everyone is in. `phoneVariants` is what lets what they type
+ * find the account it belongs to.
  */
 
 /** The market the business operates in, and so the code a bare number implies. */
@@ -41,9 +40,9 @@ export function toE164Digits(value: string): string {
 }
 
 /**
- * Every stored spelling of one number, for a lookup that must match rows
- * written before and after the change: the normalised form, and the bare
- * national form a legacy Cameroon row still carries.
+ * Every spelling of one number a lookup might have to match: the digits as
+ * typed, the normalised form with its country code, and the bare national form
+ * without it.
  *
  * Feed it to `$in` rather than comparing to a single string — a signed-in
  * customer typing the 9 digits they have always typed must still find their

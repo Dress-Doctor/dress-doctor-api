@@ -170,10 +170,10 @@ export class AuthService {
     }
 
     /**
-     * Matched against every stored spelling, not one: phones are now kept with
-     * their country code, while rows written before that carry bare national
-     * digits. Somebody signing in with the 9 digits they have always typed must
-     * still find their account, whether or not the backfill has been run.
+     * Matched against every spelling of the number, not one. Phones are stored
+     * with their country code, but somebody signing in types whatever they are
+     * used to typing — usually the 9 national digits — and that has to find
+     * their account.
      */
     return {
       channel: OTPChannelEnum.WHATSAPP,

@@ -121,6 +121,7 @@ Layered by concern, then feature. `api/<feature>/` holds `*.module.ts`, `*.contr
 - Trunk-based; short-lived branches `feat/…`, `fix/…`, `chore/…`. Conventional Commits.
 - PRs require green CI (typecheck, lint, tests, build, coverage gate) + review. `main` always deployable.
 - One image, two entrypoints (`api`, `worker`). Seeds/migrations run as explicit, idempotent, re-runnable steps — never implicitly on boot.
+- Seeding is `npm run seed` (`npm run seed:prod` against a built image). It takes a Redis leader lock, so two deploys landing together cannot seed side by side. It creates what is missing and writes nothing at all to a row that needs nothing — a name, description, price or active/inactive somebody set from the panel is theirs, and the seed never puts its own value back. `SEED_RECONCILE_PERMISSIONS=YES` makes the seed's role map authoritative; leave it off wherever people edit roles in the panel.
 
 ## 15. Naming conventions
 

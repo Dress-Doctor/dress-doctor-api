@@ -41,6 +41,4 @@ export class Currency extends Document<Types.ObjectId> {
 
 export const CurrencySchema = SchemaFactory.createForClass(Currency);
 
-// Sparse, so the unique index can be built over rows written before
-// `reference` existed. `npm run backfill:currency-reference` fills those in.
-CurrencySchema.index({ reference: 1 }, { unique: true, sparse: true });
+CurrencySchema.index({ reference: 1 }, { unique: true });

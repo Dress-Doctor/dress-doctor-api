@@ -13,6 +13,17 @@ export class Item extends Document<Types.ObjectId> {
   @Prop({ required: true })
   reference: string;
 
+  /**
+   * The seed's own name for this row: written once when the seeder creates it,
+   * never afterwards. The seeder matches on this rather than on the display
+   * name, so renaming the row in the panel cannot make the next seed run
+   * insert a second copy of it.
+   *
+   * Only seeded rows carry one. A row somebody created by hand has none.
+   */
+  @Prop({ required: false })
+  seedKey?: string;
+
   @Prop({ required: true, unique: true })
   itemName: string; // T-Shirt, Polo Shirt, Dress Shirt
 
@@ -26,9 +37,6 @@ export class Item extends Document<Types.ObjectId> {
    * which is why every write that can change an input recomputes it —
    * including a category or sub-category rename, which changes this field on
    * every item filed under that row.
-   *
-   * Optional on the schema because rows written before the column existed
-   * have none until `npm run backfill:item-derived` has run.
    */
   @Prop({ required: false, index: true })
   displayName?: string;
@@ -56,9 +64,6 @@ export class Item extends Document<Types.ObjectId> {
    * drift from the range it summarises. Not the same field as
    * `OrderItem.unitPrice`, which records what was actually charged on a line;
    * this is the list price that one starts from.
-   *
-   * Optional for the same reason as `displayName`: rows predating the column
-   * have none until the backfill has run.
    */
   @Prop({ required: false })
   unitPrice?: number;
@@ -69,6 +74,8 @@ export class Item extends Document<Types.ObjectId> {
 
 export const ItemSchema = SchemaFactory.createForClass(Item);
 
-// Sparse, so the unique index can be built over rows written before
-// `reference` existed. `npm run backfill:item-reference` fills those in.
-ItemSchema.index({ reference: 1 }, { unique: true, sparse: true });
+ItemSchema.index({ reference: 1 }, { unique: true });
+
+// Only seeded rows carry a `seedKey`, so the index is sparse: rows created by
+// hand have none and must not collide with each other.
+ItemSchema.index({ seedKey: 1 }, { unique: true, sparse: true });

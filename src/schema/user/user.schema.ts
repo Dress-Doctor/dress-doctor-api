@@ -10,10 +10,11 @@ export class User extends Document<Types.ObjectId> {
    * the same idea as an order's `orderCode` or a payment's `reference`.
    *
    * It exists so no URL, export or support conversation has to carry a
-   * 24-character mongo id. Not `required`, because rows written before this
-   * field existed have none; `npm run backfill:user-reference` fills those in.
+   * 24-character mongo id. Every account has one from the moment it is
+   * created — the sign-up path mints it, and so does the seeder for the
+   * bootstrap admin.
    */
-  @Prop({ required: false })
+  @Prop({ required: true })
   reference: string;
 
   @Prop({ required: false })
@@ -61,9 +62,7 @@ export class User extends Document<Types.ObjectId> {
 
 export const UserSchema = SchemaFactory.createForClass(User);
 
-// Sparse, so the unique index can be built over rows written before
-// `reference` existed. `npm run backfill:user-reference` fills those in.
-UserSchema.index({ reference: 1 }, { unique: true, sparse: true });
+UserSchema.index({ reference: 1 }, { unique: true });
 
 // The admin user file is filtered by type and status and sorted by creation
 // date, so the list path is indexed rather than scanned.

@@ -15,6 +15,8 @@ import { HTTPExceptionFilter } from '../src/helper/exception-filters/http.except
 import { HTTPResponseInterceptor } from '../src/helper/interceptor/http.interceptor';
 import { AppValidationPipe } from '../src/helper/pipe/app-validation.pipe';
 import { redisTestEnv } from './redis-test-env';
+import { seedBaseline } from './seed-baseline';
+import { testUserReference } from './user-reference';
 
 /**
  * Subscription module over HTTP (§2.2): plan catalog, lifecycle, and the
@@ -87,11 +89,10 @@ describe('Subscriptions + pieces overage (e2e)', () => {
     app.useGlobalPipes(AppValidationPipe);
     await app.init();
 
+    // The baseline data no longer seeds itself on boot: ask for it, and
+    // wait for it to finish rather than polling for its last row.
+    await seedBaseline(app as never);
     const apiClientModel = model('ApiClient');
-    for (let i = 0; i < 120; i++) {
-      if (await apiClientModel.findOne({ name: 'System' })) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
     await apiClientModel.create({
       name: 'e2e',
       key: 'e2e-key',
@@ -105,6 +106,7 @@ describe('Subscriptions + pieces overage (e2e)', () => {
     });
     const manager = await model('Role').findOne({ roleName: 'Manager' });
     const admin = await model('User').create({
+      reference: testUserReference(),
       firstName: 'E2E',
       lastName: 'Admin',
       phone: '690000020',
@@ -127,6 +129,7 @@ describe('Subscriptions + pieces overage (e2e)', () => {
       userTypeName: 'CUSTOMER',
     });
     const customer = await model('User').create({
+      reference: testUserReference(),
       firstName: 'Sub',
       lastName: 'Customer',
       phone: '622222200',

@@ -14,6 +14,8 @@ import { HTTPExceptionFilter } from '../src/helper/exception-filters/http.except
 import { HTTPResponseInterceptor } from '../src/helper/interceptor/http.interceptor';
 import { AppValidationPipe } from '../src/helper/pipe/app-validation.pipe';
 import { redisTestEnv } from './redis-test-env';
+import { seedBaseline } from './seed-baseline';
+import { testUserReference } from './user-reference';
 
 /**
  * The deferred pre-portal gate (Phase 3 §0): the OTP login flows proven over
@@ -114,12 +116,10 @@ describe('OTP login over HTTP (e2e)', () => {
     app.useGlobalPipes(AppValidationPipe);
     await app.init();
 
-    // Wait for the fire-and-forget seeder (System api-client lands near the end).
+    // The baseline data no longer seeds itself on boot: ask for it, and
+    // wait for it to finish rather than polling for its last row.
+    await seedBaseline(app as never);
     const apiClientModel = app.get(getModelToken('ApiClient'));
-    for (let i = 0; i < 120; i++) {
-      if (await apiClientModel.findOne({ name: 'System' })) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
 
     await apiClientModel.create({
       name: 'e2e',
@@ -139,6 +139,7 @@ describe('OTP login over HTTP (e2e)', () => {
 
     // Customer: OTP-only — no passwordHash at all.
     const customer = await model('User').create({
+      reference: testUserReference(),
       firstName: 'Otp',
       lastName: 'Customer',
       phone: CUSTOMER_PHONE,
@@ -155,6 +156,7 @@ describe('OTP login over HTTP (e2e)', () => {
 
     // Staff: password + OTP (2FA).
     const staff = await model('User').create({
+      reference: testUserReference(),
       firstName: 'Otp',
       lastName: 'Staff',
       phone: STAFF_PHONE,

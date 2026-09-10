@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { systemAuditContext } from './audit-context';
+import { SeedTally, upsertSeedRow } from './seed-upsert';
+import type { AuditContextDto } from '../mongoose-history.hook';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { OfficeType } from 'src/schema/office/office-type.schema';
@@ -12,6 +14,7 @@ import { UserType } from 'src/schema/user/user-type.schema';
 import seed from 'src/static/seed';
 import { itemDisplayName, itemUnitPrice } from '../catalog/item-derived';
 import { CodeGeneratorService } from './code-generator.service';
+import { LeaderLockService } from './leader-lock.service';
 import { User } from 'src/schema/user/user.schema';
 import {
   GenderEnum,
@@ -65,6 +68,7 @@ export class SeederService {
 
   constructor(
     private readonly codeService: CodeGeneratorService,
+    private readonly leaderLock: LeaderLockService,
 
     @InjectModel(NotificationTemplate.name)
     private readonly notificationTemplateModel: Model<NotificationTemplate>,
@@ -134,217 +138,213 @@ export class SeederService {
     private readonly subscriptionPlanModel: Model<SubscriptionPlan>,
   ) {}
 
-  private async seedUserType() {
-    // `reference` is minted per row and written with `$setOnInsert`, so a
-    // re-run leaves the reference an existing row already carries alone —
-    // it is the id the reference screen and its URLs are built on, and it
-    // must not change under anyone. Generated one at a time rather than in
-    // parallel: the generator checks the database for a clash, and two
-    // concurrent calls could pick the same code before either had saved.
-    const operations: Parameters<typeof this.userTypeModel.bulkWrite>[0] = [];
-    for (const userType of seed.userType) {
-      const reference = await this.codeService.generateUserTypeReference();
-      operations.push({
-        updateOne: {
-          filter: { userTypeName: userType.userTypeName },
-          update: { $set: userType, $setOnInsert: { reference } },
-          upsert: true,
+  /**
+   * The six reference collections, which all have the same shape and the same
+   * ownership rules.
+   *
+   * Their names are locked — no update DTO accepts one — so the name is a safe
+   * way to recognise a row. What a manager *can* edit is the description and
+   * whether the row is offered, and those are written once, at creation, and
+   * never again.
+   *
+   * `reference` is minted only when a row turns out to be missing. The old
+   * seeder minted one for every row on every boot and threw nearly all of them
+   * away, at the cost of a database round trip each time.
+   */
+  private async seedReferenceRows<T>(input: {
+    model: Model<T>;
+    nameField: string;
+    rows: { description?: string }[];
+    mintReference: () => Promise<string>;
+    label: string;
+  }): Promise<void> {
+    const { model, nameField, rows, mintReference, label } = input;
+    const audit = await this.seedAudit(`${label.toLowerCase()} seed`);
+    const tally = new SeedTally();
+
+    for (const row of rows) {
+      const name = (row as Record<string, unknown>)[nameField];
+      const { outcome } = await upsertSeedRow<T>({
+        model,
+        audit,
+        logger: this.logger,
+        generate: async () => ({ reference: await mintReference() }),
+        plan: {
+          filter: { [nameField]: name } as never,
+          // Nothing here is seed-owned. The name is the key, and the
+          // description and status belong to whoever edits them.
+          onInsert: { ...row, isActive: true },
         },
       });
+      tally.add(outcome);
     }
 
-    await this.userTypeModel.bulkWrite(operations);
-    this.logger.log(
-      `🌱 Done seeding ${seed.userType.length} data for User Type`,
-    );
+    this.logger.log(`🌱 ${label}: ${tally.toString()}`);
+  }
+
+  private async seedUserType() {
+    await this.seedReferenceRows({
+      model: this.userTypeModel,
+      nameField: 'userTypeName',
+      rows: seed.userType,
+      mintReference: () => this.codeService.generateUserTypeReference(),
+      label: 'User type',
+    });
   }
 
   private async seedOfficeType() {
-    // `reference` is minted per row and written with `$setOnInsert`, the same
-    // way the statuses are: it is the id the reference screen and its URLs are
-    // built on, so a re-run must leave an existing row's alone. Generated one
-    // at a time rather than in parallel — the generator checks the database
-    // for a clash, and two concurrent calls could pick the same code before
-    // either had saved.
-    const operations: Parameters<typeof this.officeTypeModel.bulkWrite>[0] = [];
-    for (const officeType of seed.officeType) {
-      const reference = await this.codeService.generateOfficeTypeReference();
-      operations.push({
-        updateOne: {
-          filter: { officeTypeName: officeType.officeTypeName },
-          update: { $set: officeType, $setOnInsert: { reference } },
-          upsert: true,
-        },
-      });
-    }
-
-    await this.officeTypeModel.bulkWrite(operations);
-    this.logger.log(
-      `🌱 Done seeding ${seed.officeType.length} data for Office Type`,
-    );
+    await this.seedReferenceRows({
+      model: this.officeTypeModel,
+      nameField: 'officeTypeName',
+      rows: seed.officeType,
+      mintReference: () => this.codeService.generateOfficeTypeReference(),
+      label: 'Office type',
+    });
   }
 
   private async seedPickupStatus() {
-    // `reference` is minted per row and written with `$setOnInsert`, the same
-    // way the user types are: it is the id the reference screen and its URLs
-    // are built on, so a re-run must leave an existing row's alone. Generated
-    // one at a time rather than in parallel — the generator checks the
-    // database for a clash, and two concurrent calls could pick the same code
-    // before either had saved.
-    const operations: Parameters<typeof this.pickupStatusModel.bulkWrite>[0] =
-      [];
-    for (const pickupStatus of seed.pickupStatus) {
-      const reference = await this.codeService.generatePickupStatusReference();
-      operations.push({
-        updateOne: {
-          filter: { pickupStatusName: pickupStatus.pickupStatusName },
-          update: { $set: pickupStatus, $setOnInsert: { reference } },
-          upsert: true,
-        },
-      });
-    }
-
-    await this.pickupStatusModel.bulkWrite(operations);
-    this.logger.log(
-      `🌱 Done seeding ${seed.pickupStatus.length} data for Pickup Status`,
-    );
+    await this.seedReferenceRows({
+      model: this.pickupStatusModel,
+      nameField: 'pickupStatusName',
+      rows: seed.pickupStatus,
+      mintReference: () => this.codeService.generatePickupStatusReference(),
+      label: 'Pickup status',
+    });
   }
 
   private async seedOrderStatus() {
-    // `reference` is minted per row and written with `$setOnInsert`, the same
-    // way the pickup statuses are: it is the id the reference screen and its
-    // URLs are built on, so a re-run must leave an existing row's alone.
-    // Generated one at a time rather than in parallel — the generator checks
-    // the database for a clash, and two concurrent calls could pick the same
-    // code before either had saved.
-    const operations: Parameters<typeof this.orderStatusModel.bulkWrite>[0] =
-      [];
-    for (const orderStatus of seed.orderStatus) {
-      const reference = await this.codeService.generateOrderStatusReference();
-      operations.push({
-        updateOne: {
-          filter: { orderStatusName: orderStatus.orderStatusName },
-          update: { $set: orderStatus, $setOnInsert: { reference } },
-          upsert: true,
-        },
-      });
-    }
-
-    await this.orderStatusModel.bulkWrite(operations);
-    this.logger.log(
-      `🌱 Done seeding ${seed.orderStatus.length} data for Order Status`,
-    );
+    await this.seedReferenceRows({
+      model: this.orderStatusModel,
+      nameField: 'orderStatusName',
+      rows: seed.orderStatus,
+      mintReference: () => this.codeService.generateOrderStatusReference(),
+      label: 'Order status',
+    });
   }
 
   private async seedPaymentMethod() {
-    // `reference` is minted per row and written with `$setOnInsert`, the same
-    // way the other reference collections are: it is the id the reference
-    // screen and its URLs are built on, so a re-run must leave an existing
-    // row's alone. Generated one at a time rather than in parallel — the
-    // generator checks the database for a clash, and two concurrent calls
-    // could pick the same code before either had saved.
-    const operations: Parameters<typeof this.paymentMethodModel.bulkWrite>[0] =
-      [];
-    for (const paymentMethod of seed.paymentMethod) {
-      const reference = await this.codeService.generatePaymentMethodReference();
-      operations.push({
-        updateOne: {
-          filter: { paymentMethodName: paymentMethod.paymentMethodName },
-          update: { $set: paymentMethod, $setOnInsert: { reference } },
-          upsert: true,
-        },
-      });
-    }
-
-    await this.paymentMethodModel.bulkWrite(operations);
-    this.logger.log(
-      `🌱 Done seeding ${seed.paymentMethod.length} data for Payment Method`,
-    );
+    await this.seedReferenceRows({
+      model: this.paymentMethodModel,
+      nameField: 'paymentMethodName',
+      rows: seed.paymentMethod,
+      mintReference: () => this.codeService.generatePaymentMethodReference(),
+      label: 'Payment method',
+    });
   }
 
   private async seedPaymentType() {
-    // Same one-at-a-time minting as the payment methods above, and for the
-    // same reason.
-    const operations: Parameters<typeof this.paymentTypeModel.bulkWrite>[0] =
-      [];
-    for (const paymentType of seed.paymentType) {
-      const reference = await this.codeService.generatePaymentTypeReference();
-      operations.push({
-        updateOne: {
-          filter: { paymentTypeName: paymentType.paymentTypeName },
-          update: { $set: paymentType, $setOnInsert: { reference } },
-          upsert: true,
-        },
-      });
-    }
-
-    await this.paymentTypeModel.bulkWrite(operations);
-    this.logger.log(
-      `🌱 Done seeding ${seed.paymentType.length} data for Payment Types`,
-    );
+    await this.seedReferenceRows({
+      model: this.paymentTypeModel,
+      nameField: 'paymentTypeName',
+      rows: seed.paymentType,
+      mintReference: () => this.codeService.generatePaymentTypeReference(),
+      label: 'Payment type',
+    });
   }
 
   private async seedOffice() {
     const url = process.env.DD_API_URL ?? '';
     const ttlDays = Number(process.env.OFFICE_LINK_TTL_DAYS) || 365;
+    const audit = await this.seedAudit('office seed');
+    const tally = new SeedTally();
+
     for (const office of seed.offices) {
       const { officeType, ...data } = office;
       // The seed carries an empty `signedLink` placeholder. Setting it would
-      // blank a real link, so it never reaches the update.
+      // blank a real link, so it never reaches the write.
       delete (data as { signedLink?: string }).signedLink;
-      const exp = Date.now() + ttlDays * 24 * 60 * 60 * 1000;
-      const sig = this.codeService.signOfficeLink(office.slug, exp);
-      const signedLink = `${url}/o/${office.slug}?sig=${sig}&exp=${exp}`;
 
       const officeTypeDoc = await this.officeTypeModel.findOne({
         officeTypeName: officeType,
       });
-      const officeTypeId = officeTypeDoc?._id;
 
       /*
-       * The link is minted on insert only.
+       * Everything a manager can edit — the name, address, city, region, type
+       * and whether the branch is open — is written once and then left alone.
+       * The office type included: `PATCH /offices/:code` accepts a new one, so
+       * it is theirs to change, not the seed's to put back.
        *
-       * Re-minting it on every boot invalidated the previous one each time the
-       * API restarted — so a QR code printed for a branch died overnight, and
-       * the office's audit trail filled up with link rotations nobody made.
-       * Rotating a link is a deliberate act; it belongs to
-       * `POST /offices/:officeCode/link`, not to a seed.
+       * The slug is the key because it is the one field no endpoint will
+       * change; the public link is built from it.
+       *
+       * The link itself is minted on insert only. Re-minting it on every boot
+       * invalidated the previous one each time the API restarted — a QR code
+       * printed for a branch died overnight, and the office's trail filled up
+       * with link rotations nobody made. Rotating a link is a deliberate act:
+       * it belongs to `POST /offices/:officeCode/link`.
        */
-      await this.officeModel.findOneAndUpdate(
-        { slug: data.slug },
-        { $set: { ...data, officeTypeId }, $setOnInsert: { signedLink } },
-        { upsert: true },
-      );
+      const { outcome } = await upsertSeedRow({
+        model: this.officeModel,
+        audit,
+        logger: this.logger,
+        generate: () => {
+          const exp = Date.now() + ttlDays * 24 * 60 * 60 * 1000;
+          const sig = this.codeService.signOfficeLink(office.slug, exp);
+          return Promise.resolve({
+            signedLink: `${url}/o/${office.slug}?sig=${sig}&exp=${exp}`,
+          });
+        },
+        plan: {
+          filter: { slug: data.slug },
+          onInsert: {
+            ...data,
+            officeTypeId: officeTypeDoc?._id,
+            isActive: true,
+          },
+        },
+      });
+      tally.add(outcome);
     }
-    this.logger.log(`🌱 Done seeding ${seed.offices.length} data for Office`);
+
+    this.logger.log(`🌱 Office: ${tally.toString()}`);
   }
 
   private async seedRoles() {
-    const operations = seed.roles.map((role) => ({
-      updateOne: {
-        filter: { roleName: role.roleName },
-        update: { $set: role },
-        upsert: true,
-      },
-    }));
+    const audit = await this.seedAudit('role seed');
+    const tally = new SeedTally();
 
-    await this.roleModel.bulkWrite(operations);
-    this.logger.log(`🌱 Done seeding ${seed.roles.length} data for Role`);
+    for (const role of seed.roles) {
+      const { seedKey, ...rest } = role;
+      const { outcome } = await upsertSeedRow({
+        model: this.roleModel,
+        audit,
+        logger: this.logger,
+        // A role with no reference cannot be opened in the panel — every role
+        // URL is built on one — so the seeder mints it as the role is created,
+        // the same way the API does.
+        generate: async () => ({
+          reference: await this.codeService.generateRoleReference(),
+        }),
+        plan: {
+          filter: { seedKey },
+          // The name and description are editable from the panel, so the
+          // seed writes them once and never corrects them afterwards.
+          onInsert: { ...rest, isActive: true },
+        },
+      });
+      tally.add(outcome);
+    }
+
+    this.logger.log(`🌱 Role: ${tally.toString()}`);
   }
 
   private async seedPermission() {
-    const operations = seed.permissions.map((permission) => ({
-      updateOne: {
-        filter: { action: permission.action, subject: permission.subject },
-        update: { $set: permission },
-        upsert: true,
-      },
-    }));
-
-    await this.permissionModel.bulkWrite(operations);
-    this.logger.log(
-      `🌱 Done seeding ${seed.permissions.length} data for Permission`,
-    );
+    const tally = new SeedTally();
+    // Permissions are not editable anywhere — there is no update endpoint and
+    // no screen — so the pair (action, subject) is both the key and the whole
+    // row. Nothing to protect from the seed here.
+    for (const permission of seed.permissions) {
+      const { outcome } = await upsertSeedRow({
+        model: this.permissionModel,
+        logger: this.logger,
+        plan: {
+          filter: { action: permission.action, subject: permission.subject },
+          onInsert: { ...permission },
+        },
+      });
+      tally.add(outcome);
+    }
+    this.logger.log(`🌱 Permission: ${tally.toString()}`);
   }
 
   // Subjects that carry officeId and so are office-scoped for OFFICE-scope roles.
@@ -360,78 +360,169 @@ export class SeederService {
     SubjectEnum.Activity,
   ]);
 
-  private async upsertRolePermission(
-    roleId: Types.ObjectId,
-    action: string,
-    subject: string,
-    scope: string,
-    conditions?: Record<string, unknown>,
-  ): Promise<boolean> {
+  /**
+   * Writes one row of "this role may do this thing, here".
+   *
+   * Two things changed here. The scope and its conditions are seed-owned —
+   * nothing in the panel edits a single row's scope, only the whole matrix —
+   * so they are kept in step on every run. And when a role stops being
+   * office-limited, the old `{ officeId: '$office' }` condition is *removed*
+   * rather than left behind. Before, it stayed on the row for ever, so a role
+   * moved from one branch to everywhere went on seeing one branch.
+   */
+  /**
+   * A stable, lower-case key from a name. Used only where the source has no
+   * key of its own — the imported price list — so a row can be recognised
+   * again after somebody renames it.
+   */
+  private static slug(value: string): string {
+    return value
+      .normalize('NFKD')
+      .replace(/[^\x20-\x7E]/g, '')
+      .toLowerCase()
+      .replace(/&/g, 'and')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+  }
+
+  private async upsertRolePermission(input: {
+    roleId: Types.ObjectId;
+    action: string;
+    subject: string;
+    scope: ScopeEnum;
+    conditions?: Record<string, unknown>;
+    audit?: AuditContextDto;
+  }): Promise<Types.ObjectId | undefined> {
+    const { roleId, action, subject, scope, conditions, audit } = input;
+
     const permissionDoc = await this.permissionModel.findOne({
       action,
       subject,
     } as Record<string, unknown>);
-    if (!permissionDoc) return false;
+    if (!permissionDoc) return undefined;
 
-    await this.rolePermissionModel.findOneAndUpdate(
-      { roleId, permissionId: permissionDoc._id },
-      {
-        roleId,
-        permissionId: permissionDoc._id,
+    const filter = { roleId, permissionId: permissionDoc._id };
+    const existing = await this.rolePermissionModel.findOne(filter);
+
+    if (!existing) {
+      const created = await this.rolePermissionModel.create({
+        ...filter,
         scope,
-        // undefined leaves the field unset (GLOBAL/unrestricted rows).
         ...(conditions ? { conditions } : {}),
-      },
-      { upsert: true },
-    );
-    return true;
+      });
+      return created._id;
+    }
+
+    const scopeMoved = existing.scope !== scope;
+    const conditionsMoved =
+      JSON.stringify(existing.conditions ?? null) !==
+      JSON.stringify(conditions ?? null);
+
+    // Nothing to say: leave the row untouched rather than writing the same
+    // values back over themselves and moving its "last updated".
+    if (!scopeMoved && !conditionsMoved) return existing._id;
+
+    // A condition that no longer applies has to go. Leaving it behind means
+    // the role keeps a limit the seed says it should not have — which is how
+    // a role moved from one branch to everywhere went on seeing one branch.
+    const update = conditions
+      ? { $set: { scope, conditions } }
+      : { $set: { scope }, $unset: { conditions: '' } };
+
+    await this.rolePermissionModel.findOneAndUpdate(filter, update, {
+      context: audit,
+    } as never);
+
+    return existing._id;
   }
 
+  /**
+   * What each role may do.
+   *
+   * **Additive by default, and deliberately so.** The permissions matrix in
+   * the panel is a real screen people use: saving it replaces a role's rows
+   * outright. If the seed treated its own map as the final word, every run
+   * would undo whatever was set there — and it runs on demand, so nobody
+   * would connect the two.
+   *
+   * Set `SEED_RECONCILE_PERMISSIONS=YES` to make the map the final word for
+   * seeded roles. That is the right switch when the map itself is the record
+   * of who may do what, and the wrong one the moment anybody starts editing
+   * roles in the panel. It never touches a role somebody created by hand —
+   * only roles the seed itself made, which are the ones carrying a `seedKey`.
+   */
   private async seedRolePermissions() {
-    let count = 0;
+    const audit = await this.seedAudit('what each role may do — seed');
+    const authoritative = process.env.SEED_RECONCILE_PERMISSIONS === 'YES';
+    let written = 0;
+    let removed = 0;
 
-    // Staff/internal roles: OFFICE-scoped office-owned subjects auto-scope to
-    // the caller's office via a { officeId: '$office' } condition.
-    for (const mapping of seed.rolePermissionMap) {
-      const role = await this.roleModel.findOne({ roleName: mapping.roleName });
+    const mappings = [
+      // Staff roles: an OFFICE-scoped role gets `{ officeId: '$office' }` on
+      // the subjects that carry an office, so it sees its own branch only.
+      ...seed.rolePermissionMap.map((mapping) => ({
+        roleSeedKey: mapping.roleSeedKey,
+        scope: mapping.scope,
+        permissions: mapping.permissions.map((permission) => ({
+          action: permission.action,
+          subject: permission.subject,
+          conditions:
+            mapping.scope === ScopeEnum.OFFICE &&
+            SeederService.OFFICE_OWNED.has(permission.subject)
+              ? { officeId: '$office' }
+              : undefined,
+        })),
+      })),
+      // External self-service roles: read-your-own, via `{ field: '$self' }`.
+      ...seed.selfRolePermissionMap.map((mapping) => ({
+        roleSeedKey: mapping.roleSeedKey,
+        scope: mapping.scope,
+        permissions: mapping.permissions.map((permission) => ({
+          action: permission.action,
+          subject: permission.subject,
+          conditions: permission.conditions as
+            | Record<string, unknown>
+            | undefined,
+        })),
+      })),
+    ];
+
+    for (const mapping of mappings) {
+      const role = await this.roleModel.findOne({
+        seedKey: mapping.roleSeedKey,
+      });
       if (!role) continue;
 
+      const keep: Types.ObjectId[] = [];
       for (const permission of mapping.permissions) {
-        const conditions =
-          mapping.scope === ScopeEnum.OFFICE &&
-          SeederService.OFFICE_OWNED.has(permission.subject)
-            ? { officeId: '$office' }
-            : undefined;
+        const id = await this.upsertRolePermission({
+          audit,
+          roleId: role._id,
+          scope: mapping.scope,
+          action: permission.action,
+          subject: permission.subject,
+          conditions: permission.conditions,
+        });
+        if (id) {
+          keep.push(id);
+          written++;
+        }
+      }
 
-        const ok = await this.upsertRolePermission(
-          role._id,
-          permission.action,
-          permission.subject,
-          mapping.scope,
-          conditions,
-        );
-        if (ok) count++;
+      if (authoritative) {
+        const gone = await this.rolePermissionModel.deleteMany({
+          roleId: role._id,
+          _id: { $nin: keep },
+        });
+        removed += gone.deletedCount ?? 0;
       }
     }
 
-    // External self-service roles: read-own via explicit { field: '$self' }.
-    for (const mapping of seed.selfRolePermissionMap) {
-      const role = await this.roleModel.findOne({ roleName: mapping.roleName });
-      if (!role) continue;
-
-      for (const permission of mapping.permissions) {
-        const ok = await this.upsertRolePermission(
-          role._id,
-          permission.action,
-          permission.subject,
-          mapping.scope,
-          permission.conditions,
-        );
-        if (ok) count++;
-      }
-    }
-
-    this.logger.log(`🌱 Done seeding ${count} data for RolePermission`);
+    this.logger.log(
+      `🌱 Role permissions: ${written} in the map${
+        authoritative ? `, ${removed} removed as no longer listed` : ''
+      }`,
+    );
   }
 
   /**
@@ -446,6 +537,32 @@ export class SeederService {
     return await this.userModel
       .findOne({ $or: [{ phone: this.phone }, { email: this.email }] })
       .select('_id');
+  }
+
+  /**
+   * Who the trail credits a seeded write to, and why.
+   *
+   * Every audited write owes the history an explanation. A seed has no request
+   * behind it and no header to read one from, so it states its reason outright
+   * and signs it with the bootstrap admin.
+   *
+   * On the very first run of a brand new database there is no admin yet — the
+   * roles have to exist before one can be created. Those first few rows are
+   * recorded with no name against them, which is honest: nobody made them.
+   */
+  private adminIdCache?: Types.ObjectId;
+
+  private async seedAudit(reason: string): Promise<AuditContextDto> {
+    if (!this.adminIdCache) {
+      const admin = await this.findAdminUser();
+      // On a brand new database the admin does not exist yet, and cannot: it
+      // needs a user type and a role, which are themselves seeded rows. So the
+      // id is decided up front and the account is created under it later in
+      // the same run. Every history entry the run writes then names the
+      // account it belongs to, including the ones written before it existed.
+      this.adminIdCache = admin?._id ?? new Types.ObjectId();
+    }
+    return systemAuditContext(this.adminIdCache, reason);
   }
 
   private async seedAdmin() {
@@ -483,12 +600,22 @@ export class SeederService {
     const password = process.env.ADMIN_PASSWORD!;
     const hashedPassword = await this.codeService.hashPlainText(password);
 
-    // Self-attributed: this is the very first User ever created, so
-    // there's no existing admin to credit as changedBy. Pre-generate
-    // the _id so the bootstrap admin can be its own creator.
-    const adminUserId = new Types.ObjectId();
+    // Self-attributed: this is the very first User ever created, so there is
+    // no existing admin to credit as changedBy.
+    //
+    // The id is whatever the run has already been signing its history with —
+    // the reference rows are seeded before this point and cannot wait for an
+    // account that needs them to exist first. Taking that same id here is what
+    // makes those earlier entries point at a real account.
+    const adminUserId = (await this.seedAudit('bootstrap')).changedBy!;
+    // Minted here like every other seeded row: a staff account with no
+    // reference cannot be opened in the panel, and this is the account every
+    // seeded history entry is attributed to.
+    const reference = await this.codeService.generateUserReference();
+
     const adminUserDoc = new this.userModel({
       _id: adminUserId,
+      reference,
       phone,
       email,
       lastName: 'Raymond',
@@ -501,6 +628,7 @@ export class SeederService {
       preferredLanguage: PreferredLanguageEnum.ENGLISH,
     });
     adminUserDoc.$locals.changedBy = adminUserId;
+    adminUserDoc.$locals.reason = 'created the first administrator account';
     const adminUser = await adminUserDoc.save();
 
     const userRoleExists = await this.userRoleModel.exists({
@@ -544,212 +672,209 @@ export class SeederService {
       createdBy: adminUser._id,
     });
 
-    this.logger.log(
-      `🌱 Done seeding default API Client with ${JSON.stringify({ key, secret })}`,
+    /*
+     * The secret is shown once, on the process's own stdout, and never written
+     * to the log file.
+     *
+     * It used to go through the logger with the key, which put a live
+     * credential into `logs/` — and into wherever those logs are shipped —
+     * for the life of the file. It is a bearer secret: whoever reads it can
+     * call the API as this client. It is not recoverable afterwards by
+     * design; if it is missed, issue a new one rather than going looking.
+     */
+    process.stdout.write(
+      `\n  API client "${seed.apiClient.name}" created.\n` +
+        `  key:    ${key}\n` +
+        `  secret: ${secret}\n` +
+        `  Copy the secret now — it is not stored and cannot be shown again.\n\n`,
     );
+    this.logger.log(`🌱 Default API client created with key ${key}`);
   }
 
-  private async seedCurrency() {
-    // `reference` is minted per row and written with `$setOnInsert`, the same
-    // way the reference collections above are: it is the id the catalogue
-    // screen and its URLs are built on, so a re-run must leave an existing
-    // row's alone. Generated one at a time rather than in parallel — the
-    // generator checks the database for a clash, and two concurrent calls
-    // could pick the same code before either had saved.
-    const operations: Parameters<typeof this.currencyModel.bulkWrite>[0] = [];
-    for (const currency of currencyData) {
-      const reference = await this.codeService.generateCurrencyReference();
-      operations.push({
-        updateOne: {
-          filter: { isoCode: currency.isoCode },
-          update: { $set: currency, $setOnInsert: { reference } },
-          upsert: true,
+  /**
+   * The catalogue collections a manager can rename.
+   *
+   * Because the name is theirs to change, the seeder cannot use it to
+   * recognise a row: rename "Women" to "Ladies" and a run keyed on the name
+   * would decide the row had gone and create a second "Women" beside it.
+   *
+   * So the row is found by `seedKey` — a short label the seed owns, invisible
+   * in the panel, that nothing can edit — and the name, description and status
+   * are written once and never touched again.
+   */
+  private async seedCatalogueRows<T>(input: {
+    model: Model<T>;
+    rows: { seedKey: string; description?: string }[];
+    mintReference: () => Promise<string>;
+    label: string;
+  }): Promise<void> {
+    const { model, rows, mintReference, label } = input;
+    const audit = await this.seedAudit(`${label.toLowerCase()} seed`);
+    const tally = new SeedTally();
+
+    for (const row of rows) {
+      const { seedKey, ...rest } = row;
+      const { outcome } = await upsertSeedRow<T>({
+        model,
+        audit,
+        logger: this.logger,
+        generate: async () => ({ reference: await mintReference() }),
+        plan: {
+          filter: { seedKey },
+          onInsert: { ...rest, isActive: true },
         },
       });
+      tally.add(outcome);
     }
 
-    await this.currencyModel.bulkWrite(operations);
-    this.logger.log(`🌱 Done seeding ${currencyData.length} data for Currency`);
+    this.logger.log(`🌱 ${label}: ${tally.toString()}`);
+  }
+
+  /**
+   * Currencies are the exception in this file: the ISO code cannot be changed
+   * from anywhere, so it is already a stable key and needs no `seedKey`.
+   * Everything else about a currency — its name, country, symbol, decimals —
+   * is editable, so the seed writes it once.
+   */
+  private async seedCurrency() {
+    const audit = await this.seedAudit('currency seed');
+    const tally = new SeedTally();
+
+    for (const currency of currencyData) {
+      const { outcome } = await upsertSeedRow({
+        model: this.currencyModel,
+        audit,
+        logger: this.logger,
+        generate: async () => ({
+          reference: await this.codeService.generateCurrencyReference(),
+        }),
+        plan: {
+          filter: { isoCode: currency.isoCode },
+          onInsert: { ...currency, isActive: true },
+        },
+      });
+      tally.add(outcome);
+    }
+
+    this.logger.log(`🌱 Currency: ${tally.toString()}`);
   }
 
   private async seedCategory() {
-    // `reference` is minted per row and written with `$setOnInsert`, the same
-    // way the reference collections above are: it is the id the catalogue
-    // screen and its URLs are built on, so a re-run must leave an existing
-    // row's alone. Generated one at a time rather than in parallel — the
-    // generator checks the database for a clash, and two concurrent calls
-    // could pick the same code before either had saved.
-    const operations: Parameters<typeof this.categoryModel.bulkWrite>[0] = [];
-    for (const category of categoryData) {
-      const reference = await this.codeService.generateCategoryReference();
-      operations.push({
-        updateOne: {
-          filter: { categoryName: category.categoryName },
-          update: { $set: category, $setOnInsert: { reference } },
-          upsert: true,
-        },
-      });
-    }
-
-    await this.categoryModel.bulkWrite(operations);
-    this.logger.log(`🌱 Done seeding ${categoryData.length} data for Category`);
+    await this.seedCatalogueRows({
+      model: this.categoryModel,
+      rows: categoryData,
+      mintReference: () => this.codeService.generateCategoryReference(),
+      label: 'Category',
+    });
   }
 
   private async seedSubCategory() {
-    // `reference` is minted per row and written with `$setOnInsert`, the same
-    // way the reference collections above are: it is the id the catalogue
-    // screen and its URLs are built on, so a re-run must leave an existing
-    // row's alone. Generated one at a time rather than in parallel — the
-    // generator checks the database for a clash, and two concurrent calls
-    // could pick the same code before either had saved.
-    const operations: Parameters<typeof this.subCategoryModel.bulkWrite>[0] =
-      [];
-    for (const subCategory of subCategoryData) {
-      const reference = await this.codeService.generateSubCategoryReference();
-      operations.push({
-        updateOne: {
-          filter: { subCategoryName: subCategory.subCategoryName },
-          update: { $set: subCategory, $setOnInsert: { reference } },
-          upsert: true,
-        },
-      });
-    }
-
-    await this.subCategoryModel.bulkWrite(operations);
-    this.logger.log(
-      `🌱 Done seeding ${subCategoryData.length} data for SubCategory`,
-    );
+    await this.seedCatalogueRows({
+      model: this.subCategoryModel,
+      rows: subCategoryData,
+      mintReference: () => this.codeService.generateSubCategoryReference(),
+      label: 'Sub category',
+    });
   }
 
   private async seedService() {
-    // `reference` is minted per row and written with `$setOnInsert`, the same
-    // way the reference collections above are: it is the id the catalogue
-    // screen and its URLs are built on, so a re-run must leave an existing
-    // row's alone. Generated one at a time rather than in parallel — the
-    // generator checks the database for a clash, and two concurrent calls
-    // could pick the same code before either had saved.
-    const operations: Parameters<typeof this.serviceModel.bulkWrite>[0] = [];
-    for (const service of serviceData) {
-      const reference = await this.codeService.generateServiceReference();
-      operations.push({
-        updateOne: {
-          filter: { serviceName: service.serviceName },
-          update: { $set: service, $setOnInsert: { reference } },
-          upsert: true,
-        },
-      });
-    }
-
-    await this.serviceModel.bulkWrite(operations);
-    this.logger.log(`🌱 Done seeding ${serviceData.length} data for Service`);
+    await this.seedCatalogueRows({
+      model: this.serviceModel,
+      rows: serviceData,
+      mintReference: () => this.codeService.generateServiceReference(),
+      label: 'Service',
+    });
   }
 
   private async seedServiceType() {
-    // `reference` is minted per row and written with `$setOnInsert`, the same
-    // way the reference collections above are: it is the id the catalogue
-    // screen and its URLs are built on, so a re-run must leave an existing
-    // row's alone. Generated one at a time rather than in parallel — the
-    // generator checks the database for a clash, and two concurrent calls
-    // could pick the same code before either had saved.
-    const operations: Parameters<typeof this.serviceTypeModel.bulkWrite>[0] =
-      [];
-    for (const serviceType of serviceTypeData) {
-      const reference = await this.codeService.generateServiceTypeReference();
-      operations.push({
-        updateOne: {
-          filter: { serviceTypeName: serviceType.serviceTypeName },
-          update: { $set: serviceType, $setOnInsert: { reference } },
-          upsert: true,
-        },
-      });
-    }
-
-    await this.serviceTypeModel.bulkWrite(operations);
-    this.logger.log(
-      `🌱 Done seeding ${serviceTypeData.length} data for ServiceType`,
-    );
+    await this.seedCatalogueRows({
+      model: this.serviceTypeModel,
+      rows: serviceTypeData,
+      mintReference: () => this.codeService.generateServiceTypeReference(),
+      label: 'Service type',
+    });
   }
 
+  /**
+   * The starter price list.
+   *
+   * Every field on an item is editable from the panel — the name, the service
+   * and type it sits under, the currency, both prices, what it is filed under.
+   * So the seed owns none of it after the row exists. It creates the item,
+   * files it once, and then stays out of the way. An agreed price correction
+   * is a real decision somebody made; putting the list price back on the next
+   * seed run would undo it and blame them for the change.
+   */
   private async seedItemCatalog() {
     const currency = await this.currencyModel.findOne({ isoCode: 'XAF' });
-    const adminUser = await this.findAdminUser();
-    // The catalog is reference data and still has to land without an admin to
-    // sign for it; the audit entry is what goes missing, not the row.
-    const audit = adminUser
-      ? systemAuditContext(adminUser._id, 'price list seed')
-      : undefined;
+    const audit = await this.seedAudit('price list seed');
+    const tally = new SeedTally();
 
     for (const item of itemData) {
+      // Looked up by `seedKey`, not by name: a manager may have renamed any
+      // of these, and the link has to survive that.
       const [service, serviceType, category, subCategory] = await Promise.all([
-        this.serviceModel.findOne({ serviceName: item.service }),
-        this.serviceTypeModel.findOne({ serviceTypeName: item.serviceType }),
-        this.categoryModel.findOne({ categoryName: item.category }),
-        this.subCategoryModel.findOne({
-          subCategoryName: item.subCategory,
-        }),
+        this.serviceModel.findOne({ seedKey: item.serviceKey }),
+        this.serviceTypeModel.findOne({ seedKey: item.serviceTypeKey }),
+        this.categoryModel.findOne({ seedKey: item.categoryKey }),
+        this.subCategoryModel.findOne({ seedKey: item.subCategoryKey }),
       ]);
       if (!service || !serviceType || !category || !subCategory) {
         this.logger.warn(`Skipping seed item ${item.itemName}: lookup missing`);
         continue;
       }
 
-      // `reference` rides in `$setOnInsert`, so a re-run leaves the one an
-      // existing item already carries alone — it is the id the catalogue
-      // screen and its URLs are built on.
-      const reference = await this.codeService.generateItemReference();
-      const itemDoc = await this.itemModel.findOneAndUpdate(
-        { itemName: item.itemName },
-        {
-          $set: {
+      const { outcome, doc } = await upsertSeedRow<Item>({
+        model: this.itemModel,
+        audit,
+        logger: this.logger,
+        generate: async () => ({
+          reference: await this.codeService.generateItemReference(),
+          // The two derived fields, written at creation so a fresh database is
+          // complete the moment it is seeded. Every later write that can
+          // change an input recomputes them, so the seed never touches them
+          // again.
+          unitPrice: itemUnitPrice(item.priceLow, item.priceHigh),
+          displayName: itemDisplayName({
+            itemName: item.itemName,
+            categoryNames: [category.categoryName],
+            subCategoryNames: [subCategory.subCategoryName],
+          }),
+        }),
+        plan: {
+          filter: { seedKey: item.seedKey },
+          onInsert: {
             itemName: item.itemName,
             serviceId: service._id,
             serviceTypeId: serviceType._id,
             currencyId: currency?._id,
             priceLow: item.priceLow,
             priceHigh: item.priceHigh,
-          },
-          $setOnInsert: { reference },
-        },
-        {
-          context: audit,
-          upsert: true,
-          returnDocument: 'after',
-        } as never,
-      );
-
-      const itemId = (itemDoc as unknown as Item)._id;
-      await this.itemCategoryModel.findOneAndUpdate(
-        { itemId, categoryId: category._id },
-        { itemId, categoryId: category._id },
-        { upsert: true },
-      );
-      await this.itemSubCategoryModel.findOneAndUpdate(
-        { itemId, subCategoryId: subCategory._id },
-        { itemId, subCategoryId: subCategory._id },
-        { upsert: true },
-      );
-
-      // The two derived fields, written last because the display name reads
-      // the links above. Seeded rather than left to the backfill so a fresh
-      // database is complete the moment it is seeded. `timestamps: false`:
-      // a derived field is not an edit anyone made.
-      await this.itemModel.updateOne(
-        { _id: itemId },
-        {
-          $set: {
-            unitPrice: itemUnitPrice(item.priceLow, item.priceHigh),
-            displayName: itemDisplayName({
-              itemName: item.itemName,
-              categoryNames: [category.categoryName],
-              subCategoryNames: [subCategory.subCategoryName],
-            }),
+            isActive: true,
           },
         },
-        { timestamps: false },
-      );
+      });
+      tally.add(outcome);
+
+      // Filing is only set up for an item the seed has just created. Which
+      // categories an item sits under is editable, and re-adding the seed's
+      // own choice on every run would put back a filing somebody removed.
+      if (outcome === 'created') {
+        const itemId = doc._id;
+        await this.itemCategoryModel.findOneAndUpdate(
+          { itemId, categoryId: category._id },
+          { itemId, categoryId: category._id },
+          { upsert: true },
+        );
+        await this.itemSubCategoryModel.findOneAndUpdate(
+          { itemId, subCategoryId: subCategory._id },
+          { itemId, subCategoryId: subCategory._id },
+          { upsert: true },
+        );
+      }
     }
 
-    this.logger.log(`🌱 Done seeding ${itemData.length} data for Item`);
+    this.logger.log(`🌱 Item: ${tally.toString()}`);
   }
 
   private async seedItems() {
@@ -790,11 +915,9 @@ export class SeederService {
         return obj;
       });
 
-      const adminUser = await this.findAdminUser();
-      const importAudit = adminUser
-        ? systemAuditContext(adminUser._id, 'price list import')
-        : undefined;
+      const importAudit = await this.seedAudit('price list import');
       const currency = await this.currencyModel.findOne({ isoCode: 'XAF' });
+      const imported = new SeedTally();
 
       // Loop Through Data
       const tempService = new Map<string, Types.ObjectId>();
@@ -867,101 +990,101 @@ export class SeederService {
           tempServiceType.set(item.type, serviceType._id);
         }
 
-        // Same as the static catalogue above: minted here, but only written
-        // when the row is new.
-        const reference = await this.codeService.generateItemReference();
-        const newItem = await this.itemModel.findOneAndUpdate(
-          { itemName: item.item },
-          {
-            $set: {
-              serviceId,
-              serviceTypeId,
-              itemName: item.item,
-              currencyId: currency?._id,
-              priceLow: Number(item['price low (xaf)'].replaceAll(',', '')),
-              priceHigh: Number(item['price high (xaf)'].replaceAll(',', '')),
-            },
-            $setOnInsert: { reference },
-          },
-          {
-            context: importAudit,
-            upsert: true,
-            returnDocument: 'after',
-          } as never,
-        );
-
-        const itemCategoryExists = await this.itemCategoryModel.exists({
-          categoryId,
-          itemId: (newItem as unknown as Item)._id,
-        });
-        if (!itemCategoryExists) {
-          await this.itemCategoryModel.create({
-            categoryId,
-            itemId: (newItem as unknown as Item)._id,
-          });
-        }
-
-        const itemSubCategoryExists = await this.itemSubCategoryModel.exists({
-          subCategoryId,
-          itemId: (newItem as unknown as Item)._id,
-        });
-        if (!itemSubCategoryExists) {
-          await this.itemSubCategoryModel.create({
-            subCategoryId,
-            itemId: (newItem as unknown as Item)._id,
-          });
-        }
-
-        // Same as the static catalogue above: derived last, because the
-        // display name reads the links this loop has just written.
         const priceLow = Number(item['price low (xaf)'].replaceAll(',', ''));
         const priceHigh = Number(item['price high (xaf)'].replaceAll(',', ''));
-        await this.itemModel.updateOne(
-          { _id: (newItem as unknown as Item)._id },
-          {
-            $set: {
-              unitPrice: itemUnitPrice(priceLow, priceHigh),
-              displayName: itemDisplayName({
-                itemName: item.item,
-                categoryNames: [item.category],
-                subCategoryNames: [item.subcategory],
-              }),
+
+        // The sheet has no key of its own, so one is derived from the name it
+        // arrived under and kept for ever. That is what lets a manager rename
+        // the item afterwards without a second copy appearing on the next
+        // import.
+        const seedKey = `sheet:${SeederService.slug(item.item)}`;
+
+        const { outcome, doc } = await upsertSeedRow<Item>({
+          model: this.itemModel,
+          audit: importAudit,
+          logger: this.logger,
+          generate: async () => ({
+            reference: await this.codeService.generateItemReference(),
+            unitPrice: itemUnitPrice(priceLow, priceHigh),
+            displayName: itemDisplayName({
+              itemName: item.item,
+              categoryNames: [item.category],
+              subCategoryNames: [item.subcategory],
+            }),
+          }),
+          plan: {
+            filter: { seedKey },
+            // Every one of these is editable from the catalogue screen, so the
+            // import writes them once. A price somebody corrected at the
+            // counter is a decision; re-importing the sheet must not undo it.
+            onInsert: {
+              serviceId,
+              serviceTypeId,
+              priceLow,
+              priceHigh,
+              itemName: item.item,
+              currencyId: currency?._id,
+              isActive: true,
             },
           },
-          { timestamps: false },
-        );
+        });
+        imported.add(outcome);
+
+        // Filed only for an item this run created, for the same reason: which
+        // categories an item sits under is editable, and putting the sheet's
+        // own choice back would restore a filing somebody removed.
+        if (outcome === 'created') {
+          await this.itemCategoryModel.create({ categoryId, itemId: doc._id });
+          await this.itemSubCategoryModel.create({
+            subCategoryId,
+            itemId: doc._id,
+          });
+        }
       }
 
-      this.logger.log(`🌱 Done seeding ${items.length} data for Item`);
+      this.logger.log(`🌱 Item (price list import): ${imported.toString()}`);
     } catch (error) {
       this.logger.error(`An error occur when trying to seed inventory`);
       this.logger.error(error);
     }
   }
 
+  /**
+   * Message templates.
+   *
+   * The one collection here whose wording the seed keeps for ever. There is no
+   * screen and no endpoint that edits a template, so the file is the only
+   * place the wording lives — and a corrected template should reach the
+   * database on the next run rather than needing a hand-written update.
+   */
   private async seedNotificationTemplates() {
-    const operations = notificationData.map((notification) => ({
-      updateOne: {
-        // Templates are keyed by (templateName, channel) — same name can exist
-        // per channel (email + WhatsApp).
-        filter: {
-          templateName: notification.templateName,
-          channel: notification.channel,
-        },
-        update: { $set: notification },
-        upsert: true,
-      },
-    }));
+    const tally = new SeedTally();
 
-    await this.notificationTemplateModel.bulkWrite(operations);
-    this.logger.log(
-      `🌱 Done seeding ${notificationData.length} data for NotificationTemplate`,
-    );
+    for (const notification of notificationData) {
+      const { templateName, channel, ...content } = notification;
+      const { outcome } = await upsertSeedRow({
+        model: this.notificationTemplateModel,
+        logger: this.logger,
+        plan: {
+          // Same name can exist per channel — email and WhatsApp.
+          filter: { templateName, channel },
+          onInsert: { ...content },
+          owned: { ...content },
+        },
+      });
+      tally.add(outcome);
+    }
+
+    this.logger.log(`🌱 Notification template: ${tally.toString()}`);
   }
 
+  /**
+   * Rates and thresholds, as data.
+   *
+   * All of these are meant to be tuned in production, so every one of them is
+   * written once and then left to whoever tunes it.
+   */
   private async seedSettings() {
-    // Rates as data (default 1,000 XAF/kg each). $setOnInsert so an operator's
-    // later override isn't clobbered on re-seed.
     const defaults = [
       {
         key: SettingKeys.perKgRate,
@@ -1001,85 +1124,148 @@ export class SeederService {
         description: 'XAF discount value of one reward point at redemption',
       },
     ];
-    const operations = defaults.map((s) => ({
-      updateOne: {
-        filter: { key: s.key, officeId: null },
-        update: { $setOnInsert: { ...s, officeId: null } },
-        upsert: true,
-      },
-    }));
-    await this.settingModel.bulkWrite(operations);
-    this.logger.log(`🌱 Done seeding ${defaults.length} settings`);
+
+    const audit = await this.seedAudit('settings seed');
+    const tally = new SeedTally();
+
+    for (const setting of defaults) {
+      const { key, ...rest } = setting;
+      const { outcome } = await upsertSeedRow({
+        model: this.settingModel,
+        audit,
+        logger: this.logger,
+        plan: {
+          filter: { key, officeId: null },
+          onInsert: { ...rest },
+        },
+      });
+      tally.add(outcome);
+    }
+
+    this.logger.log(`🌱 Setting: ${tally.toString()}`);
   }
 
-  /** Rewards config as data (§2.1) — $setOnInsert so admin edits survive. */
+  /** Rewards config as data (§2.1) — created once, then the operator's. */
   private async seedRewards() {
-    await this.rewardRuleModel.bulkWrite(
-      seed.rewardRules.map((rule) => ({
-        updateOne: {
-          filter: { type: rule.type },
-          update: { $setOnInsert: rule },
-          upsert: true,
-        },
-      })),
-    );
-    await this.rewardTierModel.bulkWrite(
-      seed.rewardTiers.map((tier) => ({
-        updateOne: {
-          filter: { tierName: tier.tierName },
-          update: { $setOnInsert: tier },
-          upsert: true,
-        },
-      })),
-    );
-    this.logger.log(
-      `🌱 Done seeding ${seed.rewardRules.length} reward rules + ${seed.rewardTiers.length} tiers`,
-    );
+    const audit = await this.seedAudit('rewards seed');
+    const rules = new SeedTally();
+    const tiers = new SeedTally();
+
+    for (const rule of seed.rewardRules) {
+      const { type, ...rest } = rule;
+      const { outcome } = await upsertSeedRow({
+        model: this.rewardRuleModel,
+        audit,
+        logger: this.logger,
+        plan: { filter: { type }, onInsert: { ...rest } },
+      });
+      rules.add(outcome);
+    }
+
+    for (const tier of seed.rewardTiers) {
+      const { tierName, ...rest } = tier;
+      const { outcome } = await upsertSeedRow({
+        model: this.rewardTierModel,
+        audit,
+        logger: this.logger,
+        plan: { filter: { tierName }, onInsert: { ...rest } },
+      });
+      tiers.add(outcome);
+    }
+
+    this.logger.log(`🌱 Reward rule: ${rules.toString()}`);
+    this.logger.log(`🌱 Reward tier: ${tiers.toString()}`);
   }
 
-  /** Plan catalog as data (§2.2) — $setOnInsert so admin edits survive. */
+  /** Plan catalog as data (§2.2) — created once, then the operator's. */
   private async seedSubscriptionPlans() {
-    await this.subscriptionPlanModel.bulkWrite(
-      seed.subscriptionPlans.map((plan) => ({
-        updateOne: {
-          filter: { planName: plan.planName },
-          update: { $setOnInsert: plan },
-          upsert: true,
-        },
-      })),
-    );
-    this.logger.log(
-      `🌱 Done seeding ${seed.subscriptionPlans.length} subscription plans`,
-    );
+    const audit = await this.seedAudit('subscription plan seed');
+    const tally = new SeedTally();
+
+    for (const plan of seed.subscriptionPlans) {
+      const { planName, ...rest } = plan;
+      const { outcome } = await upsertSeedRow({
+        model: this.subscriptionPlanModel,
+        audit,
+        logger: this.logger,
+        plan: { filter: { planName }, onInsert: { ...rest } },
+      });
+      tally.add(outcome);
+    }
+
+    this.logger.log(`🌱 Subscription plan: ${tally.toString()}`);
   }
 
+  /**
+   * The lock key every instance competes for.
+   *
+   * Two people deploying at once, or a job that restarts, must not seed in
+   * parallel: the reference generators check the database for a clash before
+   * picking a code, and two runs can pick the same one before either has
+   * saved. The crons already guard themselves this way.
+   */
+  private static readonly LOCK_KEY = 'seed:baseline';
+  private static readonly LOCK_TTL_MS = 10 * 60 * 1000;
+
+  /**
+   * Seed the baseline data.
+   *
+   * Safe to run as often as you like. A row that exists is left exactly as it
+   * is — the seeder creates what is missing and otherwise writes nothing at
+   * all, not even a touch of `updatedAt`.
+   *
+   * This is called from `npm run seed`, never from application start-up.
+   * Seeding on boot meant every restart rewrote rows people had edited, and
+   * it happened after the API had already reported itself ready.
+   */
   async run(): Promise<void> {
-    await this.seedSettings();
-    await this.seedRewards();
-    await this.seedSubscriptionPlans();
-    await this.seedUserType();
-    await this.seedOfficeType();
-    await this.seedPickupStatus();
-    await this.seedOrderStatus();
-    await this.seedPaymentMethod();
-    await this.seedPaymentType();
-    await this.seedOffice();
+    const started = Date.now();
+    const held = await this.leaderLock.acquire(
+      SeederService.LOCK_KEY,
+      SeederService.LOCK_TTL_MS,
+    );
 
-    // Admin
-    await this.seedRoles();
-    await this.seedPermission();
-    await this.seedRolePermissions();
-    await this.seedAdmin();
-    await this.seedSystemApiClient();
+    if (!held) {
+      this.logger.warn(
+        'Another seed run holds the lock — stopping rather than writing alongside it.',
+      );
+      return;
+    }
 
-    // Catalogs
-    await this.seedCurrency();
-    await this.seedCategory();
-    await this.seedSubCategory();
-    await this.seedService();
-    await this.seedServiceType();
-    await this.seedItemCatalog();
-    await this.seedNotificationTemplates();
-    if (process.env.SEED_ITEMS === 'YES') await this.seedItems();
+    try {
+      await this.seedSettings();
+      await this.seedRewards();
+      await this.seedSubscriptionPlans();
+      await this.seedUserType();
+      await this.seedOfficeType();
+      await this.seedPickupStatus();
+      await this.seedOrderStatus();
+      await this.seedPaymentMethod();
+      await this.seedPaymentType();
+      await this.seedOffice();
+
+      // Admin
+      await this.seedRoles();
+      await this.seedPermission();
+      await this.seedRolePermissions();
+      await this.seedAdmin();
+      await this.seedSystemApiClient();
+
+      // Catalogs
+      await this.seedCurrency();
+      await this.seedCategory();
+      await this.seedSubCategory();
+      await this.seedService();
+      await this.seedServiceType();
+      await this.seedItemCatalog();
+      await this.seedNotificationTemplates();
+      if (process.env.SEED_ITEMS === 'YES') await this.seedItems();
+
+      this.logger.log(
+        `✅ Seeding finished in ${Math.round((Date.now() - started) / 1000)}s`,
+      );
+    } finally {
+      await this.leaderLock.release(SeederService.LOCK_KEY);
+    }
   }
 }

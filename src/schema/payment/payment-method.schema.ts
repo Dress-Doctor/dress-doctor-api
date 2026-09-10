@@ -32,6 +32,4 @@ export class PaymentMethod extends Document<Types.ObjectId> {
 
 export const PaymentMethodSchema = SchemaFactory.createForClass(PaymentMethod);
 
-// Sparse, so the unique index can be built over rows written before
-// `reference` existed. `npm run backfill:payment-method-reference` fills those in.
-PaymentMethodSchema.index({ reference: 1 }, { unique: true, sparse: true });
+PaymentMethodSchema.index({ reference: 1 }, { unique: true });

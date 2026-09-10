@@ -27,6 +27,8 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AppModule } from './../app.module';
 import { CodeGeneratorService } from './../helper/service/code-generator.service';
+import { SeederService } from './../helper/service/seeder.service';
+import { productionRefusal } from './refuse-production';
 import { RoleEnum } from './../schema/admin/admin.dto';
 import { ApiClient } from './../schema/admin/api-client.schema';
 import { Role } from './../schema/admin/role.schema';
@@ -104,6 +106,14 @@ const STAFF = {
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('SeedTestData');
+  const refusal = productionRefusal();
+  if (refusal) {
+    logger.error(refusal);
+    process.exit(1);
+  }
+  if (process.env.ALLOW_TEST_SEED === 'YES') {
+    logger.warn('ALLOW_TEST_SEED=YES — running against this database anyway.');
+  }
   const app = await NestFactory.createApplicationContext(AppModule, {
     // Keep the seeder's own logs; silence debug noise.
     logger: ['log', 'warn', 'error'],
@@ -130,13 +140,11 @@ async function bootstrap(): Promise<void> {
   const paymentTypeModel = model<PaymentType>(PaymentType.name);
   const codeService = app.get(CodeGeneratorService);
 
-  // The baseline seeder is fire-and-forget in onModuleInit; wait for its tail
-  // (the System API client is created last) before layering test data on top.
-  logger.log('Waiting for baseline reference seed to finish…');
-  for (let i = 0; i < 240; i++) {
-    if (await apiClientModel.findOne({ name: 'System' })) break;
-    await new Promise((r) => setTimeout(r, 500));
-  }
+  // The baseline data no longer seeds itself on boot, so ask for it outright
+  // and wait for it. The fixtures below need the reference rows, the roles and
+  // an office to exist first.
+  logger.log('Seeding the baseline reference data…');
+  await app.get(SeederService).run();
 
   const [customerType, adminType, customerRole, managerRole, office, creator] =
     await Promise.all([
@@ -175,7 +183,11 @@ async function bootstrap(): Promise<void> {
     const existing = await userModel.findOne({ phone: data.phone });
     if (existing) return existing;
     const _id = new Types.ObjectId();
-    const doc = new userModel({ _id, ...data });
+    // Every account is addressed by its reference, so a fixture needs one as
+    // much as a real sign-up does — without it the account cannot be opened in
+    // the panel at all.
+    const reference = await codeService.generateUserReference();
+    const doc = new userModel({ _id, reference, ...data });
     doc.$locals.changedBy = adminId ?? _id;
     return doc.save();
   };

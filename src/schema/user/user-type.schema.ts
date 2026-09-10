@@ -32,6 +32,4 @@ export class UserType extends Document<Types.ObjectId> {
 
 export const UserTypeSchema = SchemaFactory.createForClass(UserType);
 
-// Sparse, so the unique index can be built over rows written before
-// `reference` existed. `npm run backfill:user-type-reference` fills those in.
-UserTypeSchema.index({ reference: 1 }, { unique: true, sparse: true });
+UserTypeSchema.index({ reference: 1 }, { unique: true });

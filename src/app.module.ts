@@ -16,6 +16,8 @@ import { LogRequestMiddleware } from './helper/middleware/log-request.middleware
 import { ApiClientLookupService } from './helper/service/api-client-lookup.service';
 import { CodeGeneratorService } from './helper/service/code-generator.service';
 import { HistoryLabelModule } from './helper/service/history-label.module';
+import { RedisModule } from './helper/redis/redis.module';
+import { LeaderLockService } from './helper/service/leader-lock.service';
 import { SeederService } from './helper/service/seeder.service';
 import { i18nModule } from './i18n/i18n.module';
 import { SchemaModule } from './schema/schema.module';
@@ -49,6 +51,7 @@ import { bullPrefix, redisConnection } from './config/redis.config';
 @Module({
   imports: [
     i18nModule,
+    RedisModule,
     EventEmitterModule.forRoot(),
     AuthModule,
     SchemaModule,
@@ -98,6 +101,7 @@ import { bullPrefix, redisConnection } from './config/redis.config';
     }),
   ],
   providers: [
+    LeaderLockService,
     SeederService,
     CodeGeneratorService,
     ApiClientLookupService,
@@ -107,10 +111,7 @@ import { bullPrefix, redisConnection } from './config/redis.config';
 })
 export class AppModule implements NestModule, OnModuleInit {
   private readonly logger = new Logger(AppModule.name);
-  constructor(
-    @InjectConnection() private readonly connection: Connection,
-    private readonly seederService: SeederService,
-  ) {}
+  constructor(@InjectConnection() private readonly connection: Connection) {}
 
   configure(consumer: MiddlewareConsumer) {
     consumer
@@ -118,15 +119,21 @@ export class AppModule implements NestModule, OnModuleInit {
       .forRoutes('*path');
   }
 
+  /**
+   * Checks the database is there. It does **not** seed.
+   *
+   * Seeding used to happen right here, unawaited, on every start-up. That
+   * meant a restart rewrote rows people had edited in the panel, the writes
+   * landed after the API had already told the world it was ready, and every
+   * replica did it at the same time. It is now an explicit step — `npm run
+   * seed` — that you run when you mean to.
+   */
   onModuleInit() {
-    try {
-      if (this.connection.readyState === ConnectionStates.connected) {
-        this.logger.log('✅ MongoDB connected');
-        void this.seederService.run();
-      } else this.logger.log('❌ Failed to connect to MongoDB');
-    } catch (error) {
-      this.logger.error('❌ Failed to connect to MongoDB', error);
-      process.exit(1); // Stop the server
+    if (this.connection.readyState === ConnectionStates.connected) {
+      this.logger.log('✅ MongoDB connected');
+      return;
     }
+    this.logger.error('❌ Failed to connect to MongoDB');
+    process.exit(1); // Stop the server
   }
 }

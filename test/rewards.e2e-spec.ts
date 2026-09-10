@@ -16,6 +16,8 @@ import { HTTPExceptionFilter } from '../src/helper/exception-filters/http.except
 import { HTTPResponseInterceptor } from '../src/helper/interceptor/http.interceptor';
 import { AppValidationPipe } from '../src/helper/pipe/app-validation.pipe';
 import { redisTestEnv } from './redis-test-env';
+import { seedBaseline } from './seed-baseline';
+import { testUserReference } from './user-reference';
 
 /**
  * Rewards engine over the REAL loop (§2.1 / §3): an order paid over HTTP emits
@@ -101,12 +103,10 @@ describe('Rewards accrual through the queue (e2e)', () => {
     app.useGlobalPipes(AppValidationPipe);
     await app.init();
 
-    // Wait for the fire-and-forget seeder to settle.
+    // The baseline data no longer seeds itself on boot: ask for it, and
+    // wait for it to finish rather than polling for its last row.
+    await seedBaseline(app as never);
     const apiClientModel = model('ApiClient');
-    for (let i = 0; i < 120; i++) {
-      if (await apiClientModel.findOne({ name: 'System' })) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
     await apiClientModel.create({
       name: 'e2e',
       key: 'e2e-key',
@@ -121,6 +121,7 @@ describe('Rewards accrual through the queue (e2e)', () => {
     });
     const manager = await model('Role').findOne({ roleName: 'Manager' });
     const admin = await model('User').create({
+      reference: testUserReference(),
       firstName: 'E2E',
       lastName: 'Admin',
       phone: '690000010',
@@ -144,6 +145,7 @@ describe('Rewards accrual through the queue (e2e)', () => {
       userTypeName: 'CUSTOMER',
     });
     const customer = await model('User').create({
+      reference: testUserReference(),
       firstName: 'Points',
       lastName: 'Customer',
       phone: '611111100',

@@ -10,8 +10,8 @@
  * through it: adding an item, editing one, and renaming a category or a sub
  * category, which changes the display name of every item filed under it.
  *
- * Pure functions with no database of their own, so the seeder, the API and the
- * backfill script all agree on the answer by construction.
+ * Pure functions with no database of their own, so the seeder and the API
+ * agree on the answer by construction.
  */
 
 /**

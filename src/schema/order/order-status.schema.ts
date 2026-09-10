@@ -32,6 +32,4 @@ export class OrderStatus extends Document<Types.ObjectId> {
 
 export const OrderStatusSchema = SchemaFactory.createForClass(OrderStatus);
 
-// Sparse, so the unique index can be built over rows written before
-// `reference` existed. `npm run backfill:order-status-reference` fills those in.
-OrderStatusSchema.index({ reference: 1 }, { unique: true, sparse: true });
+OrderStatusSchema.index({ reference: 1 }, { unique: true });

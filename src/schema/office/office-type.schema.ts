@@ -37,6 +37,4 @@ export class OfficeType extends Document<Types.ObjectId> {
 
 export const OfficeTypeSchema = SchemaFactory.createForClass(OfficeType);
 
-// Sparse, so the unique index can be built over rows written before
-// `reference` existed. `npm run backfill:office-type-reference` fills those in.
-OfficeTypeSchema.index({ reference: 1 }, { unique: true, sparse: true });
+OfficeTypeSchema.index({ reference: 1 }, { unique: true });

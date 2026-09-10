@@ -7,6 +7,8 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { Types } from 'mongoose';
 import request from 'supertest';
 import { redisTestEnv } from './redis-test-env';
+import { seedBaseline } from './seed-baseline';
+import { testUserReference } from './user-reference';
 
 /**
  * The browser session contract: tokens must arrive as HttpOnly cookies and be
@@ -93,11 +95,10 @@ describe('cookie session (e2e)', () => {
     app = configureApp(moduleRef.createNestApplication());
     await app.init();
 
+    // The baseline data no longer seeds itself on boot: ask for it, and
+    // wait for it to finish rather than polling for its last row.
+    await seedBaseline(app as never);
     const apiClientModel = app.get(getModelToken('ApiClient'));
-    for (let i = 0; i < 120; i++) {
-      if (await apiClientModel.findOne({ name: 'System' })) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
     await apiClientModel.create({
       name: 'e2e',
       key: 'e2e-key',
@@ -111,6 +112,7 @@ describe('cookie session (e2e)', () => {
       userTypeName: 'ADMIN',
     });
     const staff = await model('User').create({
+      reference: testUserReference(),
       firstName: 'Cookie',
       lastName: 'Staff',
       phone: STAFF_PHONE,

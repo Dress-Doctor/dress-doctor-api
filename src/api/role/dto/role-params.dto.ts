@@ -4,8 +4,7 @@ import { IsDefined, IsString, Matches, MaxLength } from 'class-validator';
 
 /**
  * The human-readable role reference (`RL-JDB6Z7`) every by-role read and write
- * is addressed by. Roles were the last collection still addressed by their
- * Mongo `_id`; `npm run backfill:role-reference` filled the rest in.
+ * is addressed by. No role URL carries a Mongo `_id`.
  */
 export class RoleReferenceParamsDto {
   @ApiProperty({
