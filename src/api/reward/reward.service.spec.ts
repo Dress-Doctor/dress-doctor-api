@@ -1,5 +1,9 @@
 import { AbilityBuilder } from '@casl/ability';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -230,7 +234,7 @@ describe('RewardService.redeem', () => {
 
     await expect(
       service.redeem({ points: 100, orderId: orderId.toString() }),
-    ).rejects.toThrow(BadRequestException);
+    ).rejects.toThrow(ForbiddenException);
   });
 
   it('a manager can redeem on behalf of a customer', async () => {

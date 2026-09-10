@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
@@ -11,6 +12,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
+import { scopeFilter } from 'src/helper/casl/casl-scope';
 import {
   applyAuditLocals,
   auditContext,
@@ -102,6 +104,23 @@ export type OfficeHistoryEntry = {
 };
 
 /**
+ * One entry of the admin panel's office switcher: the branch cut down to what
+ * a picker shows. A subset of `SAFE_OFFICE_PROJECTION`, so nothing that must
+ * not leave the building can ride along — the signed link and the QR code URL
+ * both carry the office HMAC.
+ */
+export type MyOfficeDto = {
+  _id: Types.ObjectId;
+  officeName: string;
+  officeCode?: string;
+  slug?: string;
+  isActive: boolean;
+};
+
+/** The same allow-list as a `select` string, for both reads in `findMine`. */
+const OFFICE_SWITCHER_SELECT = 'officeName officeCode slug isActive';
+
+/**
  * Column order of the office export — drives both CSV and Excel.
  *
  * `signedLink` and `qrCodeUrl` are deliberately absent: both carry the office
@@ -157,7 +176,7 @@ export class OfficeService {
     if (!ability.can(action, subject)) {
       const log = 'not authorized to perform this action';
       this.logger.error(`[${platform}] ${phone} is ${log}`);
-      throw new BadRequestException(`You are ${log}`);
+      throw new ForbiddenException(`You are ${log}`);
     }
   }
 
@@ -294,6 +313,66 @@ export class OfficeService {
     const totalPages = Math.ceil(total / size);
     const nextPage = page < totalPages ? page + 1 : null;
     return { total, data, nextPage };
+  }
+
+  /**
+   * The offices the caller may work in — what the admin panel's office
+   * switcher offers.
+   *
+   * Deliberately NOT gated on `READ Office`: a counter clerk has no authority
+   * over the office file, yet still has to know which branch they are stood
+   * at. Nothing wider than the person asking comes back either way, because
+   * what it returns is their own postings.
+   *
+   * A role whose `READ Office` grant carries no conditions is GLOBAL — head
+   * office, oversight, support — and gets every open branch instead.
+   * `canSwitch` says which of the two answers this is, so the panel knows
+   * whether the switcher is a real choice or a label.
+   *
+   * Closed offices are left out of both answers: an office switched off is
+   * not somewhere anyone can file work today.
+   */
+  async findMine(): Promise<{ offices: MyOfficeDto[]; canSwitch: boolean }> {
+    const { userId, ability } = this.req.user;
+
+    // `{}` means at least one matching rule carries no conditions — an
+    // unrestricted, GLOBAL grant. Anything else is scoped to something.
+    const scope = scopeFilter(ability, 'READ', 'Office');
+    const canSwitch = Object.keys(scope).length === 0;
+
+    if (canSwitch) {
+      const offices = await this.officeModel
+        .find({ isActive: true })
+        .select(OFFICE_SWITCHER_SELECT)
+        .sort({ officeName: 1 })
+        .lean<MyOfficeDto[]>();
+
+      return { offices, canSwitch };
+    }
+
+    const postings = await this.officeUserModel
+      .find({ userId: new Types.ObjectId(userId), isActive: true })
+      .populate<{ officeId: MyOfficeDto | null }>({
+        model: Office.name,
+        path: 'officeId',
+        select: OFFICE_SWITCHER_SELECT,
+      })
+      .lean();
+
+    // One person can hold two roles at the same branch, which is two postings
+    // and one office. Keyed by id so the switcher lists it once.
+    const byId = new Map<string, MyOfficeDto>();
+    for (const posting of postings) {
+      const office = posting.officeId;
+      if (!office?.isActive) continue;
+      byId.set(office._id.toString(), office);
+    }
+
+    const offices = [...byId.values()].sort((left, right) =>
+      left.officeName.localeCompare(right.officeName),
+    );
+
+    return { offices, canSwitch };
   }
 
   /**

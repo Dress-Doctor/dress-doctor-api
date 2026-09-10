@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
@@ -425,7 +426,7 @@ export class CustomerService {
     if (!ability.can(action, subject)) {
       const log = 'not authorized to perform this action';
       this.logger.error(`[${platform}] ${phone} is ${log}`);
-      throw new BadRequestException(`You are ${log}`);
+      throw new ForbiddenException(`You are ${log}`);
     }
   }
 

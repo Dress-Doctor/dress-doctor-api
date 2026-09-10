@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
@@ -58,6 +59,20 @@ function normalisedPhones(data: { phone: string; whatsappPhone?: string }) {
       : {}),
   };
 }
+
+/**
+ * A role as the staff list names it — enough to say what somebody is and
+ * where, without the permission list the detail page carries.
+ *
+ * `officeCode`/`officeName` are only set for an `OFFICE` posting; a `GLOBAL`
+ * role applies everywhere and has no branch to name.
+ */
+export type UserRoleSummary = {
+  roleName: string;
+  scope: 'GLOBAL' | 'OFFICE';
+  officeCode?: string;
+  officeName?: string;
+};
 
 /** One row of the staff export, as the projection below shapes it. */
 type UserExportRow = {
@@ -145,8 +160,8 @@ export class UserService {
 
     if (!ability.can(action, subject)) {
       const log = 'not authorized to perform this action';
-      this.logger.error(`[${platform}] ${phone} ${log} is`);
-      throw new BadRequestException(`You are ${log}`);
+      this.logger.error(`[${platform}] ${phone} is ${log}`);
+      throw new ForbiddenException(`You are ${log}`);
     }
   }
 
@@ -158,7 +173,7 @@ export class UserService {
     if (!ability.can('CREATE', 'User')) {
       const log = 'not authorized to perform this action';
       this.logger.error(`[${platform}] ${phone} ${log}`);
-      throw new BadRequestException(`You are ${log}`);
+      throw new ForbiddenException(`You are ${log}`);
     }
 
     const userTypeId = new Types.ObjectId(data.userTypeId);
@@ -344,7 +359,10 @@ export class UserService {
       .populate({ model: UserType.name, path: 'userTypeId' })
       .sort(sort)
       .skip(skip)
-      .limit(size);
+      .limit(size)
+      .lean();
+
+    const rolesByUser = await this.rolesForUsers(users.map((user) => user._id));
 
     const totalUsers = await this.userModel.countDocuments(where);
     const totalPages = Math.ceil(totalUsers / size);
@@ -353,7 +371,67 @@ export class UserService {
     this.logger.log(
       `[${platform}] ${phone} has successfully retrieved all users`,
     );
-    return { total: totalUsers, data: users, nextPage };
+    return {
+      total: totalUsers,
+      data: users.map((user) => ({
+        ...user,
+        roles: rolesByUser.get(user._id.toString()) ?? [],
+      })),
+      nextPage,
+    };
+  }
+
+  /**
+   * What each of these people is, in one round trip for the whole page.
+   *
+   * The staff file used to name everybody without ever saying what they do,
+   * which left "who is the cashier at Bonabo" a question you could only answer
+   * by opening the accounts one at a time.
+   *
+   * Both kinds of grant, same as `listRoles`: a role held everywhere and a
+   * posting at one branch. Revoked postings are left out — the row survives for
+   * the audit trail, but it is not what this person is any more.
+   */
+  private async rolesForUsers(userIds: Types.ObjectId[]) {
+    const byUser = new Map<string, UserRoleSummary[]>();
+    if (!userIds.length) return byUser;
+
+    const [global, perOffice] = await Promise.all([
+      this.userRoleModel
+        .find({ userId: { $in: userIds } })
+        .populate<{ roleId: Role }>({ model: Role.name, path: 'roleId' })
+        .lean(),
+      this.officeUserModel
+        .find({ userId: { $in: userIds }, isActive: true })
+        .populate<{ roleId: Role }>({ model: Role.name, path: 'roleId' })
+        .populate<{ officeId: Office }>({
+          model: Office.name,
+          path: 'officeId',
+        })
+        .lean(),
+    ]);
+
+    const add = (userId: Types.ObjectId, summary: UserRoleSummary) => {
+      const key = userId.toString();
+      byUser.set(key, [...(byUser.get(key) ?? []), summary]);
+    };
+
+    for (const row of global) {
+      if (!row.roleId?.roleName) continue;
+      add(row.userId, { roleName: row.roleId.roleName, scope: 'GLOBAL' });
+    }
+
+    for (const row of perOffice) {
+      if (!row.roleId?.roleName) continue;
+      add(row.userId, {
+        roleName: row.roleId.roleName,
+        scope: 'OFFICE',
+        officeCode: row.officeId?.officeCode,
+        officeName: row.officeId?.officeName,
+      });
+    }
+
+    return byUser;
   }
 
   /**

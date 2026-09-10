@@ -4,6 +4,7 @@ import {
   IsDateString,
   IsDefined,
   IsEnum,
+  IsMongoId,
   IsOptional,
   IsString,
   Matches,
@@ -31,6 +32,25 @@ export class OfficeCodeParamsDto {
   @MaxLength(50, { message: 'Invalid officeCode' })
   @Matches(/^[A-Z0-9-]+$/, { message: 'Invalid officeCode' })
   officeCode: string;
+}
+
+/**
+ * The two params `DELETE /v1/offices/:officeCode/users/:userId` carries.
+ *
+ * Both live in one DTO on purpose. The global pipe runs with
+ * `forbidNonWhitelisted`, so it validates the whole params object against
+ * whatever `@Param()` names — declaring only `officeCode` there and reading
+ * `userId` through a second `@Param('userId')` made every revoke fail with
+ * "property userId should not exist" before the handler ever ran.
+ */
+export class OfficeUserParamsDto extends OfficeCodeParamsDto {
+  @ApiProperty({
+    required: true,
+    description: 'Id of the staff member whose posting is being revoked',
+  })
+  @IsDefined({ message: 'userId is required' })
+  @IsMongoId({ message: 'Invalid userId' })
+  userId: string;
 }
 
 /**

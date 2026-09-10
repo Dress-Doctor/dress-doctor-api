@@ -2,6 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { HistoryActionEnum } from '../admin/admin.dto';
 import { ChangedFieldDto } from '../user/user.dto';
+import { User } from '../user/user.schema';
 import { PickupStatus } from './pickup-status.schema';
 
 export const pickupStatusHistorySchemaName = 'pickup_status_history';
@@ -23,6 +24,15 @@ export class PickupStatusHistory extends Document<Types.ObjectId> {
     ref: PickupStatus.name,
   })
   pickupStatusId: Types.ObjectId;
+
+  /**
+   * Who made the change. Optional on the schema on purpose: the hook writes
+   * whatever the request context carried, and a seed or migration carries no
+   * actor — a history row must never be rejected for a missing field, or the
+   * audit entry is lost entirely.
+   */
+  @Prop({ required: false, type: Types.ObjectId, ref: User.name })
+  changedBy?: Types.ObjectId;
 
   @Prop({ required: false, type: Object, default: {} })
   changedFields?: Record<string, ChangedFieldDto>;

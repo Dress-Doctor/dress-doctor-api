@@ -41,6 +41,7 @@ import { FindOfficeDto } from './dto/find-office.dto';
 import {
   OfficeCodeParamsDto,
   OfficePerformanceDto,
+  OfficeUserParamsDto,
   OfficeWindowDto,
 } from './dto/office-detail.dto';
 import { UpdateOfficeDto } from './dto/update-office.dto';
@@ -132,8 +133,28 @@ export class OfficeController {
     return await this.officeService.getOfficeKpis(query);
   }
 
-  // Declared after every static GET above so `export` and `kpis` are never
-  // read as an office code.
+  @Get('mine')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'The offices the caller may work in',
+    description:
+      "The admin panel's office switcher reads this. It is NOT gated on " +
+      '`READ Office`: a counter clerk has no authority over the office file ' +
+      'yet still has to know which branch they are stood at, and what comes ' +
+      'back is their own postings. A role whose `READ Office` grant carries ' +
+      'no conditions is GLOBAL and gets every open branch instead — ' +
+      '`canSwitch` says which of the two answers this is. Closed offices are ' +
+      'left out either way.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
+  async findMine(@Req() req: AppRequestWithUser) {
+    const { platform } = req.data;
+    this.logger.log(`[${platform}] ${req.user.phone} is listing their offices`);
+    return await this.officeService.findMine();
+  }
+
+  // Declared after every static GET above so `export`, `kpis` and `mine` are
+  // never read as an office code.
   @Get(':officeCode')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -311,10 +332,7 @@ export class OfficeController {
       'deleted, so it stays in the audit trail with its reason and date.',
   })
   @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
-  async revokeUser(
-    @Param() { officeCode }: OfficeCodeParamsDto,
-    @Param('userId') userId: string,
-  ) {
+  async revokeUser(@Param() { officeCode, userId }: OfficeUserParamsDto) {
     return await this.officeService.revokeUser(officeCode, userId);
   }
 }

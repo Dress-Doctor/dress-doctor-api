@@ -38,7 +38,10 @@ import { ExportUserDto } from './dto/export-user.dto';
 import { FindAllUserDto } from './dto/find-all-user.dto';
 import { PaginationDto } from 'src/dto/request-data.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { UserReferenceParamsDto } from './dto/user-reference.dto';
+import {
+  UserReferenceParamsDto,
+  UserRoleParamsDto,
+} from './dto/user-reference.dto';
 import { UserKpiEntity } from './entities/user-kpi.entity';
 import { UserService } from './user.service';
 
@@ -247,10 +250,7 @@ export class UserController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Revoke a role from a user' })
   @ApiResponse({ status: HttpStatus.OK, type: ApiSuccessResponse })
-  async revokeRole(
-    @Param() { reference }: UserReferenceParamsDto,
-    @Param('roleId') roleId: string,
-  ) {
+  async revokeRole(@Param() { reference, roleId }: UserRoleParamsDto) {
     return await this.userService.revokeRole(reference, roleId);
   }
 

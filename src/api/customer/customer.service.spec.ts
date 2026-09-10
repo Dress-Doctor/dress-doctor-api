@@ -2,6 +2,7 @@ import { AbilityBuilder } from '@casl/ability';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
@@ -810,7 +811,7 @@ describe('CustomerService', () => {
       // The action check fires first; the pipeline is never even built.
       await expect(
         service.findAll({ page: 1, size: 20 } as FindCustomerDto),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(ForbiddenException);
       expect(customerModel.aggregate).not.toHaveBeenCalled();
     });
   });

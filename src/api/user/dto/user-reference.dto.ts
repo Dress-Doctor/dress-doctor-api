@@ -1,6 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsDefined, IsString, Matches, MaxLength } from 'class-validator';
+import {
+  IsDefined,
+  IsMongoId,
+  IsString,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 
 /**
  * The human-readable user reference (`US-8KQTMR`) every by-user read and write
@@ -24,4 +30,23 @@ export class UserReferenceParamsDto {
   @MaxLength(50, { message: 'Invalid reference' })
   @Matches(/^[A-Z0-9-]+$/, { message: 'Invalid reference' })
   reference: string;
+}
+
+/**
+ * The two params `DELETE /v1/users/:reference/roles/:roleId` carries.
+ *
+ * Both live in one DTO on purpose. The global pipe runs with
+ * `forbidNonWhitelisted`, so it validates the whole params object against
+ * whatever `@Param()` names — declaring only `reference` there and reading
+ * `roleId` through a second `@Param('roleId')` made every revoke fail with
+ * "property roleId should not exist" before the handler ever ran.
+ */
+export class UserRoleParamsDto extends UserReferenceParamsDto {
+  @ApiProperty({
+    required: true,
+    description: 'Id of the role to revoke',
+  })
+  @IsDefined({ message: 'roleId is required' })
+  @IsMongoId({ message: 'Invalid roleId' })
+  roleId: string;
 }

@@ -1,9 +1,13 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { createMongoAbility } from '@casl/ability';
+import type { RawRuleFrom } from '@casl/ability';
 import { REQUEST } from '@nestjs/core';
+import type { AppAbilityDto, ConditionsDto } from 'src/helper/casl/casl.dto';
 import { getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Types } from 'mongoose';
@@ -73,6 +77,14 @@ describe('OfficeService', () => {
   let codeService: {
     signOfficeLink: jest.Mock;
     generateOfficeCode: jest.Mock;
+  };
+  /**
+   * The request the service reads its caller off. Mutable so a test can swap
+   * in a real CASL ability — `scopeFilter` reads the rules, not just `can`.
+   */
+  let requestMock: {
+    data: { platform: string };
+    user: { phone: string; userId: string; ability: unknown };
   };
 
   const id = new Types.ObjectId().toString();
@@ -158,6 +170,11 @@ describe('OfficeService', () => {
     roleModel.exists.mockResolvedValue({ _id: id });
     userModel.exists.mockResolvedValue({ _id: id });
 
+    requestMock = {
+      data: { platform: 'WEB' },
+      user: { phone: '600', userId: id, ability: { can: () => true } },
+    };
+
     codeService = {
       signOfficeLink: jest.fn().mockReturnValue('sig123'),
       generateOfficeCode: jest.fn().mockResolvedValue('OF-XYZ'),
@@ -190,13 +207,7 @@ describe('OfficeService', () => {
           },
         },
         { provide: CodeGeneratorService, useValue: codeService },
-        {
-          provide: REQUEST,
-          useValue: {
-            data: { platform: 'WEB' },
-            user: { phone: '600', userId: id, ability: { can: () => true } },
-          },
-        },
+        { provide: REQUEST, useValue: requestMock },
         { provide: getModelToken(Office.name), useValue: officeModel },
         { provide: getModelToken(OfficeType.name), useValue: officeTypeModel },
         { provide: getModelToken(OfficeUser.name), useValue: officeUserModel },
@@ -320,6 +331,103 @@ describe('OfficeService', () => {
     it('leaves createdAt alone when neither bound is given', async () => {
       await service.findAll(query);
       expect(whereOf().createdAt).toBeUndefined();
+    });
+  });
+
+  describe('findMine', () => {
+    /**
+     * Built from raw rules rather than the builder, because that is the shape
+     * the API actually holds: `CaslAbilityService` reads seeded rows and
+     * `scopeFilter` reads the rules back off the ability. The builder's
+     * `can()` also refuses a `conditions` object for a subject named by a
+     * string, since such a subject has no known fields.
+     */
+    const abilityOf = (rules: RawRuleFrom<AppAbilityDto, ConditionsDto>[]) =>
+      createMongoAbility<AppAbilityDto, ConditionsDto>(rules);
+
+    const globalAbility = () =>
+      abilityOf([{ action: 'READ', subject: 'Office' }]);
+
+    const scopedAbility = (officeId: string) =>
+      abilityOf([
+        { action: 'READ', subject: 'Office', conditions: { _id: officeId } },
+      ]);
+
+    it('returns every open branch for an unconditional READ Office', async () => {
+      requestMock.user.ability = globalAbility();
+      officeModel.find.mockReturnValue({
+        select: () => ({
+          sort: () => ({
+            lean: () =>
+              Promise.resolve([{ _id: typeId, officeName: 'Bonapriso' }]),
+          }),
+        }),
+      });
+
+      const result = await service.findMine();
+
+      expect(officeModel.find).toHaveBeenCalledWith({ isActive: true });
+      expect(result.canSwitch).toBe(true);
+      expect(result.offices).toHaveLength(1);
+    });
+
+    it('returns the caller postings when the grant is conditional', async () => {
+      const officeId = new Types.ObjectId();
+      requestMock.user.ability = scopedAbility(officeId.toString());
+      officeUserModel.find.mockReturnValue({
+        populate: () => ({
+          lean: () =>
+            Promise.resolve([
+              {
+                officeId: {
+                  _id: officeId,
+                  officeName: 'Bonapriso',
+                  isActive: true,
+                },
+              },
+              // The same branch again, under a second role.
+              {
+                officeId: {
+                  _id: officeId,
+                  officeName: 'Bonapriso',
+                  isActive: true,
+                },
+              },
+              // A posting to a branch that has since been closed.
+              {
+                officeId: {
+                  _id: new Types.ObjectId(),
+                  officeName: 'Akwa',
+                  isActive: false,
+                },
+              },
+              // A posting whose office row is gone.
+              { officeId: null },
+            ]),
+        }),
+      });
+
+      const result = await service.findMine();
+
+      expect(officeUserModel.find).toHaveBeenCalledWith({
+        userId: new Types.ObjectId(id),
+        isActive: true,
+      });
+      expect(result.canSwitch).toBe(false);
+      expect(result.offices).toEqual([
+        { _id: officeId, officeName: 'Bonapriso', isActive: true },
+      ]);
+    });
+
+    it('returns nothing when the caller may not read an office at all', async () => {
+      requestMock.user.ability = abilityOf([]);
+      officeUserModel.find.mockReturnValue({
+        populate: () => ({ lean: () => Promise.resolve([]) }),
+      });
+
+      const result = await service.findMine();
+
+      expect(result).toEqual({ offices: [], canSwitch: false });
     });
   });
 
@@ -455,7 +563,7 @@ describe('OfficeService', () => {
         }
       ).req.user.ability = { can: (action: string) => action === 'READ' };
 
-      await expect(exportCsv()).rejects.toThrow(BadRequestException);
+      await expect(exportCsv()).rejects.toThrow(ForbiddenException);
       expect(officeModel.aggregate).not.toHaveBeenCalled();
     });
   });

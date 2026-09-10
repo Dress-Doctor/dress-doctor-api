@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
@@ -161,8 +162,8 @@ export class CatalogueService {
 
     if (!ability.can(action, subject)) {
       const log = 'not authorized to perform this action';
-      this.logger.error(`[${platform}] ${phone} ${log} is`);
-      throw new BadRequestException(`You are ${log}`);
+      this.logger.error(`[${platform}] ${phone} is ${log}`);
+      throw new ForbiddenException(`You are ${log}`);
     }
   }
 

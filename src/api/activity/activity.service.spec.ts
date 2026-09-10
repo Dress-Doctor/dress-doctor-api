@@ -1,5 +1,5 @@
 import { AbilityBuilder } from '@casl/ability';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PipelineStage, Types } from 'mongoose';
 import { type AppRequestWithUser } from 'src/dto/request-data.dto';
 import { AppAbility } from 'src/helper/casl/casl.dto';
@@ -78,7 +78,7 @@ describe('ActivityReadService', () => {
     const { build: buildAbility } = new AbilityBuilder(AppAbility);
     build(buildAbility());
 
-    await expect(service.findAll(query())).rejects.toThrow(BadRequestException);
+    await expect(service.findAll(query())).rejects.toThrow(ForbiddenException);
     expect(activityModel.aggregate).not.toHaveBeenCalled();
   });
 
@@ -183,7 +183,7 @@ describe('ActivityReadService', () => {
       build(buildAbility());
 
       await expect(service.resourcesForUser('US-4B2C')).rejects.toThrow(
-        BadRequestException,
+        ForbiddenException,
       );
       expect(activityModel.distinct).not.toHaveBeenCalled();
     });

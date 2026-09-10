@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
@@ -229,8 +230,8 @@ export class PaymentService {
 
     if (!ability.can(action, subject)) {
       const log = 'not authorized to perform this action';
-      this.logger.error(`[${platform}] ${phone} ${log} is`);
-      throw new BadRequestException(`You are ${log}`);
+      this.logger.error(`[${platform}] ${phone} is ${log}`);
+      throw new ForbiddenException(`You are ${log}`);
     }
   }
 
@@ -1257,7 +1258,11 @@ export class PaymentService {
           paidAt,
           amount: data.amount,
           paymentPeriod,
-          currencyId: currency.id,
+          // `_id`, not the `id` virtual: that one is the id as a *string*, and
+          // it went into the document as one — so `populate` could never
+          // resolve it and every payment taken in the console showed no
+          // currency at all on its detail page.
+          currencyId: currency._id,
           paymentTypeId,
           paymentMethodId: paymentMethod._id,
           transactionRef: data.transactionRef,

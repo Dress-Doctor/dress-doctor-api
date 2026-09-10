@@ -21,13 +21,14 @@ import { FindAllUserDto } from './dto/find-all-user.dto';
 import { UserService } from './user.service';
 import { ActivityService } from 'src/helper/service/activity.service';
 
-/** `find()` is chained: .select().populate().sort().skip().limit(). */
+/** `find()` is chained: .select().populate().sort().skip().limit().lean(). */
 type FindChain = {
   select: jest.Mock;
   populate: jest.Mock;
   sort: jest.Mock;
   skip: jest.Mock;
   limit: jest.Mock;
+  lean: jest.Mock;
 };
 
 /** `.select().lean()` — how a resolve-by-reference read is shaped. */
@@ -45,7 +46,33 @@ type UpdateChain = { select: jest.Mock; populate: jest.Mock };
 type AwaitableChain = {
   populate: jest.Mock;
   select?: jest.Mock;
+  lean?: jest.Mock;
   then: (resolve: (value: unknown) => unknown) => unknown;
+};
+
+/**
+ * The global-roles query. Two readers share it: `listRoles` awaits
+ * `.find().populate()[.populate()]`, while `rolesForUsers` — what the staff
+ * list uses to name everybody's role — ends the same chain with `.lean()`.
+ */
+const rolesRows = (rows: unknown[]) => {
+  const link: AwaitableChain = {
+    populate: jest.fn(() => link),
+    lean: jest.fn().mockResolvedValue(rows),
+    then: (resolve: (value: unknown) => unknown) => resolve(rows),
+  };
+  return link;
+};
+
+/** The postings query, which three readers share — see `officeUserModel`. */
+const postingRows = (rows: unknown[]) => {
+  const link: AwaitableChain = {
+    populate: jest.fn(() => link),
+    lean: jest.fn().mockResolvedValue(rows),
+    select: jest.fn(() => ({ lean: jest.fn().mockResolvedValue(rows) })),
+    then: (resolve: (value: unknown) => unknown) => resolve(rows),
+  };
+  return link;
 };
 
 describe('UserService', () => {
@@ -88,7 +115,9 @@ describe('UserService', () => {
       populate: jest.fn(() => chain),
       sort: jest.fn(() => chain),
       skip: jest.fn(() => chain),
-      limit: jest.fn().mockResolvedValue([{ _id: id }]),
+      limit: jest.fn(() => chain),
+      // `findAll` reads the page lean so it can attach each person's roles.
+      lean: jest.fn().mockResolvedValue([{ _id: objectId }]),
     };
 
     // `resolveUserId` reads .findOne().select().lean().
@@ -128,27 +157,9 @@ describe('UserService', () => {
     };
     roleModel = { findById: jest.fn().mockResolvedValue({ _id: id }) };
     officeModel = { findById: jest.fn().mockResolvedValue({ _id: id }) };
-    // `listRoles` reads .find().populate()[.populate()], awaited.
-    const rolesChain = (rows: unknown[]) => {
-      const link: AwaitableChain = {
-        populate: jest.fn(() => link),
-        then: (resolve: (value: unknown) => unknown) => resolve(rows),
-      };
-      return link;
-    };
-
-    // The postings query, which two readers share — see `officeUserModel`.
-    const officeUserChain = (rows: unknown[]) => {
-      const link: AwaitableChain = {
-        populate: jest.fn(() => link),
-        select: jest.fn(() => ({ lean: jest.fn().mockResolvedValue(rows) })),
-        then: (resolve: (value: unknown) => unknown) => resolve(rows),
-      };
-      return link;
-    };
 
     userRoleModel = {
-      find: jest.fn(() => rolesChain([])),
+      find: jest.fn(() => rolesRows([])),
       findOneAndUpdate: jest.fn().mockResolvedValue(undefined),
       deleteOne: jest.fn().mockResolvedValue(undefined),
     };
@@ -156,7 +167,7 @@ describe('UserService', () => {
       // Two readers share this one query. `findHistory` takes
       // .find().select().lean(); `listRoles` takes .find().populate() twice
       // and awaits the query itself. Both end at an empty list.
-      find: jest.fn(() => officeUserChain([])),
+      find: jest.fn(() => postingRows([])),
       findOneAndUpdate: jest.fn().mockResolvedValue(undefined),
       deleteMany: jest.fn().mockResolvedValue(undefined),
     };
@@ -378,10 +389,61 @@ describe('UserService', () => {
 
       const result = await service.findAll(query({ page: 1, size: 10 }));
 
+      // Every row carries its roles, so the staff list can say what each
+      // person is without opening their account. Nobody granted anything gets
+      // an empty list rather than a missing key.
       expect(result).toEqual({
         total: 25,
-        data: [{ _id: id }],
+        data: [{ _id: objectId, roles: [] }],
         nextPage: 2,
+      });
+    });
+
+    it('names the roles each person holds, global and per-branch', async () => {
+      const globalRole = new Types.ObjectId();
+      const officeRole = new Types.ObjectId();
+      userModel.countDocuments.mockResolvedValue(1);
+      userRoleModel.find.mockReturnValueOnce(
+        rolesRows([
+          {
+            userId: objectId,
+            roleId: { _id: globalRole, roleName: 'Co-Founder' },
+          },
+        ]),
+      );
+      officeUserModel.find.mockReturnValueOnce(
+        postingRows([
+          {
+            userId: objectId,
+            roleId: { _id: officeRole, roleName: 'Cashier' },
+            officeId: { officeCode: 'DD-105', officeName: 'DD 105 BONADALE' },
+          },
+        ]),
+      );
+
+      const result = await service.findAll(query({ page: 1, size: 10 }));
+
+      expect(result.data[0].roles).toEqual([
+        { roleName: 'Co-Founder', scope: 'GLOBAL' },
+        {
+          roleName: 'Cashier',
+          scope: 'OFFICE',
+          officeCode: 'DD-105',
+          officeName: 'DD 105 BONADALE',
+        },
+      ]);
+    });
+
+    it('leaves out a posting that has been revoked', async () => {
+      userModel.countDocuments.mockResolvedValue(1);
+
+      await service.findAll(query({ page: 1, size: 10 }));
+
+      // Revoking flags the row inactive and keeps it for the audit trail, so
+      // the query is what has to exclude it.
+      expect(officeUserModel.find).toHaveBeenCalledWith({
+        userId: { $in: [objectId] },
+        isActive: true,
       });
     });
   });

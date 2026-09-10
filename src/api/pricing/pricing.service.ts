@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
@@ -77,7 +78,7 @@ export class PricingService {
     const { phone, ability } = this.req.user;
     if (!ability.can(action, subject)) {
       this.logger.error(`${phone} not authorized for ${action} ${subject}`);
-      throw new BadRequestException(
+      throw new ForbiddenException(
         'You are not authorized to perform this action',
       );
     }

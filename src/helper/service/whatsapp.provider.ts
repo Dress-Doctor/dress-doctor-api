@@ -103,11 +103,33 @@ export class WhatsAppProvider {
       },
       body: JSON.stringify(body),
     });
-    const json = (await res.json()) as WhatsAppApiResponse;
+    /**
+     * Read the body as text first, then try to parse it.
+     *
+     * A failing send is exactly when the body stops being JSON — a gateway
+     * returns HTML, and some providers answer a plain `ERROR: ...` line.
+     * Parsing before checking `res.ok` turned every one of those into
+     * "Unexpected token 'E' ... is not valid JSON", which threw away both the
+     * status and the provider's own reason, so the log never said why the
+     * message did not go out.
+     */
+    const raw = await res.text();
+    let json: WhatsAppApiResponse | undefined;
+    try {
+      json = JSON.parse(raw) as WhatsAppApiResponse;
+    } catch {
+      json = undefined;
+    }
 
     if (!res.ok) {
       throw new Error(
-        `WhatsApp send failed: ${res.status} ${JSON.stringify(json)}`,
+        `WhatsApp send failed: ${res.status} ${raw.slice(0, 500)}`,
+      );
+    }
+
+    if (!json) {
+      throw new Error(
+        `WhatsApp send returned a non-JSON body: ${res.status} ${raw.slice(0, 500)}`,
       );
     }
 

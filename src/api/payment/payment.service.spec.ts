@@ -1,5 +1,9 @@
 import { AbilityBuilder } from '@casl/ability';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
@@ -427,7 +431,7 @@ describe('PaymentService', () => {
 
       await expect(
         service.updateByReference(REF, { amount: 900 }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(ForbiddenException);
       expect(paymentModel.findOneAndUpdate).not.toHaveBeenCalled();
     });
 
@@ -576,7 +580,7 @@ describe('PaymentService', () => {
           sort: '',
           format: PaymentExportFormatEnum.CSV,
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(ForbiddenException);
       expect(paymentModel.aggregate).not.toHaveBeenCalled();
     });
   });
