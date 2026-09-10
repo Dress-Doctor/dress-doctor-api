@@ -20,7 +20,7 @@ export class ActivityUserParamsDto {
   @IsString({ message: 'Invalid reference' })
   // References are generated upper-case; accepting a lower-case one typed by
   // hand costs nothing and saves a spurious 404.
-  @Transform(({ value }) =>
+  @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim().toUpperCase() : value,
   )
   @MaxLength(32, { message: 'Invalid reference' })
