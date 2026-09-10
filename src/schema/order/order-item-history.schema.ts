@@ -16,8 +16,17 @@ export class OrderItemHistory extends Document<Types.ObjectId> {
   })
   orderItemId: Types.ObjectId;
 
-  @Prop({ required: true, type: Types.ObjectId, ref: User.name })
-  changedBy: Types.ObjectId;
+  /**
+   * Who made the change, off the audit context every mutating write carries.
+   *
+   * Optional on the schema, like `reason` below: a write with no person behind
+   * it — a seed, a cron-driven repair, a fixture — still owes the trail an
+   * entry. The hook swallows its own save errors by design, so a required
+   * field here would not reject the write; it would only make the audit row
+   * disappear without a sound.
+   */
+  @Prop({ required: false, type: Types.ObjectId, ref: User.name })
+  changedBy?: Types.ObjectId;
 
   @Prop({ required: false, type: Object, default: {} })
   changedFields?: Record<string, ChangedFieldDto>;

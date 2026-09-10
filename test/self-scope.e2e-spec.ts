@@ -223,7 +223,22 @@ describe('Customer self-scope + booking (e2e)', () => {
     const timeline = await get(
       `/api/v1/customers/${alice.customerCode}/timeline`,
     );
-    expect(timeline.body.data).toEqual([]);
+    /*
+     * Nothing on the books means no trade on the timeline — no order, no
+     * payment, no pickup. It does not mean an empty timeline: the account
+     * being set up is itself something that happened, and it is on the trail.
+     *
+     * This used to assert `[]`, which held only because the fixture creates
+     * the customer with no actor behind it and `changedBy` was required, so
+     * those audit rows failed validation and were dropped. The rows are kept
+     * now, and a customer registered through the API always had them anyway —
+     * `register()` supplies the actor.
+     */
+    const kinds = timeline.body.data.map((event: any) => event.kind);
+    expect(kinds).not.toContain('ORDER_CREATED');
+    expect(kinds).not.toContain('PAYMENT_RECORDED');
+    expect(kinds).not.toContain('PICKUP_REQUESTED');
+    expect(new Set(kinds)).toEqual(new Set(['PROFILE_CHANGED']));
   });
 
   it('the dedicated pickup view refuses a role that cannot read pickups', async () => {
