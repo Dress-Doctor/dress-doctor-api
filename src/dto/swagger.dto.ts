@@ -77,6 +77,26 @@ class ApiErrorObject {
       'Per-field validation messages; present only for validation errors',
   })
   details?: ApiErrorDetail[];
+
+  @ApiProperty({
+    required: false,
+    example: 'customerId',
+    description:
+      'The one request field a business rule is about, when it is about one. ' +
+      'Validation failures use `details` instead.',
+  })
+  field?: string;
+
+  @ApiProperty({
+    required: false,
+    type: [String],
+    example: ['CONFIRMED', 'WASHING', 'READY', 'DELIVERED', 'CANCELLED'],
+    description:
+      'What the caller could have asked for instead, when a rule refuses the ' +
+      'value they sent — the statuses an order could actually move to, for ' +
+      'INVALID_STATUS_TRANSITION.',
+  })
+  allowed?: string[];
 }
 
 export class ApiErrorResponse extends Base {
