@@ -5,6 +5,7 @@ import { MergeType, Model } from 'mongoose';
 import { Permission } from 'src/schema/admin/permission.schema';
 import { RolePermission } from 'src/schema/admin/role-permission.schema';
 import { UserRole } from 'src/schema/admin/user-role.schema';
+import { OfficeUser } from 'src/schema/office/office-user.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { User } from 'src/schema/user/user.schema';
 import { AppAbility, AppAbilityDto, ConditionsDto } from './casl.dto';
@@ -24,6 +25,9 @@ export class CaslAbilityService {
 
     @InjectModel(RolePermission.name)
     private readonly rolePermissionModel: Model<RolePermission>,
+
+    @InjectModel(OfficeUser.name)
+    private readonly officeUserModel: Model<OfficeUser>,
   ) {}
 
   /**
@@ -46,17 +50,50 @@ export class CaslAbilityService {
     return JSON.parse(json) as MongoQuery<any>;
   }
 
+  /**
+   * Every way a role reaches this user, and the office each one speaks for.
+   *
+   * Two collections, because there are two kinds of grant. `UserRole` is a
+   * role held everywhere — its `$office` is the office the request is being
+   * made in. `OfficeUser` is a posting at one branch, and its `$office` is
+   * that branch, not the request's: nothing in the admin panel sets the
+   * `office_ref` cookie the request office is read from, so a posting that
+   * leaned on it would resolve to whichever office happens to be the default
+   * and grant the wrong branch.
+   *
+   * Only live postings count. Revoking one flags it inactive rather than
+   * deleting it, so the row stays in the audit trail — reading it back without
+   * this filter would hand the authority straight back.
+   */
+  private async grantsFor(user: UserDto, requestOffice?: string) {
+    const [userRoles, postings] = await Promise.all([
+      this.userRoleModel.find({ userId: user._id }).lean(),
+      this.officeUserModel.find({ userId: user._id, isActive: true }).lean(),
+    ]);
+
+    return [
+      ...userRoles.map((row) => ({
+        roleId: row.roleId,
+        office: requestOffice,
+      })),
+      ...postings.map((row) => ({
+        roleId: row.roleId,
+        office: row.officeId?.toString(),
+      })),
+    ];
+  }
+
   async createForUser(
     user: UserDto,
     context: AbilityContext = {},
   ): Promise<MongoAbility<AppAbilityDto, ConditionsDto>> {
     const { can, build } = new AbilityBuilder(AppAbility);
 
-    const userRoles = await this.userRoleModel.find({ userId: user._id });
-    if (!userRoles.length) return build();
+    const grants = await this.grantsFor(user, context.office);
+    if (!grants.length) return build();
 
     const self = user._id.toString();
-    const roleIds = userRoles.map((userRole) => userRole.roleId);
+    const roleIds = grants.map((grant) => grant.roleId);
     const rolePermissions = await this.rolePermissionModel
       .find({ roleId: { $in: roleIds } })
       .populate<{ permissionId: Permission }>({
@@ -65,21 +102,34 @@ export class CaslAbilityService {
       })
       .lean();
 
+    // A role can arrive by more than one grant — held globally and posted at a
+    // branch. Each grant contributes its own rules, so the branch condition and
+    // the global one both stand rather than one quietly replacing the other.
+    const byRole = new Map<string, typeof rolePermissions>();
     for (const rolePermission of rolePermissions) {
-      const permission = rolePermission.permissionId;
+      const key = rolePermission.roleId.toString();
+      const bucket = byRole.get(key) ?? [];
+      bucket.push(rolePermission);
+      byRole.set(key, bucket);
+    }
 
-      if (!permission || !permission.isActive) continue;
+    for (const grant of grants) {
+      for (const rolePermission of byRole.get(grant.roleId.toString()) ?? []) {
+        const permission = rolePermission.permissionId;
 
-      const action = permission.action;
-      const subject = permission.subject;
+        if (!permission || !permission.isActive) continue;
 
-      const conditions = this.resolveConditions(
-        rolePermission.conditions,
-        self,
-        context.office,
-      );
-      if (conditions) can(action, subject, conditions);
-      else can(action, subject);
+        const action = permission.action;
+        const subject = permission.subject;
+
+        const conditions = this.resolveConditions(
+          rolePermission.conditions,
+          self,
+          grant.office,
+        );
+        if (conditions) can(action, subject, conditions);
+        else can(action, subject);
+      }
     }
 
     return build({
