@@ -94,6 +94,7 @@ describe('CustomerService', () => {
   let codeService: {
     generateCustomerCode: jest.Mock;
     generateReferralCode: jest.Mock;
+    generateUserReference: jest.Mock;
   };
 
   const doc = (data: Record<string, unknown>) => ({
@@ -133,6 +134,7 @@ describe('CustomerService', () => {
     codeService = {
       generateCustomerCode: jest.fn().mockResolvedValue('CU-ABC123'),
       generateReferralCode: jest.fn().mockResolvedValue('REF456'),
+      generateUserReference: jest.fn().mockResolvedValue('US-8KQTMR'),
     };
 
     mockRequest = {
@@ -197,6 +199,15 @@ describe('CustomerService', () => {
     expect(customerModel).toHaveBeenCalledTimes(1);
     expect(referralModel).not.toHaveBeenCalled();
     expect(res).toEqual({ customerCode: 'CU-ABC123', referralCode: 'REF456' });
+
+    // The account is addressed by its reference, and `User.reference` is
+    // required — so the reference has to be on the document the service
+    // builds, not added later. The end-to-end suite proves it against the
+    // real schema; this pins the call site.
+    expect(codeService.generateUserReference).toHaveBeenCalledTimes(1);
+    expect(userModel).toHaveBeenCalledWith(
+      expect.objectContaining({ reference: 'US-8KQTMR' }),
+    );
   });
 
   it('links referredBy and opens a PENDING referral when a code is given', async () => {

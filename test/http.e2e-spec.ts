@@ -480,6 +480,36 @@ describe('HTTP contract (e2e)', () => {
         expect(await statusOf(id)).toBe('CONFIRMED');
       });
 
+      /*
+       * The refusal has to say what the caller could have asked for instead.
+       * The service always attached it, but the exception filter dropped
+       * everything except `code` and `details`, so the promise the endpoint
+       * documents never reached the wire.
+       */
+      it('names what was allowed instead, on the refusal itself', async () => {
+        const { id, code } = await newOrder('633000010');
+        await move(id, 'CONFIRMED').expect(200);
+
+        const res = await move(id, 'DRAFT').expect(409);
+
+        expect(res.body.error.allowed).toEqual([
+          'RECEIVED',
+          'WASHING',
+          'READY',
+          'DELIVERED',
+          'CANCELLED',
+        ]);
+        // The same list the detail read publishes, so the two cannot drift.
+        const detail = (
+          await auth(
+            request(app.getHttpServer()).get(`/api/v1/orders/${code}`),
+          ).expect(200)
+        ).body.data;
+        expect(res.body.error.allowed).toEqual(
+          detail.availableTransitions.allowed,
+        );
+      });
+
       it('lets a live order skip straight to where it really is', async () => {
         const { id } = await newOrder('633000009');
         await move(id, 'CONFIRMED').expect(200);
@@ -1304,6 +1334,110 @@ describe('HTTP contract (e2e)', () => {
           amount: 500,
         })
         .expect(404);
+    });
+  });
+
+  /*
+   * Customer registration over HTTP, against the real schema.
+   *
+   * This endpoint had no end-to-end cover at all, which is how it came to be
+   * broken unnoticed: `User.reference` is required, `register()` did not mint
+   * one, and the service's unit spec injects a mock user model, so Mongoose
+   * validation never ran there. A mocked model cannot catch a schema
+   * invariant — only a real save can.
+   */
+  describe('customer registration over HTTP', () => {
+    const register = (over: Record<string, unknown> = {}) =>
+      auth(request(app.getHttpServer()).post('/api/v1/customers')).send({
+        firstName: 'Ada',
+        lastName: 'Mbarga',
+        phone: '655100001',
+        whatsappPhone: '655100001',
+        ...over,
+      });
+
+    it('registers a customer and gives their account a reference', async () => {
+      const res = await register().expect(201);
+
+      const { customerCode, referralCode } = res.body.data;
+      expect(customerCode).toEqual(expect.any(String));
+      expect(referralCode).toEqual(expect.any(String));
+
+      const customer = await model('Customer').findOne({ customerCode });
+      expect(customer).not.toBeNull();
+
+      const user = await model('User').findById(customer.userId);
+      expect(user).not.toBeNull();
+      // The whole point: a real save against the real schema, where
+      // `reference` is required and nothing supplies a default.
+      expect(user.reference).toEqual(expect.any(String));
+      // `US-` plus six characters from the generator's alphabet, which drops
+      // the ones that read alike — 0, O, 1 and I.
+      expect(user.reference).toMatch(
+        /^US-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/,
+      );
+    });
+
+    it('gives each registration its own reference, and leaves it alone after', async () => {
+      const first = (
+        await register({
+          phone: '655100002',
+          whatsappPhone: '655100002',
+        }).expect(201)
+      ).body.data.customerCode;
+      const second = (
+        await register({
+          phone: '655100003',
+          whatsappPhone: '655100003',
+        }).expect(201)
+      ).body.data.customerCode;
+
+      const [a, b] = await Promise.all(
+        [first, second].map(async (customerCode) => {
+          const customer = await model('Customer').findOne({ customerCode });
+          return model('User').findById(customer.userId);
+        }),
+      );
+
+      expect(a.reference).not.toBe(b.reference);
+
+      // Stable: an edit to the account leaves the reference where it was.
+      await model('User').findOneAndUpdate(
+        { _id: a._id },
+        { $set: { firstName: 'Renamed' } },
+        { returnDocument: 'after' },
+      );
+      const after = await model('User').findById(a._id);
+      expect(after.reference).toBe(a.reference);
+    });
+
+    it('serves the customer back afterwards, by the code it returned', async () => {
+      const { customerCode } = (
+        await register({
+          phone: '655100004',
+          whatsappPhone: '655100004',
+        }).expect(201)
+      ).body.data;
+
+      const res = await auth(
+        request(app.getHttpServer()).get(`/api/v1/customers/${customerCode}`),
+      ).expect(200);
+
+      expect(res.body.data.customerCode).toBe(customerCode);
+    });
+
+    it('still refuses a phone number already on the books', async () => {
+      await register({
+        phone: '655100005',
+        whatsappPhone: '655100005',
+      }).expect(201);
+
+      const res = await register({
+        phone: '655100005',
+        whatsappPhone: '655100005',
+      }).expect(409);
+
+      expect(res.body.error.code).toBe('CONFLICT');
     });
   });
 });

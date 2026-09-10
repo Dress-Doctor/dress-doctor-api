@@ -494,7 +494,12 @@ export class CustomerService {
       }
     }
 
+    // Every account is addressed by its reference, the same way a staff
+    // account is — minted before the row exists, never afterwards.
+    const reference = await this.codeService.generateUserReference();
+
     const user = new this.userModel({
+      reference,
       firstName: data.firstName,
       lastName: data.lastName,
       phone,
