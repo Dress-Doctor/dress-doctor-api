@@ -20,6 +20,16 @@ export class OfficeUserHistory extends Document<Types.ObjectId> {
   @Prop({ required: false, index: true, type: Types.ObjectId, ref: User.name })
   userId?: Types.ObjectId;
 
+  /**
+   * Who made the change, off the audit context every mutating write carries.
+   *
+   * Optional on the schema, like `reason` below: a seed or a cron-driven
+   * repair has no person behind it, and a history row must never be rejected
+   * for a missing field, or the entry is lost entirely.
+   */
+  @Prop({ required: false, type: Types.ObjectId, ref: User.name })
+  changedBy?: Types.ObjectId;
+
   @Prop({ required: false, type: Object, default: {} })
   changedFields?: Record<string, ChangedFieldDto>;
 
