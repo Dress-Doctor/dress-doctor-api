@@ -20,6 +20,7 @@ import { SubCategory } from 'src/schema/catalog/sub-category.schema';
 import { PickupRequest } from 'src/schema/pickup/pickup-request.schema';
 import { PickupStatus } from 'src/schema/pickup/pickup-status.schema';
 import { Customer } from 'src/schema/user/customer.schema';
+import { Role } from 'src/schema/admin/role.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { User } from 'src/schema/user/user.schema';
 
@@ -41,6 +42,9 @@ export class CodeGeneratorService {
 
     @InjectModel(UserType.name)
     private readonly userTypeModel: Model<UserType>,
+
+    @InjectModel(Role.name)
+    private readonly roleModel: Model<Role>,
 
     @InjectModel(PickupStatus.name)
     private readonly pickupStatusModel: Model<PickupStatus>,
@@ -364,6 +368,20 @@ export class CodeGeneratorService {
     do {
       code = this.generateCode(6, 'CY');
       const doc = await this.currencyModel.exists({ reference: code });
+      exists = doc ? true : false;
+    } while (exists);
+
+    return code;
+  }
+
+  /** The reference every role row is addressed by. */
+  async generateRoleReference() {
+    let code: string;
+    let exists: boolean;
+
+    do {
+      code = this.generateCode(6, 'RL');
+      const doc = await this.roleModel.exists({ reference: code });
       exists = doc ? true : false;
     } while (exists);
 

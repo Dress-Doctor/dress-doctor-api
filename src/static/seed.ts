@@ -277,9 +277,23 @@ export default {
     // reference screen now — name included — so the write actions have to
     // exist as permission rows before any role can be granted them.
     ...crud(SubjectEnum.OfficeType),
-    // Same reason for roles: assigning someone to an office takes a `roleId`,
-    // so the picker behind it has to be able to list them.
-    { subject: SubjectEnum.Role, action: PermissionActionEnum.READ },
+    /*
+     * Roles. `READ` is the oldest of these — assigning someone to an office
+     * takes a `roleId`, so the picker behind it has to list them. The write
+     * actions exist for the roles screen, which adds a role and rewords one.
+     *
+     * `RolePermission` is what that screen really turns: `UPDATE` on it is the
+     * authority to change what a role may do, which is the authority to change
+     * what everybody holding it may do. Seeded as a row so it can be granted;
+     * today only MANAGER and Co-Founder hold it, through `manage all`.
+     */
+    ...crud(SubjectEnum.Role),
+    { subject: SubjectEnum.Permission, action: PermissionActionEnum.READ },
+    { subject: SubjectEnum.RolePermission, action: PermissionActionEnum.READ },
+    {
+      subject: SubjectEnum.RolePermission,
+      action: PermissionActionEnum.UPDATE,
+    },
     // Order statuses are editable from the reference screen now, so the write
     // actions have to exist as permission rows before any role can be granted
     // them. Seeding the row grants nobody anything on its own.
@@ -328,6 +342,13 @@ export default {
       permissions: [
         ...crud(SubjectEnum.Order),
         { subject: SubjectEnum.Order, action: PermissionActionEnum.EXPORT },
+        /**
+         * Garment lines are their own subject, so `crud(Order)` does not carry
+         * them — and `POST /orders` refuses any order that has items without
+         * this. A branch manager who could raise an order but not put a shirt
+         * on it could not book anything at all.
+         */
+        ...crud(SubjectEnum.OrderItem),
         ...crud(SubjectEnum.Payment),
         { subject: SubjectEnum.Payment, action: PermissionActionEnum.EXPORT },
         ...crud(SubjectEnum.PickupRequest),
@@ -338,6 +359,20 @@ export default {
         ...crud(SubjectEnum.Customer),
         { subject: SubjectEnum.Customer, action: PermissionActionEnum.EXPORT },
         ...readUpdate(SubjectEnum.FollowUp),
+        /*
+         * The lookups the intake screen fills its pickers from. Read-only, and
+         * the same catalogue reads the CUSTOMER role already holds — a branch
+         * manager taking an order needs to name the garment, the service and
+         * the currency the price is in. `currencyId` is required by
+         * `CreateOrderDto` outright, so without the currency read the order
+         * cannot be built at all.
+         *
+         * Reading the catalogue is not editing it: adding an item or repricing
+         * one stays with `manage all`, as it was.
+         */
+        { subject: SubjectEnum.Currency, action: PermissionActionEnum.READ },
+        { subject: SubjectEnum.Item, action: PermissionActionEnum.READ },
+        { subject: SubjectEnum.ServiceType, action: PermissionActionEnum.READ },
         // Office-scoped by OFFICE_OWNED, so a branch manager reviews their own
         // branch's trail and no one else's.
         { subject: SubjectEnum.Activity, action: PermissionActionEnum.READ },

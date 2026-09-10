@@ -25,6 +25,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ApiClientGuard } from './helper/guard/api-client.guard';
 import { ChangeReasonGuard } from './helper/guard/change-reason.guard';
 import { CatalogueModule } from './api/catalogue/catalogue.module';
+import { RoleModule } from './api/role/role.module';
 import { UtilModule } from './api/util/util.module';
 import { UserModule } from './api/user/user.module';
 import { CustomerModule } from './api/customer/customer.module';
@@ -58,6 +59,7 @@ import { bullPrefix, redisConnection } from './config/redis.config';
     ApiClientModule,
     UtilModule,
     CatalogueModule,
+    RoleModule,
     UserModule,
     CustomerModule,
     OfficeModule,
