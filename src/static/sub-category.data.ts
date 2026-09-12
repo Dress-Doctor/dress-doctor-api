@@ -86,9 +86,20 @@ export default [
     description: 'Window coverings and decorative drapes.',
   },
   {
+    seedKey: 'bathroom',
+    subCategoryName: 'Bathroom',
+    description: 'Towels, bath mats, bathrobes, and other bathroom linens.',
+  },
+  {
     seedKey: 'kitchen',
     subCategoryName: 'Kitchen',
     description: 'Cloths and items used in the kitchen.',
+  },
+  {
+    seedKey: 'living-bedroom',
+    subCategoryName: 'Living / Bedroom',
+    description:
+      'Cushions, handkerchiefs, and other living and bedroom cloths.',
   },
   {
     seedKey: 'bulky-items',

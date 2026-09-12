@@ -49,7 +49,7 @@ This repo **evolves an existing codebase** — adopt its patterns (§3), don't r
 3. Enrich `PromoCode`: `perCustomerLimit`, `minOrderValue`, `applicableServiceTypeIds`, `stackable`.
 4. Replace `Referral.rewardAmount` with an issued `PromoCode` + `PromoCodeUsage`.
 5. Seed operational roles + (optionally) granular `OrderStatus` stages.
-6. Decide `google-auth-library`/`googleapis` fate: use for the Sheets migration script, or remove.
+6. ~~Decide `google-auth-library`/`googleapis` fate~~ — **done**: removed. The price list lives in `src/static/item.data.ts` (242 rows, the sheet as it stood 2026-08-12), so a seed run needs no Google credentials and a price change arrives as a reviewed commit. Item uniqueness moved from `itemName` to `displayName` (same garment, different filing, different price); `npm run migrate:item-label` swaps the index on an existing database.
 7. De-dup API key/secret re-verification between `LogRequestMiddleware` and `ApiClientGuard`.
 8. **Real tests for `order.service.ts` and `payment.service.ts` first.**
 

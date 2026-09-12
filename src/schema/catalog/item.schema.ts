@@ -24,7 +24,17 @@ export class Item extends Document<Types.ObjectId> {
   @Prop({ required: false })
   seedKey?: string;
 
-  @Prop({ required: true, unique: true })
+  /**
+   * What the garment is called, unqualified: `Hoodie`, `T-Shirt`.
+   *
+   * Deliberately NOT unique on its own. The price list charges the same
+   * garment differently depending on who wears it and where it is filed — a
+   * `Hoodie` is one row under Men/Tops, another under Men/Bottoms, a third
+   * under Men/Full Body, each with its own price — so the name alone cannot
+   * identify a row. What is unique is `displayName`, the name together with
+   * the filing.
+   */
+  @Prop({ required: true })
   itemName: string; // T-Shirt, Polo Shirt, Dress Shirt
 
   /**
@@ -37,8 +47,15 @@ export class Item extends Document<Types.ObjectId> {
    * which is why every write that can change an input recomputes it —
    * including a category or sub-category rename, which changes this field on
    * every item filed under that row.
+   *
+   * This — not `itemName` — is what may not repeat: two rows reading
+   * `Hoodie (Men - Bottoms)` are the same catalogue entry twice. The index
+   * that says so is declared at the foot of this file rather than here: two
+   * declarations of the same key produce two definitions of `displayName_1`,
+   * and the plain one wins, which quietly leaves the collection without its
+   * uniqueness.
    */
-  @Prop({ required: false, index: true })
+  @Prop({ required: false })
   displayName?: string;
 
   @Prop({ required: true, type: Types.ObjectId, ref: Service.name })
@@ -79,3 +96,9 @@ ItemSchema.index({ reference: 1 }, { unique: true });
 // Only seeded rows carry a `seedKey`, so the index is sparse: rows created by
 // hand have none and must not collide with each other.
 ItemSchema.index({ seedKey: 1 }, { unique: true, sparse: true });
+
+// The name together with the filing. Sparse because `displayName` is derived
+// and therefore absent for the instant between a row's insert and the
+// recompute that labels it — and because a row that has never been filed has
+// nothing to be unique about.
+ItemSchema.index({ displayName: 1 }, { unique: true, sparse: true });

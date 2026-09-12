@@ -32,9 +32,6 @@ import {
 import { RolePermission } from 'src/schema/admin/role-permission.schema';
 import { UserRole } from 'src/schema/admin/user-role.schema';
 import { ApiClient } from 'src/schema/admin/api-client.schema';
-import { google } from 'googleapis';
-import { GoogleAuth } from 'google-auth-library';
-import { CatalogDto } from 'src/schema/catalog/catalog.dto';
 import { Category } from 'src/schema/catalog/category.schema';
 import { Currency } from 'src/schema/catalog/currency.schema';
 import { Item } from 'src/schema/catalog/item.schema';
@@ -370,21 +367,6 @@ export class SeederService {
    * rather than left behind. Before, it stayed on the row for ever, so a role
    * moved from one branch to everywhere went on seeing one branch.
    */
-  /**
-   * A stable, lower-case key from a name. Used only where the source has no
-   * key of its own — the imported price list — so a row can be recognised
-   * again after somebody renames it.
-   */
-  private static slug(value: string): string {
-    return value
-      .normalize('NFKD')
-      .replace(/[^\x20-\x7E]/g, '')
-      .toLowerCase()
-      .replace(/&/g, 'and')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
-  }
-
   private async upsertRolePermission(input: {
     roleId: Types.ObjectId;
     action: string;
@@ -877,178 +859,6 @@ export class SeederService {
     this.logger.log(`🌱 Item: ${tally.toString()}`);
   }
 
-  private async seedItems() {
-    try {
-      const auth = new GoogleAuth({
-        scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
-      });
-      const sheets = google.sheets({ version: 'v4', auth });
-      const spreadsheetId = '1up-JE2aP-kWm7fk7C6t24QlDLP0CwVftsepfj9D91dg';
-
-      const res = await sheets.spreadsheets.values.get({
-        spreadsheetId,
-        range: 'Douala Laundry Price List',
-      });
-      const rows = res.data.values ?? [];
-
-      if (rows.length === 0) {
-        this.logger.warn('No inventory data found in sheet');
-        return;
-      }
-
-      const headers = rows[0]; // first row
-      const dataRows = rows.slice(1);
-      const items = dataRows.map((row) => {
-        const obj: CatalogDto = {
-          item: '',
-          type: '',
-          service: '',
-          category: '',
-          subcategory: '',
-          'price low (xaf)': '',
-          'price high (xaf)': '',
-        };
-
-        headers.forEach((header, index) => {
-          obj[(header as string).toLowerCase()] = row[index] as string;
-        });
-        return obj;
-      });
-
-      const importAudit = await this.seedAudit('price list import');
-      const currency = await this.currencyModel.findOne({ isoCode: 'XAF' });
-      const imported = new SeedTally();
-
-      // Loop Through Data
-      const tempService = new Map<string, Types.ObjectId>();
-      const tempCategory = new Map<string, Types.ObjectId>();
-      const tempSubCategory = new Map<string, Types.ObjectId>();
-      const tempServiceType = new Map<string, Types.ObjectId>();
-
-      for (const item of items) {
-        // Category
-        let categoryId = tempCategory.get(item.category);
-        if (!categoryId) {
-          const category = await this.categoryModel.findOne({
-            categoryName: item.category,
-          });
-
-          if (!category) {
-            this.logger.warn(`Category=${item.category} not found`);
-            continue;
-          }
-
-          categoryId = category._id;
-          tempCategory.set(item.category, category._id);
-        }
-
-        // Sub Category
-        let subCategoryId = tempSubCategory.get(item.subcategory);
-        if (!subCategoryId) {
-          const subCategory = await this.subCategoryModel.findOne({
-            subCategoryName: item.subcategory,
-          });
-
-          if (!subCategory) {
-            this.logger.warn(`SubCategory=${item.subcategory} not found`);
-            continue;
-          }
-
-          subCategoryId = subCategory._id;
-          tempSubCategory.set(item.subcategory, subCategory._id);
-        }
-
-        // Service
-        let serviceId = tempService.get(item.service);
-        if (!serviceId) {
-          const service = await this.serviceModel.findOne({
-            serviceName: item.service,
-          });
-
-          if (!service) {
-            this.logger.warn(`Service=${item.service} not found`);
-            continue;
-          }
-
-          serviceId = service._id;
-          tempService.set(item.service, service._id);
-        }
-
-        // Service Type
-        let serviceTypeId = tempServiceType.get(item.type);
-        if (!serviceTypeId) {
-          const serviceType = await this.serviceTypeModel.findOne({
-            serviceTypeName: item.type,
-          });
-
-          if (!serviceType) {
-            this.logger.warn(`ServiceType=${item.type} not found`);
-            continue;
-          }
-
-          serviceTypeId = serviceType._id;
-          tempServiceType.set(item.type, serviceType._id);
-        }
-
-        const priceLow = Number(item['price low (xaf)'].replaceAll(',', ''));
-        const priceHigh = Number(item['price high (xaf)'].replaceAll(',', ''));
-
-        // The sheet has no key of its own, so one is derived from the name it
-        // arrived under and kept for ever. That is what lets a manager rename
-        // the item afterwards without a second copy appearing on the next
-        // import.
-        const seedKey = `sheet:${SeederService.slug(item.item)}`;
-
-        const { outcome, doc } = await upsertSeedRow<Item>({
-          model: this.itemModel,
-          audit: importAudit,
-          logger: this.logger,
-          generate: async () => ({
-            reference: await this.codeService.generateItemReference(),
-            unitPrice: itemUnitPrice(priceLow, priceHigh),
-            displayName: itemDisplayName({
-              itemName: item.item,
-              categoryNames: [item.category],
-              subCategoryNames: [item.subcategory],
-            }),
-          }),
-          plan: {
-            filter: { seedKey },
-            // Every one of these is editable from the catalogue screen, so the
-            // import writes them once. A price somebody corrected at the
-            // counter is a decision; re-importing the sheet must not undo it.
-            onInsert: {
-              serviceId,
-              serviceTypeId,
-              priceLow,
-              priceHigh,
-              itemName: item.item,
-              currencyId: currency?._id,
-              isActive: true,
-            },
-          },
-        });
-        imported.add(outcome);
-
-        // Filed only for an item this run created, for the same reason: which
-        // categories an item sits under is editable, and putting the sheet's
-        // own choice back would restore a filing somebody removed.
-        if (outcome === 'created') {
-          await this.itemCategoryModel.create({ categoryId, itemId: doc._id });
-          await this.itemSubCategoryModel.create({
-            subCategoryId,
-            itemId: doc._id,
-          });
-        }
-      }
-
-      this.logger.log(`🌱 Item (price list import): ${imported.toString()}`);
-    } catch (error) {
-      this.logger.error(`An error occur when trying to seed inventory`);
-      this.logger.error(error);
-    }
-  }
-
   /**
    * Message templates.
    *
@@ -1259,7 +1069,6 @@ export class SeederService {
       await this.seedServiceType();
       await this.seedItemCatalog();
       await this.seedNotificationTemplates();
-      if (process.env.SEED_ITEMS === 'YES') await this.seedItems();
 
       this.logger.log(
         `✅ Seeding finished in ${Math.round((Date.now() - started) / 1000)}s`,

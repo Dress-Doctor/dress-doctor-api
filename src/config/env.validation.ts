@@ -62,10 +62,6 @@ export const envValidationSchema = Joi.object({
   // dev — the scan logs + counts skipped alerts when unset.
   CS_WHATSAPP_PHONE: Joi.string().optional(),
 
-  // Google Sheets migration (Phase 1 script) — optional
-  GOOGLE_APPLICATION_CREDENTIALS: Joi.string().optional(),
-  SEED_ITEMS: Joi.string().valid('YES', 'NO').default('NO'),
-
   // Platform client credentials used by external callers, not read server-side
   API_KEY: Joi.string().optional(),
   API_SECRET: Joi.string().optional(),

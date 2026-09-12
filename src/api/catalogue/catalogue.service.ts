@@ -1581,6 +1581,81 @@ export class CatalogueService {
   }
 
   /**
+   * The names behind a set of ids — what a prospective display name is built
+   * from before the row that would carry it exists.
+   */
+  private async linkNames<TDoc>(
+    model: Model<TDoc>,
+    ids: Types.ObjectId[],
+    field: string,
+  ): Promise<string[]> {
+    if (!ids.length) return [];
+
+    const rows = await model
+      .find({ _id: { $in: ids } } as never)
+      .select(field)
+      .lean<Record<string, string>[]>();
+
+    return rows.map((row) => row[field]);
+  }
+
+  /** The categories or sub categories an item is filed under today. */
+  private async currentLinkIds<TLink>(
+    linkModel: Model<TLink>,
+    itemId: Types.ObjectId,
+    field: string,
+  ): Promise<Types.ObjectId[]> {
+    const links = await linkModel
+      .find({ itemId } as never)
+      .select(field)
+      .lean<Record<string, Types.ObjectId>[]>();
+
+    return links.map((link) => link[field]);
+  }
+
+  /**
+   * Refuses a second catalogue entry that would read the same as one which
+   * already exists.
+   *
+   * The check is on the label an item is read by — its name together with its
+   * filing — not on the name alone. The price list charges the same garment
+   * differently depending on who wears it, so `Hoodie` legitimately exists
+   * three times over; what may not exist twice is
+   * `Hoodie (Men - Bottoms)`, which is the same row entered again.
+   *
+   * Run against the filing the write will leave behind rather than the one the
+   * row carries now: re-filing an item moves its label as surely as renaming
+   * it does.
+   */
+  private async assertItemLabelFree(input: {
+    itemName: string;
+    categoryIds: Types.ObjectId[];
+    subCategoryIds: Types.ObjectId[];
+    exclude?: Types.ObjectId;
+  }): Promise<void> {
+    const [categoryNames, subCategoryNames] = await Promise.all([
+      this.linkNames(this.categoryModel, input.categoryIds, 'categoryName'),
+      this.linkNames(
+        this.subCategoryModel,
+        input.subCategoryIds,
+        'subCategoryName',
+      ),
+    ]);
+
+    await this.assertNameFree(
+      this.itemModel,
+      'displayName',
+      itemDisplayName({
+        itemName: input.itemName,
+        categoryNames,
+        subCategoryNames,
+      }),
+      'An item with this name already exists under the same filing',
+      input.exclude,
+    );
+  }
+
+  /**
    * Adds an item.
    *
    * The three links are named by reference and resolved here, the price pair
@@ -1600,13 +1675,6 @@ export class CatalogueService {
       });
     }
 
-    await this.assertNameFree(
-      this.itemModel,
-      'itemName',
-      data.itemName,
-      'An item with this name already exists',
-    );
-
     const links = await this.resolveItemLinks(data);
     const [categoryIds, subCategoryIds] = await Promise.all([
       this.resolveLinkIds(
@@ -1620,6 +1688,15 @@ export class CatalogueService {
         'subCategoryReferences',
       ),
     ]);
+
+    // After the links are resolved, not before: the label being checked is the
+    // name qualified by the filing, and the filing is what arrives as
+    // references.
+    await this.assertItemLabelFree({
+      categoryIds,
+      subCategoryIds,
+      itemName: data.itemName,
+    });
 
     const reference = await this.codeService.generateItemReference();
     const item = new this.itemModel({
@@ -1679,14 +1756,43 @@ export class CatalogueService {
       });
     }
 
-    if (data.itemName) {
-      await this.assertNameFree(
-        this.itemModel,
-        'itemName',
-        data.itemName,
-        'An item with this name already exists',
-        item._id,
-      );
+    // The filing this write will leave behind: whatever was sent, or whatever
+    // the row carries already for a side the body left out. Resolved once and
+    // reused below, so the references are not looked up twice.
+    const [nextCategoryIds, nextSubCategoryIds] = await Promise.all([
+      data.categoryReferences
+        ? this.resolveLinkIds(
+            this.categoryModel,
+            data.categoryReferences,
+            'categoryReferences',
+          )
+        : this.currentLinkIds(this.itemCategoryModel, item._id, 'categoryId'),
+      data.subCategoryReferences
+        ? this.resolveLinkIds(
+            this.subCategoryModel,
+            data.subCategoryReferences,
+            'subCategoryReferences',
+          )
+        : this.currentLinkIds(
+            this.itemSubCategoryModel,
+            item._id,
+            'subCategoryId',
+          ),
+    ]);
+
+    // Re-filing moves the label just as renaming does, so either one has to be
+    // checked — and checked before the first write, so a clash costs nothing.
+    if (
+      data.itemName ||
+      data.categoryReferences ||
+      data.subCategoryReferences
+    ) {
+      await this.assertItemLabelFree({
+        exclude: item._id,
+        categoryIds: nextCategoryIds,
+        subCategoryIds: nextSubCategoryIds,
+        itemName: data.itemName ?? item.itemName,
+      });
     }
 
     const links = await this.resolveItemLinks(data);
@@ -1715,11 +1821,7 @@ export class CatalogueService {
     const changedFields: Record<string, { from: unknown; to: unknown }> = {};
 
     if (data.categoryReferences) {
-      const next = await this.resolveLinkIds(
-        this.categoryModel,
-        data.categoryReferences,
-        'categoryReferences',
-      );
+      const next = nextCategoryIds;
       const before = await this.currentLinkReferences(
         this.itemCategoryModel,
         this.categoryModel,
@@ -1741,11 +1843,7 @@ export class CatalogueService {
     }
 
     if (data.subCategoryReferences) {
-      const next = await this.resolveLinkIds(
-        this.subCategoryModel,
-        data.subCategoryReferences,
-        'subCategoryReferences',
-      );
+      const next = nextSubCategoryIds;
       const before = await this.currentLinkReferences(
         this.itemSubCategoryModel,
         this.subCategoryModel,

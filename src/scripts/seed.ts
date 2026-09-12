@@ -12,15 +12,14 @@
  * This used to run by itself every time the API started, which is how edits
  * made in the panel kept going back to the seed text overnight.
  *
- * Two switches, both off unless you set them:
+ * One switch, off unless you set it:
  *
- *   SEED_ITEMS=YES                   also import the price list from the sheet
  *   SEED_RECONCILE_PERMISSIONS=YES   make the seed's role map the final word,
  *                                    removing permissions it no longer lists
  *
- * Read the note on `seedRolePermissions` before using the second one: the
- * permissions matrix in the panel is a real screen, and that switch overrules
- * whatever was saved there.
+ * Read the note on `seedRolePermissions` before using it: the permissions
+ * matrix in the panel is a real screen, and that switch overrules whatever was
+ * saved there.
  */
 import { Logger, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
