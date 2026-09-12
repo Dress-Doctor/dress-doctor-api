@@ -282,10 +282,15 @@ describe('OtpService', () => {
     it('issues a code that expires in five minutes', async () => {
       const before = Date.now();
       const { expiresAt, minutes } = await service.requestOtp(request);
+      // The clock moves while the request is being served, so the window is
+      // measured against both ends of the call rather than only its start —
+      // against `before` alone, a run that takes a millisecond reads as five
+      // minutes and one millisecond, and the test fails for no reason.
+      const after = Date.now();
 
       expect(minutes).toBe(5);
       expect(expiresAt.getTime() - before).toBeGreaterThan(4.9 * 60 * 1000);
-      expect(expiresAt.getTime() - before).toBeLessThanOrEqual(5 * 60 * 1000);
+      expect(expiresAt.getTime() - after).toBeLessThanOrEqual(5 * 60 * 1000);
     });
   });
 
