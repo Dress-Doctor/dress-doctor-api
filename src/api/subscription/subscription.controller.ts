@@ -21,7 +21,7 @@ import type {
   AppRequestWithUser,
   PaginationDto,
 } from 'src/dto/request-data.dto';
-import { xApiKey, xApiSecret } from 'src/dto/swagger.dto';
+import { xApiKey, xApiSecret, xChangeReason } from 'src/dto/swagger.dto';
 import { SubscribeDto } from './dto/subscribe.dto';
 import { UpsertPlanDto } from './dto/upsert-plan.dto';
 import { SubscriptionService } from './subscription.service';
@@ -29,6 +29,7 @@ import { SubscriptionService } from './subscription.service';
 @Controller()
 @ApiHeader(xApiKey)
 @ApiHeader(xApiSecret)
+@ApiHeader(xChangeReason)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
 @ApiBearerAuth('access-token')

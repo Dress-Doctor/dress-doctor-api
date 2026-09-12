@@ -13,6 +13,9 @@ import request from 'supertest';
 import { HTTPExceptionFilter } from '../src/helper/exception-filters/http.exception-filter';
 import { HTTPResponseInterceptor } from '../src/helper/interceptor/http.interceptor';
 import { AppValidationPipe } from '../src/helper/pipe/app-validation.pipe';
+import { redisTestEnv } from './redis-test-env';
+import { seedBaseline } from './seed-baseline';
+import { testUserReference } from './user-reference';
 
 /**
  * The deferred pre-portal gate (Phase 3 §0): the OTP login flows proven over
@@ -30,7 +33,13 @@ import { AppValidationPipe } from '../src/helper/pipe/app-validation.pipe';
 describe('OTP login over HTTP (e2e)', () => {
   let app: INestApplication;
   let rs: MongoMemoryReplSet;
-  const apiHeaders = { 'x-api-key': 'e2e-key', 'x-api-secret': 'e2e-secret' };
+  const apiHeaders = {
+    'x-api-key': 'e2e-key',
+    'x-api-secret': 'e2e-secret',
+    // Every mutation must say why it is being made; these suites are not
+    // testing that rule, so they answer it once here.
+    'x-change-reason': 'automated end-to-end test',
+  };
 
   // Every enqueued notification, captured before it reaches the real queue.
   const outbox: Array<{
@@ -44,15 +53,14 @@ describe('OTP login over HTTP (e2e)', () => {
   const CUSTOMER_PHONE = '655000001';
   const CUSTOMER_WHATSAPP = '237655000001';
   const STAFF_PHONE = '677000001';
+  const STAFF_EMAIL = 'otp.staff@dressdoctor.io';
   const STAFF_PASSWORD = 'Staff@12345';
 
   beforeAll(async () => {
     rs = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
     Object.assign(process.env, {
       DATABASE_URL: rs.getUri('test'),
-      REDIS_HOST: process.env.REDIS_HOST ?? '127.0.0.1',
-      REDIS_PORT: process.env.REDIS_PORT ?? '6379',
-      REDIS_NAME: 'e2e-auth',
+      ...redisTestEnv('auth-login'),
       JWT_SECRET: 'e2e-secret-min-16-chars',
       JWT_ACCESS_TTL: '15m',
       SALT: bcrypt.genSaltSync(10),
@@ -71,6 +79,9 @@ describe('OTP login over HTTP (e2e)', () => {
     // BullModule.forRoot(process.env.REDIS_*) and the config schema.
     const { AppModule } = require('../src/app.module');
     const {
+      QueueProcessorModule,
+    } = require('../src/queue/queue-processor.module');
+    const {
       NotificationService,
     } = require('../src/helper/service/notification.service');
 
@@ -84,7 +95,10 @@ describe('OTP login over HTTP (e2e)', () => {
       });
 
     const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
+      // AppModule is the API half only — processors run in the worker
+      // (src/worker.module.ts). A spec that exercises the real queue loop has
+      // to stand both halves up, the way api + worker do in deployment.
+      imports: [AppModule, QueueProcessorModule],
     }).compile();
 
     // Mirror src/main.ts so routes + envelope match production.
@@ -102,12 +116,10 @@ describe('OTP login over HTTP (e2e)', () => {
     app.useGlobalPipes(AppValidationPipe);
     await app.init();
 
-    // Wait for the fire-and-forget seeder (System api-client lands near the end).
+    // The baseline data no longer seeds itself on boot: ask for it, and
+    // wait for it to finish rather than polling for its last row.
+    await seedBaseline(app as never);
     const apiClientModel = app.get(getModelToken('ApiClient'));
-    for (let i = 0; i < 120; i++) {
-      if (await apiClientModel.findOne({ name: 'System' })) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
 
     await apiClientModel.create({
       name: 'e2e',
@@ -127,6 +139,7 @@ describe('OTP login over HTTP (e2e)', () => {
 
     // Customer: OTP-only — no passwordHash at all.
     const customer = await model('User').create({
+      reference: testUserReference(),
       firstName: 'Otp',
       lastName: 'Customer',
       phone: CUSTOMER_PHONE,
@@ -143,6 +156,7 @@ describe('OTP login over HTTP (e2e)', () => {
 
     // Staff: password + OTP (2FA).
     const staff = await model('User').create({
+      reference: testUserReference(),
       firstName: 'Otp',
       lastName: 'Staff',
       phone: STAFF_PHONE,
@@ -177,8 +191,9 @@ describe('OTP login over HTTP (e2e)', () => {
     let refreshToken: string;
 
     it('initiate-login issues an OTP addressed to whatsappPhone', async () => {
+      // Phone identifier → WhatsApp OTP inferred.
       const res = await post('/api/v1/auth/initiate-login')
-        .send({ phone: CUSTOMER_PHONE, otpChannel: 'WhatsApp' })
+        .send({ identifier: CUSTOMER_PHONE })
         .expect(201);
 
       expect(res.body.success).toBe(true);
@@ -245,7 +260,7 @@ describe('OTP login over HTTP (e2e)', () => {
     it('rejects a staff login with no password — no OTP is issued', async () => {
       const before = outbox.length;
       const res = await post('/api/v1/auth/initiate-login')
-        .send({ phone: STAFF_PHONE, otpChannel: 'Email' })
+        .send({ identifier: STAFF_EMAIL })
         .expect(401);
 
       expect(res.body.success).toBe(false);
@@ -255,32 +270,25 @@ describe('OTP login over HTTP (e2e)', () => {
     it('rejects a wrong password — no OTP is issued', async () => {
       const before = outbox.length;
       await post('/api/v1/auth/initiate-login')
-        .send({
-          phone: STAFF_PHONE,
-          password: 'Wrong@12345',
-          otpChannel: 'Email',
-        })
+        .send({ identifier: STAFF_EMAIL, password: 'Wrong@12345' })
         .expect(401);
 
       expect(outbox.length).toBe(before);
     });
 
     it('correct password issues an OTP to the staff email, and the code completes login', async () => {
+      // Email identifier → email OTP inferred; staff still 2FA (password first).
       const res = await post('/api/v1/auth/initiate-login')
-        .send({
-          phone: STAFF_PHONE,
-          password: STAFF_PASSWORD,
-          otpChannel: 'Email',
-        })
+        .send({ identifier: STAFF_EMAIL, password: STAFF_PASSWORD })
         .expect(201);
 
       const otpRef = res.body.data.otpRef;
       const sent = outbox[outbox.length - 1];
       expect(sent.otpChannel).toBe('Email');
-      expect(sent.recipients[0].address).toBe('otp.staff@dressdoctor.io');
+      expect(sent.recipients[0].address).toBe(STAFF_EMAIL);
 
       const complete = await post('/api/v1/auth/complete-login')
-        .send({ identifier: STAFF_PHONE, otpRef, code: lastOtpCode() })
+        .send({ identifier: STAFF_EMAIL, otpRef, code: lastOtpCode() })
         .expect(200);
 
       expect(complete.body.data.accessToken).toBeDefined();
@@ -294,9 +302,73 @@ describe('OTP login over HTTP (e2e)', () => {
     });
   });
 
-  it('login for an unknown phone fails with INVALID_CREDENTIALS semantics (401)', async () => {
+  // §9: the who-did-what trail. Proves the wiring end to end — the row is
+  // written by the real service, through the real request, with the request
+  // context (platform, correlation id) filled in off the wire rather than by
+  // the caller.
+  describe('activity trail', () => {
+    // `model` in beforeAll is scoped to it; the trail is read through the
+    // same app instance here.
+    const activityFor = async (action: string) => {
+      const activityModel = app.get(getModelToken('Activity'));
+      return await activityModel
+        .find({ action })
+        .sort({ createdAt: -1 })
+        .lean();
+    };
+
+    it('records a completed sign-in against the user who signed in', async () => {
+      const res = await post('/api/v1/auth/initiate-login')
+        .send({ identifier: CUSTOMER_PHONE })
+        .expect(201);
+
+      await post('/api/v1/auth/complete-login')
+        .send({
+          identifier: CUSTOMER_PHONE,
+          otpRef: res.body.data.otpRef,
+          code: lastOtpCode(),
+        })
+        .expect(200);
+
+      const rows = await activityFor('auth.login');
+      const success = rows.find(
+        (row: { outcome: string }) => row.outcome === 'SUCCESS',
+      );
+
+      expect(success).toBeDefined();
+      expect(success.kind).toBe('AUTH');
+      expect(success.platform).toBeDefined();
+      expect(success.requestId).toBeDefined();
+    });
+
+    // The attempt nobody can attribute is exactly the one worth keeping.
+    it('records a sign-in attempt against an identifier nobody holds', async () => {
+      // otpRef has to be a well-formed uuid or the DTO rejects the call at
+      // the pipe, before the service ever sees the unknown identifier.
+      await post('/api/v1/auth/complete-login')
+        .send({
+          identifier: '699999999',
+          otpRef: '3d617878-7c58-4963-9a5f-f709a6133653',
+          code: '123456',
+        })
+        .expect(401);
+
+      const rows = await activityFor('auth.login');
+      const failure = rows.find(
+        (row: { outcome: string }) => row.outcome === 'FAILURE',
+      );
+
+      expect(failure).toBeDefined();
+      expect(failure.metadata.reason).toBe('UNKNOWN_IDENTIFIER');
+      // The identifier is masked on the way in — a trail must not become the
+      // place raw phone numbers are kept.
+      expect(failure.metadata.identifier).not.toBe('699999999');
+    });
+  });
+
+  it('login for an unknown identifier fails with INVALID_CREDENTIALS semantics (401)', async () => {
     const res = await post('/api/v1/auth/initiate-login')
-      .send({ phone: '699999999', otpChannel: 'WhatsApp' })
+      .send({ identifier: '699999999' })
       .expect(401);
 
     expect(res.body.success).toBe(false);

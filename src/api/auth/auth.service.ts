@@ -14,7 +14,6 @@ import { RefreshToken } from 'src/schema/user/refresh-token.schema';
 import { UserType } from 'src/schema/user/user-type.schema';
 import { User } from 'src/schema/user/user.schema';
 import { CompleteLoginDto, InitiateLoginDto } from './dto/login.dto';
-import { RefreshTokenDto } from './dto/refresh.dto';
 
 import { REQUEST } from '@nestjs/core';
 import appConfig from 'src/config/app-config';
@@ -28,6 +27,9 @@ import {
 import { OTPChannelEnum, OTPPurposeEnum } from 'src/schema/otp/otp.dto';
 import { UserTypeEum } from 'src/schema/user/user.dto';
 import { maskPhone } from 'src/helper/pii';
+import { ActivityService } from 'src/helper/service/activity.service';
+import { ActivityOutcomeEnum } from 'src/schema/activity/activity.dto';
+import { phoneQuery } from 'src/helper/phone';
 
 /** Just the user fields OTP delivery needs — works for populated or raw docs. */
 type OtpTarget = Pick<User, 'phone' | 'firstName' | 'email' | 'whatsappPhone'>;
@@ -48,6 +50,7 @@ export class AuthService {
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(RefreshToken.name)
     private readonly refreshTokenModel: Model<RefreshToken>,
+    private readonly activityService: ActivityService,
   ) {}
 
   private async signToken(user: TokenUser, userType: string) {
@@ -154,18 +157,46 @@ export class AuthService {
     };
   }
 
-  async initiateLogin(data: InitiateLoginDto) {
-    const platform = this.req.data.platform;
+  /**
+   * Resolve a login identifier (phone or email) to the user lookup query and the
+   * OTP channel it implies: an email logs in over email, a phone over WhatsApp.
+   */
+  private resolveLoginIdentity(identifier: string): {
+    channel: OTPChannelEnum;
+    query: Record<string, unknown>;
+  } {
+    if (identifier.includes('@')) {
+      return { channel: OTPChannelEnum.EMAIL, query: { email: identifier } };
+    }
 
-    const foundedUser = await this.userModel
-      .findOne({ phone: data.phone })
-      .populate<{
-        userTypeId: UserType;
-      }>({ model: UserType.name, path: 'userTypeId' });
+    /**
+     * Matched against every spelling of the number, not one. Phones are stored
+     * with their country code, but somebody signing in types whatever they are
+     * used to typing — usually the 9 national digits — and that has to find
+     * their account.
+     */
+    return {
+      channel: OTPChannelEnum.WHATSAPP,
+      query: { phone: phoneQuery(identifier) },
+    };
+  }
+
+  /**
+   * Resolve a login identifier to an authenticated user + its OTP channel:
+   * verify the account exists and is active, and (for staff) that the password
+   * is valid. Shared by initiate-login and resend-otp so both gate identically.
+   */
+  private async authenticateForOtp(data: InitiateLoginDto) {
+    const platform = this.req.data.platform;
+    const { channel, query } = this.resolveLoginIdentity(data.identifier);
+
+    const foundedUser = await this.userModel.findOne(query).populate<{
+      userTypeId: UserType;
+    }>({ model: UserType.name, path: 'userTypeId' });
 
     if (!foundedUser) {
       this.logger.warn(
-        `[${platform}] login for unknown phone ${maskPhone(data.phone)}`,
+        `[${platform}] login for unknown identifier ${maskPhone(data.identifier)}`,
       );
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
@@ -175,7 +206,7 @@ export class AuthService {
 
     if (!foundedUser.isActive) {
       this.logger.warn(
-        `[${platform}] login for deactivated account ${maskPhone(data.phone)}`,
+        `[${platform}] login for deactivated account ${maskPhone(data.identifier)}`,
       );
       throw new ForbiddenException({
         code: 'ACCOUNT_INACTIVE',
@@ -190,7 +221,7 @@ export class AuthService {
     if (!isCustomer) {
       if (!data.password) {
         this.logger.warn(
-          `[${platform}] staff ${maskPhone(data.phone)} sent no password`,
+          `[${platform}] staff ${maskPhone(data.identifier)} sent no password`,
         );
         throw new UnauthorizedException({
           code: 'INVALID_CREDENTIALS',
@@ -204,7 +235,7 @@ export class AuthService {
       );
       if (!isValid) {
         this.logger.warn(
-          `[${platform}] wrong password for ${maskPhone(data.phone)}`,
+          `[${platform}] wrong password for ${maskPhone(data.identifier)}`,
         );
         throw new UnauthorizedException({
           code: 'INVALID_CREDENTIALS',
@@ -213,29 +244,65 @@ export class AuthService {
       }
     }
 
-    return await this.issueLoginOtp(foundedUser, data.otpChannel);
+    return { user: foundedUser, channel };
+  }
+
+  async initiateLogin(data: InitiateLoginDto) {
+    const { user, channel } = await this.authenticateForOtp(data);
+    await this.activityService.recordAuth(this.req, {
+      action: 'auth.otp_requested',
+      userId: user._id,
+      metadata: { channel },
+    });
+    return await this.issueLoginOtp(user, channel);
+  }
+
+  /**
+   * Re-issue a fresh LOGIN OTP for an identifier that already passed
+   * initiate-login. Re-authenticates through the same gate (staff still need
+   * their password); per-identifier request cool-downs in OtpService throttle
+   * abuse. The previously issued code stays valid until it expires.
+   */
+  async resendOtp(data: InitiateLoginDto) {
+    const { user, channel } = await this.authenticateForOtp(data);
+    return await this.issueLoginOtp(user, channel);
   }
 
   async completeLogin(data: CompleteLoginDto) {
     const platform = this.req.data.platform;
+    const { query } = this.resolveLoginIdentity(data.identifier);
 
-    const foundedUser = await this.userModel
-      .findOne({ phone: data.identifier })
-      .populate<{ userTypeId: UserType }>({
-        model: UserType.name,
-        path: 'userTypeId',
-      });
+    const foundedUser = await this.userModel.findOne(query).populate<{
+      userTypeId: UserType;
+    }>({ model: UserType.name, path: 'userTypeId' });
     if (!foundedUser) {
       this.logger.warn(
-        `[${platform}] verify for unknown phone ${maskPhone(data.identifier)}`,
+        `[${platform}] verify for unknown identifier ${maskPhone(data.identifier)}`,
       );
+      // A sign-in attempt against an identifier nobody holds is exactly the
+      // pattern a reviewer wants to find later, so it is recorded even though
+      // there is no user to hang it on.
+      await this.activityService.recordAuth(this.req, {
+        action: 'auth.login',
+        outcome: ActivityOutcomeEnum.FAILURE,
+        metadata: {
+          reason: 'UNKNOWN_IDENTIFIER',
+          identifier: maskPhone(data.identifier),
+        },
+      });
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
         message: 'Invalid login credentials',
       });
     }
 
-    await this.otpService.verifyOtp(data);
+    // OTP is keyed by the user's phone (issueLoginOtp), regardless of whether the
+    // caller logged in with a phone or an email — verify against that.
+    await this.otpService.verifyOtp({
+      code: data.code,
+      otpRef: data.otpRef,
+      identifier: foundedUser.phone,
+    });
     const userType = foundedUser.userTypeId?.userTypeName ?? '';
     const { accessToken, refreshToken } = await this.issueTokens(
       foundedUser,
@@ -245,6 +312,11 @@ export class AuthService {
     this.logger.log(
       `[${platform}] ${maskPhone(data.identifier)} have successfully login`,
     );
+    await this.activityService.recordAuth(this.req, {
+      action: 'auth.login',
+      userId: foundedUser._id,
+      metadata: { userType },
+    });
     return { accessToken, refreshToken, message: 'Login successful' };
   }
 
@@ -254,9 +326,9 @@ export class AuthService {
    * token that was already rotated (revoked) is treated as a breach: the user's
    * entire live refresh-token chain is revoked so a stolen token can't be reused.
    */
-  async refresh(data: RefreshTokenDto) {
+  async refresh(refreshToken: string) {
     const platform = this.req.data.platform;
-    const tokenHash = this.hashRefreshToken(data.refreshToken);
+    const tokenHash = this.hashRefreshToken(refreshToken);
     const invalid = new UnauthorizedException({
       code: 'INVALID_REFRESH_TOKEN',
       message: 'Invalid or expired refresh token',
@@ -306,16 +378,29 @@ export class AuthService {
     this.logger.log(
       `[${platform}] ${maskPhone(user.phone)} rotated a refresh token`,
     );
+    await this.activityService.recordAuth(this.req, {
+      action: 'auth.refresh',
+      userId: user._id,
+    });
     return tokens;
   }
 
   /** Revoke a single refresh token (idempotent — unknown tokens are a no-op). */
-  async logout(data: RefreshTokenDto) {
-    const tokenHash = this.hashRefreshToken(data.refreshToken);
-    await this.refreshTokenModel.updateOne(
+  async logout(refreshToken: string) {
+    const tokenHash = this.hashRefreshToken(refreshToken);
+    const stored = await this.refreshTokenModel.findOneAndUpdate(
       { tokenHash, revokedAt: { $exists: false } },
       { revokedAt: new Date() },
     );
+
+    // Idempotent by contract: an unknown or already-revoked token is a no-op,
+    // and there is no session to attribute the row to.
+    if (stored) {
+      await this.activityService.recordAuth(this.req, {
+        action: 'auth.logout',
+        userId: stored.userId,
+      });
+    }
     return { message: 'Logged out successfully' };
   }
 

@@ -6,6 +6,7 @@ import {
   IsEnum,
   IsInt,
   IsMongoId,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
@@ -29,6 +30,21 @@ export class QuoteLineDto {
   @IsInt({ message: 'quantity must be an integer' })
   @Min(1, { message: 'quantity must be at least 1' })
   quantity: number;
+
+  @ApiProperty({
+    required: false,
+    example: 750.5,
+    description:
+      'Agreed price for one garment on this line. Supplied, it replaces the ' +
+      'price list for this line and no PRICE_NOT_FOUND can arise from it.',
+  })
+  @IsOptional()
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'unitPrice must be a number with at most 2 decimals' },
+  )
+  @Min(0, { message: 'unitPrice cannot be negative' })
+  unitPrice?: number;
 }
 
 export class QuoteDto {
@@ -55,10 +71,14 @@ export class QuoteDto {
 
   @ApiProperty({
     required: false,
+    example: 20.5,
     description: 'Total weight (kg) — required for PER_KG and SUBSCRIPTION',
   })
   @IsOptional()
-  @IsInt({ message: 'totalWeightKg must be an integer' })
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'totalWeightKg must be a number with at most 2 decimals' },
+  )
   @Min(0)
   totalWeightKg?: number;
 
@@ -69,10 +89,29 @@ export class QuoteDto {
 
   @ApiProperty({
     required: false,
+    example: 500.5,
+    description:
+      'Agreed subtotal. Supplied, it replaces the subtotal this engine would ' +
+      'have computed; discounts and the total are still derived from it.',
+  })
+  @IsOptional()
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'orderAmount must be a number with at most 2 decimals' },
+  )
+  @Min(0, { message: 'orderAmount cannot be negative' })
+  orderAmount?: number;
+
+  @ApiProperty({
+    required: false,
+    example: 250.5,
     description: 'Staff ad-hoc discount (XAF) — permissioned, not a promo',
   })
   @IsOptional()
-  @IsInt({ message: 'manualDiscount must be an integer (XAF)' })
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'manualDiscount must be a number with at most 2 decimals' },
+  )
   @Min(0)
   manualDiscount?: number;
 

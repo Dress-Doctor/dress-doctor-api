@@ -1,43 +1,36 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
   IsDefined,
-  IsEnum,
   IsNumberString,
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
-import { OTPChannelEnum } from 'src/schema/otp/otp.dto';
+
+// A 9-digit phone or a basic email — the identifier used to log in. The OTP
+// channel is inferred: phone → WhatsApp, email → email.
+const PHONE_OR_EMAIL = /^(\d{9}|[^@\s]+@[^@\s]+\.[^@\s]+)$/;
 
 export class InitiateLoginDto {
   @ApiProperty({
     required: true,
     example: '698765294',
-    description: 'User phone number',
+    description: 'Phone (9 digits) or email — OTP channel is inferred from it',
   })
-  @IsDefined({ message: 'Phone is required' })
-  @IsNumberString({ no_symbols: true })
-  @MaxLength(9, { message: 'Phone must be 9 digit long' })
-  @MinLength(9, { message: 'Phone must be 9 digit long' })
-  phone: string;
-
-  @ApiProperty({
-    required: true,
-    description: 'OTP channel',
-    example: OTPChannelEnum.WHATSAPP,
+  @IsDefined({ message: 'identifier is required' })
+  @IsString()
+  @Matches(PHONE_OR_EMAIL, {
+    message: 'identifier must be a 9-digit phone or a valid email',
   })
-  @IsDefined({ message: 'OTP channel is required' })
-  @IsEnum(OTPChannelEnum, {
-    message: 'OTP channel must be either (Email WhatsApp)',
-  })
-  otpChannel: OTPChannelEnum;
+  identifier: string;
 
   @ApiProperty({
     required: false,
     example: 'password',
-    description: 'User password',
+    description: 'User password (staff only)',
   })
   @IsOptional()
   @IsString({ message: 'Password must be a string' })

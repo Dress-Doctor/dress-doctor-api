@@ -19,7 +19,9 @@ import {
   ApiSuccessResponseWithPagination,
   xApiKey,
   xApiSecret,
+  xChangeReason,
 } from 'src/dto/swagger.dto';
+import { SkipChangeReason } from 'src/helper/decorator/skip-change-reason.decorator';
 import { CreatePriceDto } from './dto/create-price.dto';
 import { FindPriceDto } from './dto/find-price.dto';
 import { QuoteDto } from './dto/quote.dto';
@@ -28,12 +30,16 @@ import { PricingService } from './pricing.service';
 @Controller('pricing')
 @ApiHeader(xApiKey)
 @ApiHeader(xApiSecret)
+@ApiHeader(xChangeReason)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
 @ApiBearerAuth('access-token')
 export class PricingController {
   constructor(private readonly pricingService: PricingService) {}
 
+  // A POST that reads: it prices a hypothetical basket and writes nothing, so
+  // there is no change for a reason to explain.
+  @SkipChangeReason()
   @Post('quote')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Price a basket without creating an order' })

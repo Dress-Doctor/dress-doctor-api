@@ -1,11 +1,9 @@
-import { Logger, RequestMethod, VersioningType } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { configureApp, corsOptions } from './config/app-setup';
 import swaggerConfig from './config/swagger.config';
-import { HTTPExceptionFilter } from './helper/exception-filters/http.exception-filter';
-import { HTTPResponseInterceptor } from './helper/interceptor/http.interceptor';
-import { AppValidationPipe } from './helper/pipe/app-validation.pipe';
 import { FileLoggerService } from './helper/service/file-logger.service';
 
 async function bootstrap() {
@@ -18,29 +16,10 @@ async function bootstrap() {
     }),
   });
 
-  // Cors
-  app.enableCors({
-    credentials: true,
-    methods: 'GET, HEAD, PUT, POST',
-    origin: ['http://localhost:5173', 'http://localhost:3000'],
-  });
-
-  // API Versioning
-  app.setGlobalPrefix('api', {
-    exclude: [
-      { path: 'o/*path', method: RequestMethod.GET },
-      { path: 'health', method: RequestMethod.GET },
-      { path: 'ready', method: RequestMethod.GET },
-    ],
-  });
-  app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
-
-  // HTTP Interceptor / Exception Filter
-  app.useGlobalFilters(new HTTPExceptionFilter());
-  app.useGlobalInterceptors(new HTTPResponseInterceptor());
-
-  // Handle Class-Validation Errors
-  app.useGlobalPipes(AppValidationPipe);
+  // Cookie parsing, prefix, versioning, envelope — shared with the e2e specs
+  // so tests exercise the same app shape production serves.
+  configureApp(app);
+  app.enableCors(corsOptions());
 
   // Swagger Documentation
   const document = SwaggerModule.createDocument(app, swaggerConfig);

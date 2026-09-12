@@ -14,6 +14,9 @@ import request from 'supertest';
 import { HTTPExceptionFilter } from '../src/helper/exception-filters/http.exception-filter';
 import { HTTPResponseInterceptor } from '../src/helper/interceptor/http.interceptor';
 import { AppValidationPipe } from '../src/helper/pipe/app-validation.pipe';
+import { redisTestEnv } from './redis-test-env';
+import { seedBaseline } from './seed-baseline';
+import { testUserReference } from './user-reference';
 
 /**
  * Subscription module over HTTP (§2.2): plan catalog, lifecycle, and the
@@ -26,7 +29,13 @@ describe('Subscriptions + pieces overage (e2e)', () => {
 
   let app: INestApplication;
   let rs: MongoMemoryReplSet;
-  const apiHeaders = { 'x-api-key': 'e2e-key', 'x-api-secret': 'e2e-secret' };
+  const apiHeaders = {
+    'x-api-key': 'e2e-key',
+    'x-api-secret': 'e2e-secret',
+    // Every mutation must say why it is being made; these suites are not
+    // testing that rule, so they answer it once here.
+    'x-change-reason': 'automated end-to-end test',
+  };
   let adminToken: string;
   let customerUserId: Types.ObjectId;
   let subscriptionId: string;
@@ -40,9 +49,7 @@ describe('Subscriptions + pieces overage (e2e)', () => {
     rs = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
     Object.assign(process.env, {
       DATABASE_URL: rs.getUri('subs-e2e'),
-      REDIS_HOST: process.env.REDIS_HOST ?? '127.0.0.1',
-      REDIS_PORT: process.env.REDIS_PORT ?? '6379',
-      REDIS_NAME: `subs-e2e-${Date.now()}`,
+      ...redisTestEnv('subs'),
       JWT_SECRET: 'e2e-secret-min-16-chars',
       JWT_ACCESS_TTL: '15m',
       SALT: bcrypt.genSaltSync(10),
@@ -58,8 +65,14 @@ describe('Subscriptions + pieces overage (e2e)', () => {
     });
 
     const { AppModule } = require('../src/app.module');
+    const {
+      QueueProcessorModule,
+    } = require('../src/queue/queue-processor.module');
     const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
+      // AppModule is the API half only — processors run in the worker
+      // (src/worker.module.ts). A spec that exercises the real queue loop has
+      // to stand both halves up, the way api + worker do in deployment.
+      imports: [AppModule, QueueProcessorModule],
     }).compile();
 
     app = moduleRef.createNestApplication();
@@ -76,11 +89,10 @@ describe('Subscriptions + pieces overage (e2e)', () => {
     app.useGlobalPipes(AppValidationPipe);
     await app.init();
 
+    // The baseline data no longer seeds itself on boot: ask for it, and
+    // wait for it to finish rather than polling for its last row.
+    await seedBaseline(app as never);
     const apiClientModel = model('ApiClient');
-    for (let i = 0; i < 120; i++) {
-      if (await apiClientModel.findOne({ name: 'System' })) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
     await apiClientModel.create({
       name: 'e2e',
       key: 'e2e-key',
@@ -94,6 +106,7 @@ describe('Subscriptions + pieces overage (e2e)', () => {
     });
     const manager = await model('Role').findOne({ roleName: 'Manager' });
     const admin = await model('User').create({
+      reference: testUserReference(),
       firstName: 'E2E',
       lastName: 'Admin',
       phone: '690000020',
@@ -116,6 +129,7 @@ describe('Subscriptions + pieces overage (e2e)', () => {
       userTypeName: 'CUSTOMER',
     });
     const customer = await model('User').create({
+      reference: testUserReference(),
       firstName: 'Sub',
       lastName: 'Customer',
       phone: '622222200',

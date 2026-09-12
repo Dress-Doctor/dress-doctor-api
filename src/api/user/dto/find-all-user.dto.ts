@@ -1,56 +1,60 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import {
-  IsDefined,
-  IsInt,
-  IsMongoId,
-  IsOptional,
-  IsString,
-  Max,
-  Min,
-} from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsDateString, IsOptional, IsString } from 'class-validator';
+import { PaginationDto } from 'src/dto/request-data.dto';
 
-export class FindAllUserDto {
-  @ApiProperty({
-    example: 1,
-    required: true,
-    description: 'Specifies the page number of the results to retrieve',
-  })
-  @IsDefined({ message: 'page is required' })
-  @Type(() => Number)
-  @IsInt({ message: 'page must be a number' })
-  @Min(1, { message: 'page must be at least 1' })
-  page: number;
-
-  @ApiProperty({
-    required: true,
-    example: 10,
-    description: 'Defines the number of items per page',
-  })
-  @IsDefined({ message: 'size is required' })
-  @Type(() => Number)
-  @IsInt({ message: 'size must be a number' })
-  @Min(1, { message: 'size must be at least 1' })
-  @Max(20, { message: 'size cannot be greater than 20' })
-  size: number;
+/**
+ * The staff file's query. Extends `PaginationDto` rather than restating
+ * `page`/`size`/`sort`, so the bounds are the same ones every other list on
+ * the platform uses (`size` ≤ 100) and a default page is a default page
+ * everywhere.
+ */
+export class FindAllUserDto extends PaginationDto {
+  // No `userType` filter: this module answers for staff and nobody else, so
+  // there is no second type to narrow to. Customers are read through
+  // `/v1/customers`, which is the endpoint that knows about orders, spend and
+  // a home office.
 
   @ApiProperty({
     required: false,
-    example: 'createdAt:asc,id:desc',
+    example: 'jane',
     description:
-      'Specifies the criteria and direction for ordering the results',
+      'Free-text search on reference, first name, last name, email, phone ' +
+      'or whatsapp phone',
   })
   @IsOptional()
   @IsString()
-  sort: string;
+  q?: string;
 
   @ApiProperty({
     required: false,
-    example: '64b8c9f1e1d2c3a4b5f6g7h',
     description:
-      'Specifies the criteria and direction for ordering the results',
+      'Start of the createdAt range (ISO). Omitted means no lower bound.',
+    example: '2026-07-01',
   })
   @IsOptional()
-  @IsMongoId({ message: 'userTypeId must be a valid MongoDB ObjectId' })
-  userTypeId?: string;
+  @IsDateString({}, { message: 'startDate must be an ISO date' })
+  startDate?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'End of the createdAt range (ISO). A date without a time covers the ' +
+      'whole day. Omitted means no upper bound.',
+    example: '2026-08-05',
+  })
+  @IsOptional()
+  @IsDateString({}, { message: 'endDate must be an ISO date' })
+  endDate?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'User status. Omitted returns both.',
+  })
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === undefined ? undefined : value === 'true' || value === true,
+  )
+  @IsBoolean()
+  isActive?: boolean;
 }

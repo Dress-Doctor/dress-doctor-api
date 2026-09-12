@@ -8,22 +8,42 @@ export class PaymentEntity {
   _id: string;
 
   @ApiProperty({
-    description: 'Order ID',
-    example: '507f1f77bcf86cd799439011',
+    description: "The payment's human-readable identifier",
+    example: 'PY-A4F92C',
   })
-  orderId: string;
+  reference: string;
 
   @ApiProperty({
-    description: 'Payment method ID',
-    example: '507f1f77bcf86cd799439011',
+    description: 'The order the payment settles, resolved to the order itself',
+    type: Object,
   })
-  paymentMethodId: string;
+  orderId: Record<string, unknown>;
 
   @ApiProperty({
-    description: 'Payment status ID',
-    example: '507f1f77bcf86cd799439011',
+    description: 'Payment method, resolved to the method itself',
+    type: Object,
   })
-  paymentStatusId: string;
+  paymentMethodId: Record<string, unknown>;
+
+  @ApiProperty({
+    description: 'Payment type, resolved to the type itself',
+    type: Object,
+  })
+  paymentTypeId: Record<string, unknown>;
+
+  @ApiProperty({
+    description: 'Office the payment was taken at, resolved to the office',
+    type: Object,
+    required: false,
+  })
+  officeId?: Record<string, unknown>;
+
+  @ApiProperty({
+    description: 'Customer who paid, resolved to the user',
+    type: Object,
+    required: false,
+  })
+  customerId?: Record<string, unknown>;
 
   @ApiProperty({
     description: 'Amount paid',
@@ -32,11 +52,11 @@ export class PaymentEntity {
   amount: number;
 
   @ApiProperty({
-    description: 'User who received the payment',
-    example: '507f1f77bcf86cd799439011',
+    description: 'Staff member who received the payment, resolved to the user',
+    type: Object,
     required: false,
   })
-  receivedBy?: string;
+  receivedBy?: Record<string, unknown>;
 
   @ApiProperty({
     description: 'Date and time when payment was made',
@@ -52,10 +72,10 @@ export class PaymentEntity {
   transactionRef?: string;
 
   @ApiProperty({
-    description: 'Currency ID',
-    example: '507f1f77bcf86cd799439011',
+    description: 'Currency the amount is in, resolved to the currency itself',
+    type: Object,
   })
-  currencyId: string;
+  currencyId: Record<string, unknown>;
 
   @ApiProperty({
     description: 'Payment note',
@@ -75,11 +95,4 @@ export class PaymentEntity {
     example: '2026-01-04T13:09:58.201Z',
   })
   updatedAt: Date;
-
-  @ApiProperty({
-    required: true,
-    example: 'REFUND',
-    description: 'Payment type',
-  })
-  paymentType: string;
 }

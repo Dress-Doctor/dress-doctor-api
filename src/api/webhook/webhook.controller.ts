@@ -15,9 +15,12 @@ import { ApiOperation } from '@nestjs/swagger';
 import { type Request, type Response } from 'express';
 import { Public } from 'src/helper/decorator/public.decorator';
 import { SkipApiKeyCheck } from 'src/helper/decorator/skip-api-key.decorator';
+import { SkipChangeReason } from 'src/helper/decorator/skip-change-reason.decorator';
 import { WebhookService } from './webhook.service';
 
 @Controller('webhooks/whatsapp')
+// Inbound from Meta — there is no staff member to ask for a reason.
+@SkipChangeReason()
 export class WebhookController {
   constructor(private readonly webhookService: WebhookService) {}
 

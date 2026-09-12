@@ -30,6 +30,32 @@ export class AppUtilService {
   }
 
   /**
+   * Parses the upper bound of a date filter.
+   *
+   * A date-only string (`'2026-08-05'`) carries no time, so `new Date()` puts
+   * it at that day's midnight — an upper bound built from it silently drops
+   * everything recorded during the day the caller asked for. Such a value is
+   * extended to the last millisecond of the day (UTC); a value that names an
+   * explicit time is taken as given.
+   *
+   * @param value - An ISO date or date-time string, or undefined.
+   * @returns The end of the window, or undefined when no bound was given.
+   */
+  parseRangeEnd(value?: string): Date | undefined {
+    if (!value) return undefined;
+
+    // Trim before parsing, not just before testing: a padded value falls out of
+    // the ISO fast path and into the legacy parser, which reads a bare date as
+    // local midnight and shifts the whole window by the UTC offset.
+    const trimmed = value.trim();
+    const end = new Date(trimmed);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      end.setUTCHours(23, 59, 59, 999);
+    }
+    return end;
+  }
+
+  /**
    * Escapes regex metacharacters in a user-supplied string so it can be used as
    * a literal inside a `RegExp` (e.g. free-text search) without injection.
    */

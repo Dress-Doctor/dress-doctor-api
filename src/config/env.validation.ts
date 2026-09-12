@@ -14,6 +14,15 @@ export const envValidationSchema = Joi.object({
   REDIS_HOST: Joi.string().required(),
   REDIS_PORT: Joi.number().port().required(),
   REDIS_NAME: Joi.string().required(),
+  // Logical database index. Real environments stay on 0; the e2e suites move
+  // to their own db so test keys can never sit beside dev/stage data.
+  REDIS_DB: Joi.number().min(0).max(15).default(0),
+
+  // How long the who-did-what trail is kept, in days. Read when the Activity
+  // schema builds its TTL index, so changing it only affects a collection
+  // that does not exist yet — moving an existing horizon needs a collMod
+  // migration on expireAfterSeconds.
+  ACTIVITY_RETENTION_DAYS: Joi.number().min(1).default(730),
 
   // Auth
   JWT_SECRET: Joi.string().min(16).required(),
@@ -52,12 +61,4 @@ export const envValidationSchema = Joi.object({
   // Customer Service destination for inactivity alerts (E.164). Optional in
   // dev — the scan logs + counts skipped alerts when unset.
   CS_WHATSAPP_PHONE: Joi.string().optional(),
-
-  // Google Sheets migration (Phase 1 script) — optional
-  GOOGLE_APPLICATION_CREDENTIALS: Joi.string().optional(),
-  SEED_ITEMS: Joi.string().valid('YES', 'NO').default('NO'),
-
-  // Platform client credentials used by external callers, not read server-side
-  API_KEY: Joi.string().optional(),
-  API_SECRET: Joi.string().optional(),
 }).unknown(true);

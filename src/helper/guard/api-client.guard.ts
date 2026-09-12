@@ -16,6 +16,7 @@ import { OfficeTypeEnum } from 'src/schema/office/office.dto';
 import { Office } from 'src/schema/office/office.schema';
 import { SKIP_API_KEY } from '../decorator/skip-api-key.decorator';
 import { ApiClientLookupService } from '../service/api-client-lookup.service';
+import { CHANGE_REASON_HEADER } from './change-reason.guard';
 
 @Injectable()
 export class ApiClientGuard implements CanActivate {
@@ -90,9 +91,19 @@ export class ApiClientGuard implements CanActivate {
     const officeId = await this.getOfficeId(request.headers.cookie);
     const language = this.getLanguage(request.headers['accept-language']);
 
+    // Read here rather than in ChangeReasonGuard because this is where
+    // `data` is built: global guards from different modules have no
+    // guaranteed order, and the reason must not depend on winning that race.
+    // ChangeReasonGuard is what rejects a mutation that omitted it.
+    const rawReason = request.headers[CHANGE_REASON_HEADER];
+    const reason = (
+      Array.isArray(rawReason) ? rawReason[0] : rawReason
+    )?.trim();
+
     (request as AppRequest).data = {
       language,
       officeId,
+      reason,
       ...apiClient,
     } as RequestDataDto;
     return true;

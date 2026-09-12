@@ -49,7 +49,7 @@ describe('NotificationService (WhatsApp dispatch)', () => {
     service = new NotificationService(
       notificationModel as never,
       templateModel as never,
-      {} as never, // i18n
+      { t: () => ({}) } as never, // i18n
       {
         renderTemplate: (s: string) => s,
         getLogText: () => '',
@@ -95,18 +95,145 @@ describe('NotificationService (WhatsApp dispatch)', () => {
       expect(queue.add).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({ dedupKey: 'order-status:o1:READY' }),
-        { jobId: 'order-status-o1-READY' },
+        expect.objectContaining({ jobId: 'order-status-o1-READY' }),
       );
     });
 
     it('enqueues without a jobId when there is no dedupKey', async () => {
       await service.addToQueue(data);
 
+      const [, , opts] = queue.add.mock.calls[0] as [
+        string,
+        unknown,
+        Record<string, unknown>,
+      ];
+      expect(opts).not.toHaveProperty('jobId');
+    });
+
+    // A 421 "try again later" needs re-trying further apart than the
+    // queue-wide default, and for longer than three attempts.
+    it('enqueues with the throttle-tolerant retry budget', async () => {
+      await service.addToQueue(data);
+
       expect(queue.add).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ templateName: data.templateName }),
-        undefined,
+        expect.anything(),
+        expect.objectContaining({
+          attempts: 5,
+          backoff: { type: 'exponential', delay: 10_000 },
+        }),
       );
     });
+  });
+});
+
+describe('NotificationService (email dispatch)', () => {
+  let service: NotificationService;
+  let notificationModel: { create: jest.Mock; exists: jest.Mock };
+  let templateModel: { findOne: jest.Mock };
+  let userModel: { findOne: jest.Mock };
+  let sendMail: jest.Mock;
+
+  const emailTemplate = {
+    channel: OTPChannelEnum.EMAIL,
+    templateName: NotificationTemplateNameEnum.LOGIN_VERIFICATION_CODE,
+    variables: ['code'],
+    titleEn: 'Your code',
+    titleFr: 'Votre code',
+  };
+
+  const emailData: SendNotificationDto = {
+    templateName: NotificationTemplateNameEnum.LOGIN_VERIFICATION_CODE,
+    otpChannel: OTPChannelEnum.EMAIL,
+    language: LanguageEum.FR,
+    variables: { code: '123456' },
+    recipients: [{ name: 'Ada', address: 'ada@example.com' }],
+  };
+
+  beforeEach(() => {
+    notificationModel = {
+      create: jest.fn().mockResolvedValue({}),
+      exists: jest.fn().mockResolvedValue(null),
+    };
+    templateModel = { findOne: jest.fn().mockResolvedValue(emailTemplate) };
+    userModel = {
+      findOne: jest.fn().mockResolvedValue({ _id: new Types.ObjectId() }),
+    };
+    sendMail = jest.fn().mockResolvedValue({ messageId: 'smtp-1' });
+
+    service = new NotificationService(
+      notificationModel as never,
+      templateModel as never,
+      { t: () => ({}) } as never, // i18n
+      {
+        renderTemplate: (t: string) => t,
+        getLogText: () => '',
+      } as never, // appUtilService
+      userModel as never,
+      { send: jest.fn() } as never, // whatsappProvider
+      { add: jest.fn() } as never, // queue
+    );
+    // Stand in for the pooled SMTP transport onModuleInit would build.
+    Object.assign(service, { transport: { sendMail } });
+  });
+
+  it('sends the mail and writes the delivery log', async () => {
+    await service.send(emailData);
+
+    expect(sendMail).toHaveBeenCalledTimes(1);
+    expect(notificationModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: OTPChannelEnum.EMAIL,
+        status: NotificationStatusEnum.SEND,
+      }),
+    );
+  });
+
+  // The whole point of dropping the old catch: a dead SMTP host has to reach
+  // the processor so BullMQ retries and /metrics counts the failure, instead
+  // of the job completing with the mail never sent.
+  it('lets an SMTP failure escape so the job retries', async () => {
+    sendMail.mockRejectedValue(new Error('ECONNREFUSED'));
+
+    await expect(service.send(emailData)).rejects.toThrow('ECONNREFUSED');
+    expect(notificationModel.create).not.toHaveBeenCalled();
+  });
+
+  it('skips a send whose dedupKey is already in the delivery log', async () => {
+    notificationModel.exists.mockResolvedValue({ _id: new Types.ObjectId() });
+
+    await service.send({ ...emailData, dedupKey: 'payment-receipt:p1' });
+
+    expect(sendMail).not.toHaveBeenCalled();
+    expect(notificationModel.create).not.toHaveBeenCalled();
+  });
+
+  // The mail has already gone out by then; throwing would retry it forever.
+  it('does not fail the job when a recipient has no user row', async () => {
+    userModel.findOne.mockResolvedValue(null);
+
+    await expect(service.send(emailData)).resolves.toBeUndefined();
+    expect(sendMail).toHaveBeenCalledTimes(1);
+    expect(notificationModel.create).not.toHaveBeenCalled();
+  });
+
+  it('carries the dedupKey on the first recipient row only', async () => {
+    await service.send({
+      ...emailData,
+      recipients: [
+        { name: 'Ada', address: 'ada@example.com' },
+        { name: 'Bo', address: 'bo@example.com' },
+      ],
+      dedupKey: 'order-status:o1:READY',
+    });
+
+    expect(notificationModel.create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ dedupKey: 'order-status:o1:READY' }),
+    );
+    expect(notificationModel.create).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ dedupKey: undefined }),
+    );
   });
 });

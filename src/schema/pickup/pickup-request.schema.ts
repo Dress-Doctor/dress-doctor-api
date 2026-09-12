@@ -30,14 +30,22 @@ export class PickupRequest extends Document<Types.ObjectId> {
   @Prop({ required: false })
   note?: string;
 
-  @Prop({ required: true, type: Types.ObjectId, ref: PickupStatus.name })
+  @Prop({
+    index: true,
+    required: true,
+    type: Types.ObjectId,
+    ref: PickupStatus.name,
+  })
   pickupStatusId: Types.ObjectId;
 
-  @Prop({ required: false, type: Types.ObjectId, ref: User.name })
+  @Prop({ required: false, index: true, type: Types.ObjectId, ref: User.name })
   confirmedBy: Types.ObjectId;
 
-  @Prop({ required: true, type: Types.ObjectId, ref: Office.name })
+  @Prop({ required: true, index: true, type: Types.ObjectId, ref: Office.name })
   officeId: Types.ObjectId;
 }
 
 export const PickupRequestSchema = SchemaFactory.createForClass(PickupRequest);
+
+// The list windows on createdAt and sorts newest-first by default.
+PickupRequestSchema.index({ createdAt: -1 });

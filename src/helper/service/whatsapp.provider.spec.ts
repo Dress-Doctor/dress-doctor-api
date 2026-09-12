@@ -31,7 +31,9 @@ describe('WhatsAppProvider', () => {
 
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ messages: [{ id: 'wamid.123' }] }),
+      status: 200,
+      text: () =>
+        Promise.resolve(JSON.stringify({ messages: [{ id: 'wamid.123' }] })),
     } as Response);
 
     const res = await provider.send({
@@ -55,7 +57,7 @@ describe('WhatsAppProvider', () => {
     jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: false,
       status: 400,
-      json: () => Promise.resolve({ error: 'bad' }),
+      text: () => Promise.resolve(JSON.stringify({ error: 'bad' })),
     } as Response);
 
     await expect(
@@ -66,5 +68,27 @@ describe('WhatsAppProvider', () => {
         variables: {},
       }),
     ).rejects.toThrow(/WhatsApp send failed/);
+  });
+
+  it('reports the provider’s own words when the error body is not JSON', async () => {
+    process.env.WHATSAPP_API_URL = 'https://graph.example.com';
+    process.env.WHATSAPP_TOKEN = 'tok';
+    process.env.WHATSAPP_PHONE_NUMBER = 'PN1';
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 403,
+      text: () => Promise.resolve('ERROR: phone number not registered'),
+    } as Response);
+
+    // Parsing the body before checking `res.ok` used to turn this into
+    // "Unexpected token 'E'", which said nothing about what went wrong.
+    await expect(
+      provider.send({
+        to: '237690000000',
+        templateName: 't',
+        language: 'fr',
+        variables: {},
+      }),
+    ).rejects.toThrow(/403 ERROR: phone number not registered/);
   });
 });

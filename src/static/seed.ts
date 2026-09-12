@@ -168,59 +168,72 @@ export default {
 
   roles: [
     {
+      seedKey: 'co-founder',
       roleName: RoleEnum.CO_FOUNDER,
       description:
         'Provides strategic direction, oversees company growth, and supports key decision-making across the business.',
     },
     {
+      seedKey: 'manager',
       roleName: RoleEnum.MANAGER,
       description:
         'Manages daily operations, coordinates teams, and ensures business goals are met efficiently.',
     },
     {
+      seedKey: 'office-manager',
       roleName: RoleEnum.OFFICE_MANAGER,
       description:
         'Oversees office administration, staff coordination, and ensures smooth day-to-day office operations.',
     },
     {
+      seedKey: 'factory-manager',
       roleName: RoleEnum.FACTORY_MANAGER,
       description:
         'Supervises factory operations, manages production workflows, and ensures quality and efficiency standards are maintained.',
     },
     {
+      seedKey: 'cashier',
       roleName: RoleEnum.CASHIER,
       description: 'Records payments and reconciles till at an office.',
     },
     {
+      seedKey: 'driver',
       roleName: RoleEnum.DRIVER,
       description: 'Handles pickup and delivery assignments.',
     },
     {
+      seedKey: 'laundry-staff',
       roleName: RoleEnum.LAUNDRY_STAFF,
       description: 'Processes orders through washing/drying/ironing stages.',
     },
     {
+      seedKey: 'customer-service',
       roleName: RoleEnum.CUSTOMER_SERVICE,
       description:
         'Handles customer inquiries, order intake, and pickup scheduling.',
     },
     {
+      seedKey: 'treasurer',
       roleName: RoleEnum.TREASURER,
       description: 'Oversees payments, reconciliation, and financial reports.',
     },
     {
+      seedKey: 'secretary',
       roleName: RoleEnum.SECRETARY,
       description: 'Handles office administration and record-keeping.',
     },
     {
+      seedKey: 'customer',
       roleName: RoleEnum.CUSTOMER,
       description: 'External customer placing and tracking their own orders.',
     },
     {
+      seedKey: 'referrer',
       roleName: RoleEnum.REFERRER,
       description: 'External user who refers new customers.',
     },
     {
+      seedKey: 'affiliate',
       roleName: RoleEnum.AFFILIATE,
       description: 'External partner earning commission on referred orders.',
     },
@@ -232,27 +245,91 @@ export default {
       description: 'Full system access',
       action: PermissionActionEnum.MANAGE,
     },
+    // The who-did-what trail is read-only by design: rows are written by the
+    // audit hook and the auth/export paths, never by a request. There is no
+    // CREATE/UPDATE/DELETE to grant, and granting one would be a way to edit
+    // the record of what happened.
+    { subject: SubjectEnum.Activity, action: PermissionActionEnum.READ },
     ...crud(SubjectEnum.Order),
+    // Bulk CSV/Excel export of orders — gated separately from READ so it can be
+    // granted to reporting/oversight roles only.
+    { subject: SubjectEnum.Order, action: PermissionActionEnum.EXPORT },
     ...crud(SubjectEnum.OrderItem),
     ...crud(SubjectEnum.Payment),
+    // Bulk CSV/Excel export of payments — gated separately from READ so it can
+    // be granted to reporting/finance roles only.
+    { subject: SubjectEnum.Payment, action: PermissionActionEnum.EXPORT },
     ...crud(SubjectEnum.PickupRequest),
+    // Bulk CSV/Excel export of pickups — gated separately from READ so it can
+    // be granted to reporting/oversight roles only.
+    { subject: SubjectEnum.PickupRequest, action: PermissionActionEnum.EXPORT },
     ...crud(SubjectEnum.PickupAssignment),
     ...crud(SubjectEnum.Customer),
+    // Bulk CSV/Excel export of customers — gated separately from READ because
+    // the file is a list of names, phones and addresses leaving the building.
+    { subject: SubjectEnum.Customer, action: PermissionActionEnum.EXPORT },
     ...crud(SubjectEnum.User),
+    // Bulk CSV/Excel export of users — gated separately from READ because the
+    // file is a list of names, phones and emails leaving the building.
+    { subject: SubjectEnum.User, action: PermissionActionEnum.EXPORT },
+    // User types are reference data, but they are now editable from the
+    // reference screen, so the write actions have to exist as permission rows
+    // before any role can be granted them. Seeding the row grants nobody
+    // anything on its own — that is what `rolePermissionMap` below does.
+    ...crud(SubjectEnum.UserType),
     ...crud(SubjectEnum.Office),
+    // Bulk CSV/Excel export of offices — gated separately from READ so it can
+    // be granted to reporting/oversight roles only.
+    { subject: SubjectEnum.Office, action: PermissionActionEnum.EXPORT },
     ...crud(SubjectEnum.Item),
     ...crud(SubjectEnum.Promo),
     ...crud(SubjectEnum.AffiliatePartner),
     ...crud(SubjectEnum.AffiliateTransaction),
-    ...readUpdate(SubjectEnum.OrderStatus),
-    ...readUpdate(SubjectEnum.PickupStatus),
-    ...readUpdate(SubjectEnum.PaymentType),
-    ...readUpdate(SubjectEnum.PaymentMethod),
-    ...readUpdate(SubjectEnum.Category),
-    ...readUpdate(SubjectEnum.SubCategory),
-    ...readUpdate(SubjectEnum.Service),
-    ...readUpdate(SubjectEnum.ServiceType),
-    ...readUpdate(SubjectEnum.Currency),
+    // `POST /offices` takes an `officeTypeId`, so any role that may open a
+    // branch has to be able to list the types first. Editable from the
+    // reference screen now — name included — so the write actions have to
+    // exist as permission rows before any role can be granted them.
+    ...crud(SubjectEnum.OfficeType),
+    /*
+     * Roles. `READ` is the oldest of these — assigning someone to an office
+     * takes a `roleId`, so the picker behind it has to list them. The write
+     * actions exist for the roles screen, which adds a role and rewords one.
+     *
+     * `RolePermission` is what that screen really turns: `UPDATE` on it is the
+     * authority to change what a role may do, which is the authority to change
+     * what everybody holding it may do. Seeded as a row so it can be granted;
+     * today only MANAGER and Co-Founder hold it, through `manage all`.
+     */
+    ...crud(SubjectEnum.Role),
+    { subject: SubjectEnum.Permission, action: PermissionActionEnum.READ },
+    { subject: SubjectEnum.RolePermission, action: PermissionActionEnum.READ },
+    {
+      subject: SubjectEnum.RolePermission,
+      action: PermissionActionEnum.UPDATE,
+    },
+    // Order statuses are editable from the reference screen now, so the write
+    // actions have to exist as permission rows before any role can be granted
+    // them. Seeding the row grants nobody anything on its own.
+    ...crud(SubjectEnum.OrderStatus),
+    // Pickup statuses are editable from the reference screen now, so the
+    // write actions have to exist as permission rows before any role can be
+    // granted them. Seeding the row grants nobody anything on its own.
+    ...crud(SubjectEnum.PickupStatus),
+    // Payment types and methods are editable from the reference screen now, so
+    // the write actions have to exist as permission rows before any role can
+    // be granted them. Seeding the row grants nobody anything on its own.
+    ...crud(SubjectEnum.PaymentType),
+    ...crud(SubjectEnum.PaymentMethod),
+    // The catalogue. Editable from the catalogue screen now — added to as
+    // well as reworded — so the write actions have to exist as permission
+    // rows before any role can be granted them. Seeding the row grants nobody
+    // anything on its own; that is what `rolePermissionMap` below does, and
+    // today only MANAGER (`manage all`) holds these.
+    ...crud(SubjectEnum.Category),
+    ...crud(SubjectEnum.SubCategory),
+    ...crud(SubjectEnum.Service),
+    ...crud(SubjectEnum.ServiceType),
+    ...crud(SubjectEnum.Currency),
     ...crud(SubjectEnum.RewardRule),
     ...crud(SubjectEnum.RewardTier),
     ...crud(SubjectEnum.RewardLedger),
@@ -266,35 +343,66 @@ export default {
   // belong to the Phase 1 auth-flow work, not this foundational seed.
   rolePermissionMap: [
     {
-      roleName: RoleEnum.MANAGER,
+      roleSeedKey: 'manager',
       scope: ScopeEnum.GLOBAL,
       permissions: [
         { subject: SubjectEnum.All, action: PermissionActionEnum.MANAGE },
       ],
     },
     {
-      roleName: RoleEnum.OFFICE_MANAGER,
+      roleSeedKey: 'office-manager',
       scope: ScopeEnum.OFFICE,
       permissions: [
         ...crud(SubjectEnum.Order),
+        { subject: SubjectEnum.Order, action: PermissionActionEnum.EXPORT },
+        /**
+         * Garment lines are their own subject, so `crud(Order)` does not carry
+         * them — and `POST /orders` refuses any order that has items without
+         * this. A branch manager who could raise an order but not put a shirt
+         * on it could not book anything at all.
+         */
+        ...crud(SubjectEnum.OrderItem),
         ...crud(SubjectEnum.Payment),
+        { subject: SubjectEnum.Payment, action: PermissionActionEnum.EXPORT },
         ...crud(SubjectEnum.PickupRequest),
+        {
+          subject: SubjectEnum.PickupRequest,
+          action: PermissionActionEnum.EXPORT,
+        },
         ...crud(SubjectEnum.Customer),
+        { subject: SubjectEnum.Customer, action: PermissionActionEnum.EXPORT },
         ...readUpdate(SubjectEnum.FollowUp),
+        /*
+         * The lookups the intake screen fills its pickers from. Read-only, and
+         * the same catalogue reads the CUSTOMER role already holds — a branch
+         * manager taking an order needs to name the garment, the service and
+         * the currency the price is in. `currencyId` is required by
+         * `CreateOrderDto` outright, so without the currency read the order
+         * cannot be built at all.
+         *
+         * Reading the catalogue is not editing it: adding an item or repricing
+         * one stays with `manage all`, as it was.
+         */
+        { subject: SubjectEnum.Currency, action: PermissionActionEnum.READ },
+        { subject: SubjectEnum.Item, action: PermissionActionEnum.READ },
+        { subject: SubjectEnum.ServiceType, action: PermissionActionEnum.READ },
+        // Office-scoped by OFFICE_OWNED, so a branch manager reviews their own
+        // branch's trail and no one else's.
+        { subject: SubjectEnum.Activity, action: PermissionActionEnum.READ },
       ],
     },
     {
-      roleName: RoleEnum.FACTORY_MANAGER,
+      roleSeedKey: 'factory-manager',
       scope: ScopeEnum.OFFICE,
       permissions: [...crud(SubjectEnum.Order), ...crud(SubjectEnum.OrderItem)],
     },
     {
-      roleName: RoleEnum.CASHIER,
+      roleSeedKey: 'cashier',
       scope: ScopeEnum.OFFICE,
       permissions: [...crud(SubjectEnum.Payment)],
     },
     {
-      roleName: RoleEnum.DRIVER,
+      roleSeedKey: 'driver',
       scope: ScopeEnum.OFFICE,
       permissions: [
         ...readUpdate(SubjectEnum.PickupRequest),
@@ -302,7 +410,7 @@ export default {
       ],
     },
     {
-      roleName: RoleEnum.LAUNDRY_STAFF,
+      roleSeedKey: 'laundry-staff',
       scope: ScopeEnum.OFFICE,
       permissions: [
         ...readUpdate(SubjectEnum.Order),
@@ -310,7 +418,7 @@ export default {
       ],
     },
     {
-      roleName: RoleEnum.CUSTOMER_SERVICE,
+      roleSeedKey: 'customer-service',
       scope: ScopeEnum.OFFICE,
       permissions: [
         ...crud(SubjectEnum.Customer),
@@ -327,16 +435,21 @@ export default {
       ],
     },
     {
-      roleName: RoleEnum.TREASURER,
+      roleSeedKey: 'treasurer',
       scope: ScopeEnum.OFFICE,
       permissions: [
         ...crud(SubjectEnum.Payment),
+        { subject: SubjectEnum.Payment, action: PermissionActionEnum.EXPORT },
         ...readUpdate(SubjectEnum.PaymentType),
         ...readUpdate(SubjectEnum.PaymentMethod),
+        // Order exports for financial reconciliation (read is implied by export
+        // in the service, which also reads the list to build the file).
+        { subject: SubjectEnum.Order, action: PermissionActionEnum.READ },
+        { subject: SubjectEnum.Order, action: PermissionActionEnum.EXPORT },
       ],
     },
     {
-      roleName: RoleEnum.SECRETARY,
+      roleSeedKey: 'secretary',
       scope: ScopeEnum.OFFICE,
       permissions: [
         ...readUpdate(SubjectEnum.Office),
@@ -350,7 +463,7 @@ export default {
   // someone else's record simply returns nothing).
   selfRolePermissionMap: [
     {
-      roleName: RoleEnum.CUSTOMER,
+      roleSeedKey: 'customer',
       scope: ScopeEnum.GLOBAL,
       permissions: [
         {
@@ -463,7 +576,7 @@ export default {
       ],
     },
     {
-      roleName: RoleEnum.REFERRER,
+      roleSeedKey: 'referrer',
       scope: ScopeEnum.GLOBAL,
       permissions: [
         {
@@ -474,7 +587,7 @@ export default {
       ],
     },
     {
-      roleName: RoleEnum.AFFILIATE,
+      roleSeedKey: 'affiliate',
       scope: ScopeEnum.GLOBAL,
       permissions: [
         {

@@ -64,6 +64,13 @@ export function scopeFilter(
  * whether the caller's (action, subject) rules permit acting for this
  * customer id. Unrestricted staff → true; a customer's `$self` condition
  * must mention the target id; fully denied → false.
+ *
+ * Only a condition that names `customerId` restricts *which customer* may be
+ * acted for. An office-scoped staff rule (`{ officeId: '$office' }`) says where
+ * the record lands, not who it is for — customers are not office-owned — so it
+ * must not be read as a customer restriction. Treating it as one denied every
+ * OFFICE-scoped role (Office Manager, Factory Manager, …) the ability to create
+ * an order at all.
  */
 export function scopePermitsCustomer(
   ability: MongoAbility<AppAbilityDto, ConditionsDto>,
@@ -76,5 +83,6 @@ export function scopePermitsCustomer(
 
   const flat = JSON.stringify(scope);
   if (flat.includes('"$in":[]')) return false;
+  if (!flat.includes('"customerId"')) return true;
   return flat.includes(customerId.toString());
 }

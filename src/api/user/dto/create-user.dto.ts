@@ -50,11 +50,17 @@ export class CreateUserDto {
   email?: string;
 
   @ApiProperty({
-    required: false,
+    required: true,
     example: 'Admin@12345',
-    description: 'This is required only for admin users',
+    description:
+      'Required. This endpoint creates staff accounts, and staff sign in ' +
+      'with a password — a customer signs in with a one-time code and is ' +
+      'registered through POST /v1/customers instead.',
   })
-  @IsOptional()
+  // Declared here as well as checked in the service, so a missing password
+  // comes back as a per-field error the form can put next to its own field
+  // rather than as a bare message.
+  @IsDefined({ message: 'Password is required' })
   @IsString()
   @MinLength(8, { message: 'Password must be at least 8 characters long' })
   @MaxLength(32, { message: 'Password must be at most 32 characters long' })
@@ -68,7 +74,7 @@ export class CreateUserDto {
   @Matches(/(?=.*[@$!%*?&])/, {
     message: 'Password must contain at least one special character (@$!%*?&)',
   })
-  password?: string;
+  password: string;
 
   @ApiProperty({
     required: true,

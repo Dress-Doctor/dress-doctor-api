@@ -20,6 +20,7 @@ import {
   ApiSuccessResponseWithPagination,
   xApiKey,
   xApiSecret,
+  xChangeReason,
 } from 'src/dto/swagger.dto';
 import { FollowUpService } from './follow-up.service';
 import { FollowUpParamsDto } from './dto/follow-up-params.dto';
@@ -29,6 +30,7 @@ import { ResolveFollowUpDto } from './dto/resolve-follow-up.dto';
 @Controller('follow-ups')
 @ApiHeader(xApiKey)
 @ApiHeader(xApiSecret)
+@ApiHeader(xChangeReason)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
 @ApiBearerAuth('access-token')

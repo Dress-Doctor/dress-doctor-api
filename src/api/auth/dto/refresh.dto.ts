@@ -1,13 +1,19 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsDefined, IsString } from 'class-validator';
+import { IsOptional, IsString } from 'class-validator';
 
 export class RefreshTokenDto {
+  /**
+   * Optional because browser clients hold the refresh token in an HttpOnly
+   * cookie they cannot read. The controller rejects the request when neither
+   * source supplies one.
+   */
   @ApiProperty({
-    required: true,
-    description: 'The refresh token issued at login',
+    required: false,
+    description:
+      'The refresh token issued at login. Omit it when the HttpOnly cookie is present.',
     example: 'a1b2c3…',
   })
-  @IsDefined({ message: 'Refresh token is required' })
+  @IsOptional()
   @IsString({ message: 'Refresh token must be a string' })
-  refreshToken: string;
+  refreshToken?: string;
 }

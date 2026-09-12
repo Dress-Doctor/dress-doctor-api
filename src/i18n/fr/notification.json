@@ -1,13 +1,15 @@
 {
   "email": {
     "login_verification_code": {
-      "title": "Code de vérification: {code}",
-      "greeting": "Hi {firstName},",
-      "instruction": "To securely complete your login to Dress Doctor, please enter the verification code below in the application.",
-      "codeValidity": "This code is valid for {minutes} minutes. Please do not share it with anyone.",
-      "helpText": "If you ever need help, we’re always here for you:",
-      "ignoreMessage": "If you did not initiate this login attempt, you may safely ignore this email.",
-      "footer": "© {year} Dress Doctor. All rights reserved."
+      "title": "Code de vérification : {code}",
+      "greeting": "Bonjour {firstName},",
+      "instruction": "Pour finaliser votre connexion à Dress Doctor en toute sécurité, veuillez saisir le code de vérification ci-dessous dans l’application.",
+      "codeValidFor": "Ce code est valable pendant",
+      "minute": "{minutes} minutes",
+      "doNotShare": "Merci de ne le communiquer à personne.",
+      "helpText": "Besoin d’aide ? Nous sommes toujours à votre écoute :",
+      "ignoreMessage": "Si vous n’êtes pas à l’origine de cette tentative de connexion, vous pouvez ignorer cet e-mail.",
+      "footer": "© {year} Dress Doctor. Tous droits réservés."
     },
     "order_ready": {
       "title": "Votre commande {orderCode} est prête",

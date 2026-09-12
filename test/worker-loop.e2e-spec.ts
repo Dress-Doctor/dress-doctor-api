@@ -5,6 +5,8 @@ import { getQueueToken } from '@nestjs/bullmq';
 import { Test } from '@nestjs/testing';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { Types } from 'mongoose';
+import { redisTestEnv } from './redis-test-env';
+import { testUserReference } from './user-reference';
 
 /**
  * Phase 2 close-out A: the live worker loop against a REAL Redis (CI service
@@ -40,10 +42,7 @@ describe('Worker loop (e2e)', () => {
     rs = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
     Object.assign(process.env, {
       DATABASE_URL: rs.getUri('worker-e2e'),
-      REDIS_HOST: process.env.REDIS_HOST ?? '127.0.0.1',
-      REDIS_PORT: process.env.REDIS_PORT ?? '6379',
-      // Distinct prefix so queues never collide with the HTTP e2e run.
-      REDIS_NAME: `worker-e2e-${Date.now()}`,
+      ...redisTestEnv('worker'),
       JWT_SECRET: 'e2e-secret-min-16-chars',
       JWT_ACCESS_TTL: '15m',
       SALT: '$2b$10$C6UzMDM.H6dfI/f/IKcEeO',
@@ -94,6 +93,9 @@ describe('Worker loop (e2e)', () => {
     const ready =
       (await orderStatusModel.findOne({ orderStatusName: 'READY' })) ??
       (await orderStatusModel.create({
+        // Lookup rows are addressed by reference since 7f908e2, and the field
+        // is required — a fixture has to state one the way a seed does.
+        reference: 'OS-READY',
         orderStatusName: 'READY',
         isActive: true,
       }));
@@ -101,6 +103,9 @@ describe('Worker loop (e2e)', () => {
     const currency =
       (await currencyModel.findOne({ isoCode: 'XAF' })) ??
       (await currencyModel.create({
+        // Same reason as the status above: `reference` is required on every
+        // lookup row since 7f908e2, so a fixture has to state one.
+        reference: 'CY-XAF',
         isoCode: 'XAF',
         countryName: 'Cameroon',
         name: 'Central African CFA Franc',
@@ -121,8 +126,11 @@ describe('Worker loop (e2e)', () => {
       flagged: true, // drifted
       estimatedDeliveryDate: new Date(),
       orderStatusId: ready._id,
+      createdBy: userId,
+      pickedUpBy: userId,
     });
     await model('Payment').create({
+      reference: 'PY-TEST01',
       orderId: order._id,
       amount: 1000,
       paidAt: new Date(),
@@ -275,8 +283,12 @@ describe('Worker loop (e2e)', () => {
     const userTypeModel = model('UserType');
     const customerType =
       (await userTypeModel.findOne({ userTypeName: 'CUSTOMER' })) ??
-      (await userTypeModel.create({ userTypeName: 'CUSTOMER' }));
+      (await userTypeModel.create({
+        reference: 'UT-CUSTOMER',
+        userTypeName: 'CUSTOMER',
+      }));
     const user = await model('User').create({
+      reference: testUserReference(),
       firstName: 'Marie',
       phone: '690000001',
       whatsappPhone: '237690000001',

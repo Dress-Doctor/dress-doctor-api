@@ -1,10 +1,12 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { applyAuditLocals } from 'src/helper/service/audit-context';
 import { REQUEST } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -76,10 +78,19 @@ export class PricingService {
     const { phone, ability } = this.req.user;
     if (!ability.can(action, subject)) {
       this.logger.error(`${phone} not authorized for ${action} ${subject}`);
-      throw new BadRequestException(
+      throw new ForbiddenException(
         'You are not authorized to perform this action',
       );
     }
+  }
+
+  /**
+   * Round to 2 decimals. Weights are fractional (20.5 kg), so every amount
+   * derived from one carries binary-float noise — 20.1 × 1000 lands on
+   * 20100.000000000004 without this.
+   */
+  private round(amount: number): number {
+    return Math.round(amount * 100) / 100;
   }
 
   /** Read a numeric setting (global row). Throws if the rate isn't seeded. */
@@ -129,9 +140,22 @@ export class PricingService {
       .findOne({ ...base, officeId: null })
       .sort({ effectiveFrom: -1 });
     if (!companyWide) {
+      // Name the pair. "One of the items" tells an operator with six garments
+      // in the basket nothing they can act on, and the usual cause — a
+      // (garment, service type) combination that was simply never priced — is
+      // fixable from the price list once you know which one it is.
+      const [item, serviceType] = await Promise.all([
+        this.itemModel.findById(itemId).select('itemName'),
+        this.serviceTypeModel.findById(serviceTypeId).select('serviceTypeName'),
+      ]);
+      const pair = `${item?.itemName ?? itemId.toString()} (${
+        serviceType?.serviceTypeName ?? serviceTypeId.toString()
+      })`;
+      this.logger.error(`no active price row for ${pair}`);
       throw new NotFoundException({
         code: 'PRICE_NOT_FOUND',
-        message: 'No price configured for one of the items',
+        field: 'items',
+        message: `No price is set up for ${pair}. Add it to the price list, or pick a service type that has one.`,
       });
     }
     return companyWide;
@@ -169,19 +193,27 @@ export class PricingService {
     switch (data.pricingModel) {
       case PricingModelEnum.PER_PIECE: {
         for (const line of data.items ?? []) {
-          const price = await this.resolvePrice(
-            new Types.ObjectId(line.itemId),
-            new Types.ObjectId(line.serviceTypeId),
-            officeId,
-          );
-          const lineTotal = price.unitPrice * line.quantity;
-          subtotal += lineTotal;
-          currencyId = price.currencyId;
+          // An agreed price for the line beats the rate card, exactly as
+          // orderAmount does for the order — and it is the only thing that
+          // makes a garment bookable when no price row exists for its
+          // (item, service type) pair.
+          let unitPrice = line.unitPrice;
+          if (unitPrice === undefined) {
+            const price = await this.resolvePrice(
+              new Types.ObjectId(line.itemId),
+              new Types.ObjectId(line.serviceTypeId),
+              officeId,
+            );
+            unitPrice = price.unitPrice;
+            currencyId = price.currencyId;
+          }
+          const lineTotal = this.round(unitPrice * line.quantity);
+          subtotal = this.round(subtotal + lineTotal);
           lines.push({
             itemId: line.itemId,
             serviceTypeId: line.serviceTypeId,
             quantity: line.quantity,
-            unitPrice: price.unitPrice,
+            unitPrice,
             lineTotal,
           });
         }
@@ -198,7 +230,7 @@ export class PricingService {
           });
         }
         const perKgRate = await this.getRate(SettingKeys.perKgRate);
-        subtotal = weight * perKgRate;
+        subtotal = this.round(weight * perKgRate);
         lines = this.qcLines(data.items);
         break;
       }
@@ -230,14 +262,20 @@ export class PricingService {
           // overage lands on the order subtotal.
           const unitPrices: number[] = [];
           for (const line of data.items ?? []) {
-            const price = await this.resolvePrice(
-              new Types.ObjectId(line.itemId),
-              new Types.ObjectId(line.serviceTypeId),
-              officeId,
-            );
-            currencyId = price.currencyId;
+            // Same rule as PER_PIECE: an agreed price for the line is what the
+            // overage is billed at.
+            let unitPrice = line.unitPrice;
+            if (unitPrice === undefined) {
+              const price = await this.resolvePrice(
+                new Types.ObjectId(line.itemId),
+                new Types.ObjectId(line.serviceTypeId),
+                officeId,
+              );
+              unitPrice = price.unitPrice;
+              currencyId = price.currencyId;
+            }
             for (let i = 0; i < line.quantity; i++) {
-              unitPrices.push(price.unitPrice);
+              unitPrices.push(unitPrice);
             }
           }
           unitPrices.sort((a, b) => b - a);
@@ -256,7 +294,7 @@ export class PricingService {
         const overageRate = await this.getRate(SettingKeys.overageRate);
         quotaConsumed = Math.min(weight, sub.remainingQuota);
         const overage = Math.max(0, weight - sub.remainingQuota);
-        subtotal = overage * overageRate;
+        subtotal = this.round(overage * overageRate);
         lines = this.qcLines(data.items);
         break;
       }
@@ -267,6 +305,12 @@ export class PricingService {
         break;
       }
     }
+
+    // An agreed price replaces the computed subtotal — the counter, not the
+    // rate card, decided this one. Everything downstream (promo, discounts,
+    // total) is still derived here, so the numbers stay consistent with each
+    // other whichever way the subtotal was arrived at.
+    if (data.orderAmount !== undefined) subtotal = this.round(data.orderAmount);
 
     // Discounts: manual (staff) and promo (engine) both subtract; total floors
     // at 0 so an order can never go negative.
@@ -284,7 +328,9 @@ export class PricingService {
       promoCodeId = applied.promoCodeId;
     }
 
-    const total = Math.max(0, subtotal - manualDiscount - promoDiscount);
+    const total = this.round(
+      Math.max(0, subtotal - manualDiscount - promoDiscount),
+    );
 
     return {
       pricingModel: data.pricingModel,
@@ -436,7 +482,7 @@ export class PricingService {
       unitPrice: data.unitPrice,
       effectiveFrom: data.effectiveFrom ?? new Date(),
     });
-    price.$locals.changedBy = actorId;
+    applyAuditLocals(price, this.req, actorId);
     await price.save();
     return price;
   }

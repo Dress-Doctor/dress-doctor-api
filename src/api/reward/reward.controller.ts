@@ -20,7 +20,7 @@ import type {
   AppRequestWithUser,
   PaginationDto,
 } from 'src/dto/request-data.dto';
-import { xApiKey, xApiSecret } from 'src/dto/swagger.dto';
+import { xApiKey, xApiSecret, xChangeReason } from 'src/dto/swagger.dto';
 import { RedeemDto } from './dto/redeem.dto';
 import { UpsertRuleDto } from './dto/upsert-rule.dto';
 import { UpsertTierDto } from './dto/upsert-tier.dto';
@@ -29,6 +29,7 @@ import { RewardService } from './reward.service';
 @Controller('rewards')
 @ApiHeader(xApiKey)
 @ApiHeader(xApiSecret)
+@ApiHeader(xChangeReason)
 @ApiSecurity('x-api-key')
 @ApiSecurity('x-api-secret')
 @ApiBearerAuth('access-token')

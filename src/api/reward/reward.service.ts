@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
@@ -13,6 +14,7 @@ import {
   type PaginationDto,
 } from 'src/dto/request-data.dto';
 import { scopeFilter } from 'src/helper/casl/casl-scope';
+import { auditContext } from 'src/helper/service/audit-context';
 import { CaslActionsDto, CaslSubjectsDto } from 'src/helper/casl/casl.dto';
 import { AppUtilService } from 'src/helper/service/app-util.service';
 import { OrderStatus } from 'src/schema/order/order-status.schema';
@@ -62,7 +64,7 @@ export class RewardService {
     if (!ability.can(action, subject)) {
       const log = 'not authorized to perform this action';
       this.logger.error(`[${platform}] ${phone} is ${log}`);
-      throw new BadRequestException(`You are ${log}`);
+      throw new ForbiddenException(`You are ${log}`);
     }
   }
 
@@ -105,7 +107,7 @@ export class RewardService {
       {
         upsert: true,
         returnDocument: 'after',
-        context: { changedBy },
+        context: auditContext(this.req, changedBy),
       } as never,
     );
     return rule as unknown as RewardRule;
@@ -126,7 +128,7 @@ export class RewardService {
       {
         upsert: true,
         returnDocument: 'after',
-        context: { changedBy },
+        context: auditContext(this.req, changedBy),
       } as never,
     );
     return tier as unknown as RewardTier;

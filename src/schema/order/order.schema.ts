@@ -28,6 +28,28 @@ export class Order extends Document<Types.ObjectId> {
   @Prop({ required: true, unique: true })
   orderCode: string;
 
+  /**
+   * What this row was called in the 2026 Sales sheet it came from — `OR-0001`.
+   *
+   * Written once by `migrate-sales`, and the only thing that makes that
+   * migration re-runnable: the codes here are minted fresh, so without this
+   * there is nothing to recognise an already-imported row by, and a second run
+   * would import the whole ledger again.
+   *
+   * Only migrated rows carry one. Anything entered since has none, which is
+   * why the index is sparse.
+   */
+  @Prop({ required: false })
+  legacyCode?: string;
+
+  /**
+   * Anything specific the customer told us about this order — "no starch on
+   * the blue shirt", "collar stain", a delivery instruction. Free text on
+   * purpose: it is what the customer said, not a field we can enumerate.
+   */
+  @Prop({ required: false, trim: true, maxlength: 1000 })
+  note?: string;
+
   // Server-authoritative pricing model (§6-8); never a client price.
   @Prop({
     type: String,
@@ -47,6 +69,13 @@ export class Order extends Document<Types.ObjectId> {
   // subtotal (kept as orderAmount for continuity): Σ lineTotal | weight×rate | overage.
   @Prop({ required: true, default: 0 })
   orderAmount: number;
+
+  // The subtotal a human agreed at the counter, when one was given. It is an
+  // INPUT, not a result: reprice() feeds it back to the pricing engine as the
+  // subtotal, so adding a garment or editing the draft can't quietly reprice
+  // the order away from what the customer was told. Unset = engine prices it.
+  @Prop({ required: false })
+  manualOrderAmount?: number;
 
   // Staff ad-hoc discount (permissioned) — not a promo.
   @Prop({ required: true, default: 0 })
@@ -106,8 +135,30 @@ export class Order extends Document<Types.ObjectId> {
   @Prop({ required: true, default: false })
   flagged: boolean;
 
+  // Business date the laundry was physically received from the customer.
+  // Entered by whoever creates the order (may differ from the system
+  // `createdAt`); defaults to creation time when not supplied. Drives the
+  // orders list date-range filter and turnaround statistics.
+  @Prop({ required: true, default: () => new Date() })
+  receivedAt: Date;
+
   @Prop({ required: true })
   estimatedDeliveryDate: Date;
+
+  // Business date the finished laundry was actually delivered — stamped once,
+  // on the transition into DELIVERED. Null until then. estimatedDeliveryDate
+  // vs deliveredAt gives the on-time / turnaround metric.
+  @Prop({ required: false })
+  deliveredAt?: Date;
+
+  // The user who created the order (staff/system) — set automatically.
+  @Prop({ required: true, type: Types.ObjectId, ref: User.name })
+  createdBy: Types.ObjectId;
+
+  // The agent/staff who physically picked up the customer's laundry. Optional
+  // at creation; defaults to createdBy when not supplied.
+  @Prop({ required: true, type: Types.ObjectId, ref: User.name })
+  pickedUpBy: Types.ObjectId;
 
   @Prop({ required: true, type: Types.ObjectId, ref: OrderStatus.name })
   orderStatusId: Types.ObjectId;
@@ -117,6 +168,11 @@ export const OrderSchema = SchemaFactory.createForClass(Order);
 // The flagged view sorts by outstanding balance then age.
 OrderSchema.index({ flagged: 1, balanceDue: -1, createdAt: 1 });
 OrderSchema.index({ officeId: 1, createdAt: -1 });
+// The orders list filters/sorts by the business receipt date.
+OrderSchema.index({ officeId: 1, receivedAt: -1 });
+// Same list narrowed to one payment status — equality first, then the range
+// the date window scans and the list sorts on.
+OrderSchema.index({ officeId: 1, paymentStatus: 1, receivedAt: -1 });
 OrderSchema.index(
   { pickupRequestId: 1, customerId: 1 },
   {
@@ -126,3 +182,6 @@ OrderSchema.index(
     },
   },
 );
+// Only migrated rows carry a `legacyCode`, so the index is sparse: rows
+// entered since have none and must not collide with each other.
+OrderSchema.index({ legacyCode: 1 }, { unique: true, sparse: true });

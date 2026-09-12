@@ -14,6 +14,7 @@ describe('OrderController', () => {
       findAll: jest
         .fn()
         .mockResolvedValue({ total: 0, data: [], nextPage: null }),
+      findByCode: jest.fn().mockResolvedValue({ orderCode: 'OR-000123' }),
       confirmOrder: jest.fn().mockResolvedValue('confirmed'),
       receiveOrder: jest.fn().mockResolvedValue('received'),
       washOrder: jest.fn().mockResolvedValue('washing'),
@@ -49,6 +50,16 @@ describe('OrderController', () => {
       page: 1,
       size: 10,
     });
+  });
+
+  it('getOrderByCode should call service with the order code', async () => {
+    const req: any = { data: { platform: 'p' }, user: { phone: '123' } };
+    const res = await controller.getOrderByCode(
+      { orderCode: 'OR-000123' } as any,
+      req,
+    );
+    expect(service.findByCode).toHaveBeenCalledWith('OR-000123');
+    expect(res).toEqual({ orderCode: 'OR-000123' });
   });
 
   it('createOrder should call service', async () => {

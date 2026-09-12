@@ -22,6 +22,19 @@ export interface ErrorDetail {
 export interface ErrorObject {
   code: string;
   details?: ErrorDetail[];
+  /**
+   * The one request field a business rule is about, when it is about one —
+   * `DRAFT_EXISTS` naming `customerId`, say. A validation failure uses
+   * `details[]` instead, which carries a message per field.
+   */
+  field?: string;
+  /**
+   * What the caller could have asked for instead, when a rule refuses the
+   * value they sent. `INVALID_STATUS_TRANSITION` lists the statuses the order
+   * could actually move to, so a client does not need its own copy of the
+   * workflow to recover.
+   */
+  allowed?: string[];
 }
 
 export interface ErrorEnvelope {
@@ -42,5 +55,7 @@ export interface HttpErrorPayload {
   code?: string;
   message?: string | string[];
   details?: ErrorDetail[];
+  field?: string;
+  allowed?: string[];
   error?: string;
 }

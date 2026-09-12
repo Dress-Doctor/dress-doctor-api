@@ -5,15 +5,20 @@ import { AppUtilService } from 'src/helper/service/app-util.service';
 import { NotificationService } from 'src/helper/service/notification.service';
 import { maskRecipients, variableKeys } from 'src/helper/pii';
 import { SendNotificationDto } from 'src/schema/notification/notification.dto';
+import { FailedJobsService } from 'src/helper/service/failed-jobs.service';
 import { Queues } from '../queue.dto';
 
-@Processor(Queues.notification)
+// concurrency 5: sends are IO-bound on SMTP, and the default of 1 serialised
+// the whole queue behind whichever message was mid-handshake. Matches the
+// transport's maxConnections so the pool is saturated but not oversubscribed.
+@Processor(Queues.notification, { concurrency: 5 })
 export class NotificationProcessor extends WorkerHost {
   private logger = new Logger(NotificationProcessor.name);
 
   constructor(
     private readonly appUtilService: AppUtilService,
     private readonly notificationService: NotificationService,
+    private readonly failedJobs: FailedJobsService,
   ) {
     super();
   }
@@ -37,9 +42,21 @@ export class NotificationProcessor extends WorkerHost {
   }
 
   @OnWorkerEvent('failed')
-  onFailed(job: Job<SendNotificationDto>, err: Error) {
-    this.logger.error(this.stageLog('FAILED', job.data));
+  async onFailed(job: Job<SendNotificationDto>, err: Error) {
+    const maxAttempts = job.opts.attempts ?? 1;
+    const exhausted = job.attemptsMade >= maxAttempts;
+    this.logger.error(this.stageLog(exhausted ? 'FAILED' : 'RETRY', job.data));
     this.logger.error(err.message, err.stack);
+    if (!exhausted) return;
+
+    // Out of retries: keep it visible in the failed set, since
+    // defaultJobOptions.removeOnFail drops the job itself.
+    await this.failedJobs.record({
+      queue: job.queueName,
+      jobId: job.id ?? 'unknown',
+      jobName: job.name,
+      error: err.message,
+    });
   }
 
   @OnWorkerEvent('completed')

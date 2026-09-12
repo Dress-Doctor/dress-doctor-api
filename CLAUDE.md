@@ -49,7 +49,7 @@ This repo **evolves an existing codebase** — adopt its patterns (§3), don't r
 3. Enrich `PromoCode`: `perCustomerLimit`, `minOrderValue`, `applicableServiceTypeIds`, `stackable`.
 4. Replace `Referral.rewardAmount` with an issued `PromoCode` + `PromoCodeUsage`.
 5. Seed operational roles + (optionally) granular `OrderStatus` stages.
-6. Decide `google-auth-library`/`googleapis` fate: use for the Sheets migration script, or remove.
+6. ~~Decide `google-auth-library`/`googleapis` fate~~ — **done**: removed. The price list lives in `src/static/item.data.ts` (242 rows, the sheet as it stood 2026-08-12), so a seed run needs no Google credentials and a price change arrives as a reviewed commit. Item uniqueness moved from `itemName` to `displayName` (same garment, different filing, different price); `npm run migrate:item-label` swaps the index on an existing database.
 7. De-dup API key/secret re-verification between `LogRequestMiddleware` and `ApiClientGuard`.
 8. **Real tests for `order.service.ts` and `payment.service.ts` first.**
 
@@ -71,6 +71,7 @@ Layered by concern, then feature. `api/<feature>/` holds `*.module.ts`, `*.contr
 ## 8. API conventions
 
 - Base `/v1`; plural resources; nest one level max; non-CRUD actions as sub-path verbs (`POST /orders/:id/transitions`).
+- **Order status moves go through `POST /orders/:orderId/transitions` only.** The caller names a `target`; the server classifies the move against one `ORDER_WORKFLOW` map (`next` = normal progress, `previous` = a one-step correction of a status recorded in error) and derives cancellability (anything but `DELIVERED`/`CANCELLED`) — never duplicate the cancel rule per status. A client cannot declare the *kind* of move, so a correction can't be passed off as progress. Kinds are audited apart (`CORRECT`, `CANCEL`), and leaving CONFIRMED-or-later releases what confirming reserved (subscription quota + promo use) so nothing is double-spent. `GET /orders/:orderCode` publishes `availableTransitions`, so no frontend keeps its own copy of the rules.
 - Always return the success envelope; always paginate lists (`page`, `size≤100`, `sort=field:dir`).
 - Headers: `x-api-key`+`x-api-secret` (platform), `Bearer` (user), `Accept-Language`, `x-idempotency-key` (money/messaging).
 - Keep Swagger accurate — it's the frontend's contract.
@@ -83,6 +84,10 @@ Layered by concern, then feature. `api/<feature>/` holds `*.module.ts`, `*.contr
 - Human-readable codes via `CodeGeneratorService` (`OR-`, `CU-`, `PU-`), office-scoped sequences where noted.
 - Declare indexes on the schema for every list filter/sort path (see database doc). Audited schemas get `attachHistoryHooks()`.
 - Enum-like fields reference lookup collections by id; seed the named values.
+- **Every mutating request carries an `x-change-reason` header (3–500 chars) and every audited write records it.** `ChangeReasonGuard` rejects a POST/PATCH/PUT/DELETE without one (400 `CHANGE_REASON_REQUIRED`); `ApiClientGuard` puts it on `request.data.reason`. Never hand-roll `{ changedBy }` again — build the context with `auditContext(this.req, userId)` (or `applyAuditLocals(doc, this.req, userId)` before a `save()`, `systemAuditContext(id, 'why')` for seeds/cron), so the reason reaches the trail. Exempt only what has no human intent: `@SkipChangeReason()` on auth/OTP, webhooks, api-client bootstrap and the read-shaped `POST /pricing/quote`.
+- **A history row only says what changed if the write went through `findOneAndUpdate` with `{ context: { changedBy } }`.** That is the only path that diffs previous vs `$set` into `changedFields`. A `save()` writes `action: CREATE` with an empty `changedFields`, so it lands on a timeline as a bare marker with nothing in it — fine for an actual creation, useless for an edit. Mutate audited schemas through `findOneAndUpdate` + context; reserve `save()` for creates (and set `doc.$locals.changedBy` so the entry is still attributed).
+- History joins the caller's transaction: pass `{ session }` on transactional writes and the hook reads the previous state and writes the audit row inside that session — so a rollback takes the entry with it, and a create-then-update in one transaction is logged as CREATE + UPDATE, not two creates.
+- Read history back through `HistoryLabelService.labelChanges(SourceModel.name, entries)` (global, no wiring): it turns the foreign keys in a trail into names (`orderStatusId: … → …` becomes `CONFIRMED → RECEIVED`) off the schema's own `ref`s, so no per-table mapping or query. Raw ids stay beside the labels; never return the stored `snapshot` to a client.
 
 ## 10. Queues, events, notifications
 
@@ -116,6 +121,8 @@ Layered by concern, then feature. `api/<feature>/` holds `*.module.ts`, `*.contr
 - Trunk-based; short-lived branches `feat/…`, `fix/…`, `chore/…`. Conventional Commits.
 - PRs require green CI (typecheck, lint, tests, build, coverage gate) + review. `main` always deployable.
 - One image, two entrypoints (`api`, `worker`). Seeds/migrations run as explicit, idempotent, re-runnable steps — never implicitly on boot.
+- **History from the Google Sheet comes in through `npm run migrate:sales`**, not the seed. It takes the four tabs as CSV paths (`--customers --orders --items --payments`) plus a staff roster (`--staff`), and writes nothing until `--commit` — the dry run resolves everything and prints what did not resolve, and it predicts the committing run row for row. Imported rows carry the sheet's code in `legacyCode` (a payment's is `<order>:<date>:<amount>`), which is what makes a second run a no-op. The CSVs hold real customer data and staff passwords: they live in the git-ignored `data/`, and the roster is deleted once the run is done. Money is recomputed from the payments that landed rather than copied from the sheet's own columns, so an order the sheet records as paid a different amount is reported, not obeyed.
+- Seeding is `npm run seed` (`npm run seed:prod` against a built image). It takes a Redis leader lock, so two deploys landing together cannot seed side by side. It creates what is missing and writes nothing at all to a row that needs nothing — a name, description, price or active/inactive somebody set from the panel is theirs, and the seed never puts its own value back. `SEED_RECONCILE_PERMISSIONS=YES` makes the seed's role map authoritative; leave it off wherever people edit roles in the panel.
 
 ## 15. Naming conventions
 
@@ -127,4 +134,4 @@ Layered by concern, then feature. `api/<feature>/` holds `*.module.ts`, `*.contr
 - Put every business rule in a service; compute flags; scope by office; go through the queue for external calls; extend `attachHistoryHooks`; keep Swagger current; write real order/payment tests.
 
 **Don't**
-- Call it "branch"; split staff/customers into two identity tables; hardcode statuses/roles as the runtime source of truth; re-check permissions with `if (role)`; call WhatsApp/SMTP inline in a request; store money as float; log secrets/OTPs; return unpaginated lists; import from `api/` inside `schema/`; leave `order.service`/`payment.service` untested.
+- **Hardcode a status-transition table anywhere but `ORDER_WORKFLOW`** (frontends included — read `availableTransitions` off the order); mutate without a reason on the request; call it "branch"; split staff/customers into two identity tables; hardcode statuses/roles as the runtime source of truth; re-check permissions with `if (role)`; call WhatsApp/SMTP inline in a request; store money as float; log secrets/OTPs; return unpaginated lists; import from `api/` inside `schema/`; **edit an audited schema with `save()` or an update that carries no `changedBy` context — the history row comes out empty**; leave `order.service`/`payment.service` untested.

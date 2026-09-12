@@ -8,6 +8,10 @@ import {
   OrderItemHistorySchema,
 } from './order-item-history.schema';
 import { OrderItem, OrderItemSchema } from './order-item.schema';
+import {
+  OrderStatusHistory,
+  OrderStatusHistorySchema,
+} from './order-status-history.schema';
 import { OrderStatus, OrderStatusSchema } from './order-status.schema';
 import { Order, OrderSchema } from './order.schema';
 
@@ -43,11 +47,25 @@ import { Order, OrderSchema } from './order.schema';
           });
         },
       },
+
+      // Reference data, but editable from the reference screen now, so its
+      // edits are recorded like any other domain write.
+      {
+        name: OrderStatus.name,
+        inject: [getModelToken(OrderStatusHistory.name)],
+        useFactory: (historyModel: Model<OrderStatusHistory>) =>
+          attachHistoryHooks({
+            historyModel,
+            idField: 'orderStatusId',
+            schema: OrderStatusSchema,
+            resourceName: OrderStatus.name,
+          }),
+      },
     ]),
     MongooseModule.forFeature([
-      { name: OrderStatus.name, schema: OrderStatusSchema },
       { name: OrderHistory.name, schema: OrderHistorySchema },
       { name: OrderItemHistory.name, schema: OrderItemHistorySchema },
+      { name: OrderStatusHistory.name, schema: OrderStatusHistorySchema },
     ]),
   ],
   exports: [MongooseModule],

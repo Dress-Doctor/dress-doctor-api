@@ -48,6 +48,8 @@ export class HTTPExceptionFilter implements ExceptionFilter {
     let code: string | undefined = STATUS_CODE_MAP[status];
     let message = isHttp ? exception.message : constant.SERVER_ERROR;
     let details: ErrorDetail[] | undefined;
+    let field: string | undefined;
+    let allowed: string[] | undefined;
 
     if (isHttp) {
       const res = exception.getResponse();
@@ -62,6 +64,17 @@ export class HTTPExceptionFilter implements ExceptionFilter {
         }
         if (Array.isArray(payload.details)) {
           details = payload.details;
+        }
+        // Context a business rule attached to explain itself. Carried through
+        // rather than dropped: a caller that is told only "conflict" has to
+        // keep its own copy of the rule to recover from it.
+        if (typeof payload.field === 'string') {
+          field = payload.field;
+        }
+        if (Array.isArray(payload.allowed)) {
+          allowed = payload.allowed.filter(
+            (value): value is string => typeof value === 'string',
+          );
         }
         if (typeof payload.message === 'string') {
           message = payload.message;
@@ -83,11 +96,19 @@ export class HTTPExceptionFilter implements ExceptionFilter {
       code = 'INTERNAL_SERVER_ERROR';
       message = constant.SERVER_ERROR;
       details = undefined;
+      field = undefined;
+      allowed = undefined;
     }
 
     const error: ErrorObject = { code: code ?? 'ERROR' };
     if (details && details.length > 0) {
       error.details = details;
+    }
+    if (field) {
+      error.field = field;
+    }
+    if (allowed && allowed.length > 0) {
+      error.allowed = allowed;
     }
 
     const errorEnvelope: ErrorEnvelope = {

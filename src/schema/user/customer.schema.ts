@@ -23,6 +23,20 @@ export class Customer extends Document<Types.ObjectId> {
   @Prop({ required: true, unique: true })
   referralCode: string;
 
+  /**
+   * What this row was called in the 2026 Sales sheet it came from — `CU-0001`.
+   *
+   * Written once by `migrate-sales`, and the only thing that makes that
+   * migration re-runnable: the codes here are minted fresh, so without this
+   * there is nothing to recognise an already-imported row by, and a second run
+   * would import the whole ledger again.
+   *
+   * Only migrated rows carry one. Anything entered since has none, which is
+   * why the index is sparse.
+   */
+  @Prop({ required: false })
+  legacyCode?: string;
+
   @Prop({ required: false })
   pickupAddress?: string;
 
@@ -64,3 +78,8 @@ export class Customer extends Document<Types.ObjectId> {
 export const CustomerSchema = SchemaFactory.createForClass(Customer);
 CustomerSchema.index({ lastOrderAt: -1 });
 CustomerSchema.index({ homeOfficeId: 1 });
+// The customers list filters on a registeredAt window and sorts by it.
+CustomerSchema.index({ registeredAt: -1 });
+// Only migrated rows carry a `legacyCode`, so the index is sparse: rows
+// entered since have none and must not collide with each other.
+CustomerSchema.index({ legacyCode: 1 }, { unique: true, sparse: true });

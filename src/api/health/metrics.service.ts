@@ -11,6 +11,7 @@ import {
   ProviderMetrics,
 } from 'src/helper/metrics/provider-metrics.service';
 import { WHATSAPP_PROVIDER_NAME } from 'src/helper/service/whatsapp.provider';
+import { SMTP_PROVIDER_NAME } from 'src/helper/service/notification.service';
 import { Setting, SettingKeys } from 'src/schema/settings/settings.schema';
 
 // Cron is overdue when the last COMPLETED run is older than ~3 intervals —
@@ -22,6 +23,10 @@ const DEFAULT_INACTIVITY_OVERDUE_H = 26; // nightly cron
 interface QueueMetrics {
   counts: Record<string, number>;
   failedSetSize: number;
+  // Age of the job that has been waiting longest, or null when nothing is
+  // waiting. Depth alone can't tell a queue that is briefly busy from one
+  // that is stuck — this can.
+  oldestWaitingMs: number | null;
 }
 
 interface CronMetrics {
@@ -81,7 +86,11 @@ export class MetricsService {
         'delayed',
       );
       const failedSetSize = await this.failedJobs.size(name);
-      queues[name] = { counts, failedSetSize };
+      queues[name] = {
+        counts,
+        failedSetSize,
+        oldestWaitingMs: await this.oldestWaitingMs(queue),
+      };
       if (failedSetSize > 0) {
         alerts.push(
           `failed-set: ${name} has ${failedSetSize} exhausted job(s)`,
@@ -123,7 +132,21 @@ export class MetricsService {
       );
     }
 
-    return { queues, cron, providers: { whatsapp }, alerts };
+    // SMTP is the channel actually in use, so its failure rate and latency
+    // belong beside WhatsApp's rather than only in the log file.
+    const smtp = await this.providerMetrics.read(SMTP_PROVIDER_NAME);
+    if (smtp.failures > 0) {
+      alerts.push(`provider-failures: smtp ${smtp.failures}/${smtp.calls}`);
+    }
+
+    return { queues, cron, providers: { whatsapp, smtp }, alerts };
+  }
+
+  /** Wait time of the head of the waiting list — FIFO, so the oldest job. */
+  private async oldestWaitingMs(queue: Queue): Promise<number | null> {
+    const [oldest] = await queue.getWaiting(0, 0);
+    if (!oldest?.timestamp) return null;
+    return Math.max(0, Date.now() - oldest.timestamp);
   }
 
   private async cronMetrics(

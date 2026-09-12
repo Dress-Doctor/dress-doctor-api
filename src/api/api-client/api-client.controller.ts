@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { ApiOperation } from '@nestjs/swagger';
 import { SkipApiKeyCheck } from 'src/helper/decorator/skip-api-key.decorator';
+import { SkipChangeReason } from 'src/helper/decorator/skip-change-reason.decorator';
 import { ApiClientService } from './api-client.service';
 import { CreateApiClientDto } from './dto/create-api-client.dto';
 
@@ -19,6 +20,9 @@ export class ApiClientController {
   // TODO: Add @ApiResponse
   @Post()
   @SkipApiKeyCheck()
+  // Bootstrap: this is how the first API credentials come into existence,
+  // before any client (or audit trail) exists to explain itself.
+  @SkipChangeReason()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Used to create an api-client' })
   async create(@Body() data: CreateApiClientDto) {

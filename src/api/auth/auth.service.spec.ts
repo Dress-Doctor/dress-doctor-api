@@ -11,6 +11,7 @@ import { RefreshToken } from 'src/schema/user/refresh-token.schema';
 import { UserTypeEum } from 'src/schema/user/user.dto';
 import { User } from 'src/schema/user/user.schema';
 import { AuthService } from './auth.service';
+import { ActivityService } from 'src/helper/service/activity.service';
 
 type MockUser = {
   phone: string;
@@ -35,7 +36,13 @@ describe('AuthService', () => {
     create: jest.Mock;
     findOne: jest.Mock;
     updateOne: jest.Mock;
+    findOneAndUpdate: jest.Mock;
     updateMany: jest.Mock;
+  };
+  let activityService: {
+    record: jest.Mock;
+    recordAuth: jest.Mock;
+    recordFromRequest: jest.Mock;
   };
 
   const buildUser = (over: Partial<MockUser> = {}): MockUser => ({
@@ -57,10 +64,16 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     userModel = { findOne: jest.fn(), findById: jest.fn() };
+    activityService = {
+      record: jest.fn().mockResolvedValue(undefined),
+      recordAuth: jest.fn().mockResolvedValue(undefined),
+      recordFromRequest: jest.fn().mockResolvedValue(undefined),
+    };
     refreshTokenModel = {
       create: jest.fn().mockResolvedValue(undefined),
       findOne: jest.fn(),
       updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
+      findOneAndUpdate: jest.fn().mockResolvedValue({ userId: 'user-1' }),
       updateMany: jest.fn().mockResolvedValue({ modifiedCount: 2 }),
     };
     otpService = {
@@ -79,6 +92,8 @@ describe('AuthService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // The trail observes these services; it never changes what they do.
+        { provide: ActivityService, useValue: activityService },
         AuthService,
         {
           provide: JwtService,
@@ -104,8 +119,7 @@ describe('AuthService', () => {
       mockFindOne(buildUser({ userTypeId: { userTypeName: CUSTOMER } }));
 
       const res = await service.initiateLogin({
-        phone: '698765294',
-        otpChannel: OTPChannelEnum.WHATSAPP,
+        identifier: '698765294',
       });
 
       expect(codeService.verifyHash).not.toHaveBeenCalled();
@@ -127,8 +141,7 @@ describe('AuthService', () => {
       );
 
       await service.initiateLogin({
-        phone: '698765294',
-        otpChannel: OTPChannelEnum.WHATSAPP,
+        identifier: '698765294',
       });
 
       expect(notificationService.addToQueue).toHaveBeenCalledWith(
@@ -142,10 +155,7 @@ describe('AuthService', () => {
     it('routes an email OTP to email', async () => {
       mockFindOne(buildUser());
 
-      await service.initiateLogin({
-        phone: '698765294',
-        otpChannel: OTPChannelEnum.EMAIL,
-      });
+      await service.initiateLogin({ identifier: 'ada@example.com' });
 
       expect(notificationService.addToQueue).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -161,8 +171,7 @@ describe('AuthService', () => {
       mockFindOne(buildUser());
 
       await service.initiateLogin({
-        phone: '698765294',
-        otpChannel: OTPChannelEnum.WHATSAPP,
+        identifier: '698765294',
       });
 
       for (const call of logSpy.mock.calls) {
@@ -176,8 +185,7 @@ describe('AuthService', () => {
 
       await expect(
         service.initiateLogin({
-          phone: '698765294',
-          otpChannel: OTPChannelEnum.WHATSAPP,
+          identifier: '698765294',
           password: 'wrong',
         }),
       ).rejects.toThrow(UnauthorizedException);
@@ -189,10 +197,7 @@ describe('AuthService', () => {
       mockFindOne(buildUser({ userTypeId: { userTypeName: STAFF } }));
 
       await expect(
-        service.initiateLogin({
-          phone: '698765294',
-          otpChannel: OTPChannelEnum.WHATSAPP,
-        }),
+        service.initiateLogin({ identifier: '698765294' }),
       ).rejects.toThrow(UnauthorizedException);
       expect(otpService.requestOtp).not.toHaveBeenCalled();
     });
@@ -202,8 +207,7 @@ describe('AuthService', () => {
       codeService.verifyHash.mockResolvedValue(true);
 
       await service.initiateLogin({
-        phone: '698765294',
-        otpChannel: OTPChannelEnum.WHATSAPP,
+        identifier: '698765294',
         password: 'right',
       });
 
@@ -214,10 +218,7 @@ describe('AuthService', () => {
       mockFindOne(buildUser({ isActive: false }));
 
       await expect(
-        service.initiateLogin({
-          phone: '698765294',
-          otpChannel: OTPChannelEnum.WHATSAPP,
-        }),
+        service.initiateLogin({ identifier: '698765294' }),
       ).rejects.toThrow(ForbiddenException);
     });
 
@@ -225,10 +226,7 @@ describe('AuthService', () => {
       mockFindOne(null);
 
       await expect(
-        service.initiateLogin({
-          phone: '000000000',
-          otpChannel: OTPChannelEnum.WHATSAPP,
-        }),
+        service.initiateLogin({ identifier: '000000000' }),
       ).rejects.toThrow(UnauthorizedException);
     });
 
@@ -236,10 +234,42 @@ describe('AuthService', () => {
       mockFindOne(buildUser({ whatsappPhone: undefined }));
 
       await expect(
-        service.initiateLogin({
-          phone: '698765294',
-          otpChannel: OTPChannelEnum.WHATSAPP,
+        service.initiateLogin({ identifier: '698765294' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('resendOtp', () => {
+    it('customer: re-issues an OTP without a password', async () => {
+      mockFindOne(buildUser({ userTypeId: { userTypeName: CUSTOMER } }));
+
+      const res = await service.resendOtp({ identifier: '698765294' });
+
+      expect(codeService.verifyHash).not.toHaveBeenCalled();
+      expect(otpService.requestOtp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          identifier: '698765294',
+          channel: OTPChannelEnum.WHATSAPP,
         }),
+      );
+      expect(res.otpRef).toBe('otp-ref');
+    });
+
+    it('staff: still requires a valid password to re-issue', async () => {
+      mockFindOne(buildUser({ userTypeId: { userTypeName: STAFF } }));
+      codeService.verifyHash.mockResolvedValue(false);
+
+      await expect(
+        service.resendOtp({ identifier: '698765294', password: 'wrong' }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(otpService.requestOtp).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown user with INVALID_CREDENTIALS', async () => {
+      mockFindOne(null);
+
+      await expect(
+        service.resendOtp({ identifier: '000000000' }),
       ).rejects.toThrow(UnauthorizedException);
     });
   });
@@ -288,7 +318,7 @@ describe('AuthService', () => {
       refreshTokenModel.findOne.mockResolvedValue(stored);
       mockUserById();
 
-      const res = await service.refresh({ refreshToken: 'raw-token' });
+      const res = await service.refresh('raw-token');
 
       expect(res.accessToken).toBe('access.jwt');
       expect(typeof res.refreshToken).toBe('string');
@@ -302,9 +332,9 @@ describe('AuthService', () => {
       stored.revokedAt = new Date();
       refreshTokenModel.findOne.mockResolvedValue(stored);
 
-      await expect(
-        service.refresh({ refreshToken: 'raw-token' }),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.refresh('raw-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
 
       // Breach response: nuke all of the user's still-live refresh tokens.
       expect(refreshTokenModel.updateMany).toHaveBeenCalledTimes(1);
@@ -321,31 +351,52 @@ describe('AuthService', () => {
       stored.expiresAt = new Date(Date.now() - 1000);
       refreshTokenModel.findOne.mockResolvedValue(stored);
 
-      await expect(
-        service.refresh({ refreshToken: 'raw-token' }),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.refresh('raw-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('rejects an unknown token', async () => {
       refreshTokenModel.findOne.mockResolvedValue(null);
 
-      await expect(
-        service.refresh({ refreshToken: 'raw-token' }),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.refresh('raw-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
   });
 
   describe('logout', () => {
+    // findOneAndUpdate rather than updateOne: revoking is the same write, but
+    // the trail needs the row back to know whose session ended.
     it('revokes the presented refresh token', async () => {
-      await service.logout({ refreshToken: 'raw-token' });
-      expect(refreshTokenModel.updateOne).toHaveBeenCalledTimes(1);
-      const [filter, update] = refreshTokenModel.updateOne.mock.calls[0] as [
+      await service.logout('raw-token');
+      expect(refreshTokenModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      const [filter, update] = refreshTokenModel.findOneAndUpdate.mock
+        .calls[0] as [
         { tokenHash: string; revokedAt: { $exists: boolean } },
         { revokedAt: Date },
       ];
       expect(filter.revokedAt).toEqual({ $exists: false });
       expect(typeof filter.tokenHash).toBe('string');
       expect(update.revokedAt).toBeInstanceOf(Date);
+    });
+
+    it('records the sign-out against the session it revoked', async () => {
+      await service.logout('raw-token');
+
+      expect(activityService.recordAuth).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ action: 'auth.logout', userId: 'user-1' }),
+      );
+    });
+
+    // Nothing was revoked, so nobody signed out.
+    it('records nothing for an unknown token', async () => {
+      refreshTokenModel.findOneAndUpdate.mockResolvedValue(null);
+
+      await service.logout('raw-token');
+
+      expect(activityService.recordAuth).not.toHaveBeenCalled();
     });
   });
 });

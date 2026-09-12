@@ -15,6 +15,9 @@ import { CorrelationIdMiddleware } from './helper/middleware/correlation-id.midd
 import { LogRequestMiddleware } from './helper/middleware/log-request.middleware';
 import { ApiClientLookupService } from './helper/service/api-client-lookup.service';
 import { CodeGeneratorService } from './helper/service/code-generator.service';
+import { HistoryLabelModule } from './helper/service/history-label.module';
+import { RedisModule } from './helper/redis/redis.module';
+import { LeaderLockService } from './helper/service/leader-lock.service';
 import { SeederService } from './helper/service/seeder.service';
 import { i18nModule } from './i18n/i18n.module';
 import { SchemaModule } from './schema/schema.module';
@@ -22,6 +25,9 @@ import { ApiClientModule } from './api/api-client/api-client.module';
 import { AuthModule } from './api/auth/auth.module';
 import { APP_GUARD } from '@nestjs/core';
 import { ApiClientGuard } from './helper/guard/api-client.guard';
+import { ChangeReasonGuard } from './helper/guard/change-reason.guard';
+import { CatalogueModule } from './api/catalogue/catalogue.module';
+import { RoleModule } from './api/role/role.module';
 import { UtilModule } from './api/util/util.module';
 import { UserModule } from './api/user/user.module';
 import { CustomerModule } from './api/customer/customer.module';
@@ -35,22 +41,28 @@ import { RewardModule } from './api/reward/reward.module';
 import { SubscriptionModule } from './api/subscription/subscription.module';
 import { EventsModule } from './events/events.module';
 import { MetricsModule } from './helper/metrics/metrics.module';
+import { ActivityRecorderModule } from './helper/activity/activity.module';
+import { ActivityModule } from './api/activity/activity.module';
 import { BullModule } from '@nestjs/bullmq';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { QueueProcessorModule } from './queue/queue-processor.module';
 import { envValidationSchema } from './config/env.validation';
+import { bullPrefix, redisConnection } from './config/redis.config';
 
 @Module({
   imports: [
     i18nModule,
+    RedisModule,
     EventEmitterModule.forRoot(),
     AuthModule,
     SchemaModule,
+    HistoryLabelModule,
     PickupModule,
     OfficeLinkModule,
     HealthModule,
     ApiClientModule,
     UtilModule,
+    CatalogueModule,
+    RoleModule,
     UserModule,
     CustomerModule,
     OfficeModule,
@@ -63,18 +75,20 @@ import { envValidationSchema } from './config/env.validation';
     SubscriptionModule,
     EventsModule,
     MetricsModule,
-    QueueProcessorModule,
+    ActivityRecorderModule,
+    ActivityModule,
+    // No QueueProcessorModule here on purpose: the API only *produces* jobs
+    // (via QueueProducerModule, imported where jobs are enqueued). Processors
+    // run in the worker (src/worker.module.ts), so a request never competes
+    // with an SMTP send for this process' event loop.
     ConfigModule.forRoot({
       isGlobal: true,
       validationSchema: envValidationSchema,
       validationOptions: { abortEarly: false },
     }),
     BullModule.forRoot({
-      connection: {
-        host: process.env.REDIS_HOST,
-        port: Number(process.env.REDIS_PORT),
-      },
-      prefix: `dress-doctor-${process.env.REDIS_NAME}`,
+      connection: redisConnection(),
+      prefix: bullPrefix(),
       defaultJobOptions: {
         attempts: 3,
         removeOnFail: true,
@@ -87,18 +101,17 @@ import { envValidationSchema } from './config/env.validation';
     }),
   ],
   providers: [
+    LeaderLockService,
     SeederService,
     CodeGeneratorService,
     ApiClientLookupService,
     { provide: APP_GUARD, useClass: ApiClientGuard },
+    { provide: APP_GUARD, useClass: ChangeReasonGuard },
   ],
 })
 export class AppModule implements NestModule, OnModuleInit {
   private readonly logger = new Logger(AppModule.name);
-  constructor(
-    @InjectConnection() private readonly connection: Connection,
-    private readonly seederService: SeederService,
-  ) {}
+  constructor(@InjectConnection() private readonly connection: Connection) {}
 
   configure(consumer: MiddlewareConsumer) {
     consumer
@@ -106,15 +119,21 @@ export class AppModule implements NestModule, OnModuleInit {
       .forRoutes('*path');
   }
 
+  /**
+   * Checks the database is there. It does **not** seed.
+   *
+   * Seeding used to happen right here, unawaited, on every start-up. That
+   * meant a restart rewrote rows people had edited in the panel, the writes
+   * landed after the API had already told the world it was ready, and every
+   * replica did it at the same time. It is now an explicit step — `npm run
+   * seed` — that you run when you mean to.
+   */
   onModuleInit() {
-    try {
-      if (this.connection.readyState === ConnectionStates.connected) {
-        this.logger.log('✅ MongoDB connected');
-        void this.seederService.run();
-      } else this.logger.log('❌ Failed to connect to MongoDB');
-    } catch (error) {
-      this.logger.error('❌ Failed to connect to MongoDB', error);
-      process.exit(1); // Stop the server
+    if (this.connection.readyState === ConnectionStates.connected) {
+      this.logger.log('✅ MongoDB connected');
+      return;
     }
+    this.logger.error('❌ Failed to connect to MongoDB');
+    process.exit(1); // Stop the server
   }
 }

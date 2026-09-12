@@ -71,9 +71,24 @@ describe('PricingService', () => {
           },
         },
         { provide: getModelToken(Price.name), useValue: priceModel },
-        { provide: getModelToken(Item.name), useValue: {} },
+        // Only read to name the pair in a PRICE_NOT_FOUND message.
+        {
+          provide: getModelToken(Item.name),
+          useValue: {
+            findById: () => ({
+              select: () => Promise.resolve({ itemName: 'T-Shirt' }),
+            }),
+          },
+        },
         { provide: getModelToken(Currency.name), useValue: {} },
-        { provide: getModelToken(ServiceType.name), useValue: {} },
+        {
+          provide: getModelToken(ServiceType.name),
+          useValue: {
+            findById: () => ({
+              select: () => Promise.resolve({ serviceTypeName: 'Basic' }),
+            }),
+          },
+        },
         { provide: getModelToken(PromoCode.name), useValue: promoCodeModel },
         {
           provide: getModelToken(PromoCodeUsage.name),
@@ -133,6 +148,47 @@ describe('PricingService', () => {
         } as QuoteDto),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('bills an agreed unit price instead of the price list', async () => {
+      // The price list is never consulted, so a pair with no row still books.
+      setResolver(() => null);
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_PIECE,
+        items: [line({ quantity: 3, unitPrice: 750.5 })],
+      } as QuoteDto);
+
+      expect(res.lines[0].unitPrice).toBe(750.5);
+      expect(res.lines[0].lineTotal).toBe(2251.5);
+      expect(res.subtotal).toBe(2251.5);
+    });
+
+    it('mixes agreed and catalog lines in one order', async () => {
+      setResolver(() => ({ unitPrice: 1000, currencyId }));
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_PIECE,
+        items: [line({ quantity: 2, unitPrice: 250 }), line({ quantity: 1 })],
+      } as QuoteDto);
+
+      expect(res.lines[0].lineTotal).toBe(500);
+      expect(res.lines[1].lineTotal).toBe(1000);
+      expect(res.subtotal).toBe(1500);
+    });
+
+    it('names the garment and service type that has no price', async () => {
+      setResolver(() => null);
+      await expect(
+        service.priceOrder({
+          pricingModel: PricingModelEnum.PER_PIECE,
+          items: [line()],
+        } as QuoteDto),
+        // "one of the items" is useless with six garments in the basket.
+      ).rejects.toMatchObject({
+        response: {
+          code: 'PRICE_NOT_FOUND',
+          message: expect.stringContaining('T-Shirt (Basic)') as unknown,
+        },
+      });
+    });
   });
 
   describe('PER_KG', () => {
@@ -148,6 +204,53 @@ describe('PricingService', () => {
       expect(settingModel.findOne).toHaveBeenCalledWith(
         expect.objectContaining({ key: SettingKeys.perKgRate }),
       );
+    });
+
+    it('prices a fractional weight without float noise', async () => {
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_KG,
+        totalWeightKg: 20.1,
+      } as QuoteDto);
+      // 20.1 × 1000 is 20100.000000000004 in binary floating point.
+      expect(res.subtotal).toBe(20100);
+      expect(res.total).toBe(20100);
+    });
+  });
+
+  describe('agreed subtotal (orderAmount)', () => {
+    it('replaces the computed subtotal and still derives the total', async () => {
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_KG,
+        totalWeightKg: 7,
+        orderAmount: 5500.5,
+        manualDiscount: 500,
+      } as QuoteDto);
+      // The rate card says 7000; the counter said 5500.5.
+      expect(res.subtotal).toBe(5500.5);
+      expect(res.total).toBe(5000.5);
+    });
+
+    it('prices a promo against the agreed subtotal, not the rate card', async () => {
+      promoCodeModel.findOne.mockResolvedValue({
+        _id: new Types.ObjectId(),
+        promoCodeName: 'HALF',
+        isActive: true,
+        discountType: RewardTypeEnum.PERCENTAGE,
+        discountValue: 50,
+        minOrderValue: 0,
+        applicableServiceTypeIds: [],
+        perCustomerLimit: 0,
+        usedCount: 0,
+      });
+
+      const res = await service.priceOrder({
+        pricingModel: PricingModelEnum.PER_KG,
+        totalWeightKg: 7,
+        orderAmount: 2000,
+        promoCode: 'HALF',
+      } as QuoteDto);
+      expect(res.promoDiscount).toBe(1000);
+      expect(res.total).toBe(1000);
     });
   });
 

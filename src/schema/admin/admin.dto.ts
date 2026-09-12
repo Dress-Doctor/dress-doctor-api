@@ -9,6 +9,8 @@ export enum HistoryActionEnum {
   UPDATE = 'UPDATE',
   DELETE = 'DELETE',
   ASSIGN = 'ASSIGN',
+  /** Work called off: the record still exists, but its lifecycle ended here. */
+  CANCEL = 'CANCEL',
 }
 
 export enum PermissionActionEnum {
@@ -20,6 +22,7 @@ export enum PermissionActionEnum {
   MANAGE = 'manage',
   UNLOCK = 'UNLOCK',
   CONFIRM = 'CONFIRM',
+  EXPORT = 'EXPORT',
 }
 
 export enum ScopeEnum {
@@ -93,6 +96,9 @@ export enum SubjectEnum {
   // subscriptions
   Subscription = 'Subscription',
   SubscriptionPlan = 'SubscriptionPlan',
+
+  // who-did-what trail
+  Activity = 'Activity',
 }
 
 export enum RoleEnum {

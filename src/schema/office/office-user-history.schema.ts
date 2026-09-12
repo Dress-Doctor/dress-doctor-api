@@ -11,14 +11,39 @@ export class OfficeUserHistory extends Document<Types.ObjectId> {
   @Prop({ required: true, type: Types.ObjectId, ref: OfficeUser.name })
   officeUserId: Types.ObjectId;
 
-  @Prop({ required: true, index: true, type: Types.ObjectId, ref: User.name })
-  userId: Types.ObjectId;
+  /**
+   * The staff member the assignment is about. Optional so a history row is
+   * never rejected for a missing field — the trail is written by a post-save
+   * hook that only knows the assignment's own `_id`, and the snapshot below
+   * carries the user either way.
+   */
+  @Prop({ required: false, index: true, type: Types.ObjectId, ref: User.name })
+  userId?: Types.ObjectId;
+
+  /**
+   * Who made the change, off the audit context every mutating write carries.
+   *
+   * Optional on the schema, like `reason` below: a seed or a cron-driven
+   * repair has no person behind it, and a history row must never be rejected
+   * for a missing field, or the entry is lost entirely.
+   */
+  @Prop({ required: false, type: Types.ObjectId, ref: User.name })
+  changedBy?: Types.ObjectId;
 
   @Prop({ required: false, type: Object, default: {} })
   changedFields?: Record<string, ChangedFieldDto>;
 
   @Prop({ required: true, type: String, enum: HistoryActionEnum })
   action: HistoryActionEnum;
+
+  /**
+   * Why the change was made. Required of every mutating request through the
+   * `x-change-reason` header, so a trail never says only what changed. Kept
+   * optional on the schema on purpose: a history row must never be rejected
+   * for a missing field, or the audit entry is lost entirely.
+   */
+  @Prop({ required: false, trim: true, maxlength: 500 })
+  reason?: string;
 
   @Prop({ required: false, type: Object, default: {} })
   snapshot?: Record<string, any>;

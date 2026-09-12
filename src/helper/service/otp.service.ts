@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { InjectModel } from '@nestjs/mongoose';
+import { randomInt } from 'crypto';
 import { Model } from 'mongoose';
 import appConfig from 'src/config/app-config';
 import { type AppRequest } from 'src/dto/request-data.dto';
@@ -18,7 +19,11 @@ import {
   OtpSecurityState,
   OtpSecurityStateDoc,
 } from 'src/schema/otp/otp-security-state.schema';
-import { RequestOtpDto, VerifyOtpDto } from 'src/schema/otp/otp.dto';
+import {
+  OTPPurposeEnum,
+  RequestOtpDto,
+  VerifyOtpDto,
+} from 'src/schema/otp/otp.dto';
 import { AppAbilityDto, ConditionsDto } from '../casl/casl.dto';
 import { maskPhone } from '../pii';
 import { CodeGeneratorService } from './code-generator.service';
@@ -44,8 +49,16 @@ export class OtpService {
     return value.trim().toLowerCase();
   }
 
+  /**
+   * A six-digit code, from the system's cryptographic random source.
+   *
+   * `Math.random()` is not one: its output comes from a seeded generator that
+   * can be predicted from enough earlier values, which is not a property a
+   * sign-in code may have. `randomInt` takes an exclusive upper bound, so the
+   * range is 100000-999999 and the result is always six digits.
+   */
   private generateCode() {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    return randomInt(100000, 1000000).toString();
   }
 
   private addMinutes(date: Date, minutes: number): Date {
@@ -72,20 +85,46 @@ export class OtpService {
     return this.BASE_COOL_DOWN_MINUTES * Math.pow(2, level - 1);
   }
 
+  /**
+   * Refuse the attempt outright while a verify cool-down is running.
+   *
+   * This used to sit inside `handleFailure`, which runs only once a code has
+   * been found wrong — so a correct code submitted mid-cool-down went straight
+   * through. That made the cool-down a message rather than a limit: a guesser
+   * could keep firing at full speed and would still be let in the moment they
+   * hit the right six digits.
+   *
+   * Called before the submitted code is looked at, so every attempt is refused
+   * the same way and nothing about the code leaks through the answer.
+   *
+   * It only reads. An attempt made during a cool-down is not counted, so it
+   * neither lengthens the wait nor resets it — the wait ends when the clock
+   * says it does.
+   */
+  private assertNotCoolingDown(state: OtpSecurityStateDoc) {
+    if (!state.verifyCoolDownUntil) return;
+    if (state.verifyCoolDownUntil <= new Date()) return;
+
+    const platform = this.request.data.platform;
+    const waitTime = this.getWaitTime(state.verifyCoolDownUntil);
+
+    this.logger.error(
+      `[${platform}] ${maskPhone(state.identifier)} has to wait for ${waitTime} minute(s) before trying.`,
+    );
+    throw new BadRequestException(
+      `Please wait for ${waitTime} minute(s) before trying.`,
+    );
+  }
+
+  /**
+   * Count a wrong code, and start the next cool-down once too many have been
+   * wrong. Never reached while a cool-down is running — `assertNotCoolingDown`
+   * has already turned the attempt away — so it does not check for one.
+   */
   private async handleFailure(state: OtpSecurityStateDoc) {
     const platform = this.request.data.platform;
     const identifier = maskPhone(state.identifier);
-
     const now = new Date();
-    if (state.verifyCoolDownUntil && state.verifyCoolDownUntil > now) {
-      const waitTime = this.getWaitTime(state.verifyCoolDownUntil);
-      this.logger.error(
-        `[${platform}] ${identifier} has to wait for ${waitTime} minute(s) before trying.`,
-      );
-      throw new BadRequestException(
-        `Please wait for ${waitTime} minute(s) before trying.`,
-      );
-    }
 
     state.failedAttempts += 1;
     if (state.failedAttempts <= 3) {
@@ -102,11 +141,13 @@ export class OtpService {
 
     const waitTime = this.getWaitTime(state.verifyCoolDownUntil);
     this.logger.error(
-      `[${platform}] ${identifier} has to wait for ${waitTime} minute(s) before requesting another code.`,
+      `[${platform}] ${identifier} has to wait for ${waitTime} minute(s) before trying.`,
     );
 
+    // "before trying", not "before requesting another code": what is blocked
+    // is checking a code, and a resend is still allowed during this wait.
     throw new BadRequestException(
-      `Please wait for ${waitTime} minute(s) before requesting another code.`,
+      `Please wait for ${waitTime} minute(s) before trying.`,
     );
   }
 
@@ -180,6 +221,36 @@ export class OtpService {
     );
   }
 
+  /**
+   * Retire every code still outstanding for this identifier and purpose, so
+   * only the newest one can be verified.
+   *
+   * Keyed on identifier and purpose, deliberately not on channel: someone who
+   * asks for the code by email after asking by WhatsApp has told us the first
+   * one never reached them, and leaving it alive would be a second live code
+   * on a channel they have walked away from.
+   *
+   * Rows that are already used or already expired are left alone — `verifyOtp`
+   * refuses them anyway, and rewriting them would blur when each one died.
+   */
+  private async supersedeOutstanding(
+    identifier: string,
+    purpose: OTPPurposeEnum,
+  ) {
+    const now = new Date();
+
+    await this.otpRequestModel.updateMany(
+      {
+        identifier,
+        purpose,
+        isUsed: false,
+        expiresAt: { $gt: now },
+        supersededAt: { $exists: false },
+      },
+      { $set: { supersededAt: now } },
+    );
+  }
+
   async requestOtp(data: RequestOtpDto) {
     const { identifier, channel, purpose } = data;
 
@@ -191,6 +262,11 @@ export class OtpService {
     });
 
     await this.handleOtpRequestAttempt(state);
+
+    // After the cool-down gate, so a request that is refused for abuse cannot
+    // kill a code the person is still legitimately holding. Before the insert,
+    // so the new row is not caught by its own sweep.
+    await this.supersedeOutstanding(normalized, purpose);
 
     const code = this.generateCode();
     const codeHash = await this.codeService.hashPlainText(code);
@@ -220,6 +296,9 @@ export class OtpService {
       isUsed: false,
       expiresAt: { $gt: now },
       usedAt: { $exists: false },
+      // A code a later request replaced. Same answer as expired or already
+      // used: the row exists, but it is no longer the one that counts.
+      supersededAt: { $exists: false },
     });
 
     if (!otpRequest) {
@@ -241,6 +320,8 @@ export class OtpService {
         `Your ${this.accountLocked}. Please contact support`,
       );
     }
+
+    this.assertNotCoolingDown(state);
 
     const isValid = await this.codeService.verifyHash(
       code,
