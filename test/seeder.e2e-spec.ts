@@ -249,7 +249,9 @@ describe('Seeding (e2e)', () => {
 
       await seed();
 
-      const after = await model('Item').findOne({ seedKey: 'men-tops-t-shirt' });
+      const after = await model('Item').findOne({
+        seedKey: 'men-tops-t-shirt',
+      });
       expect(after.priceLow).toBe(1234);
       expect(after.priceHigh).toBe(5678);
     });
