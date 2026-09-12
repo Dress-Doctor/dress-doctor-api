@@ -61,8 +61,4 @@ export const envValidationSchema = Joi.object({
   // Customer Service destination for inactivity alerts (E.164). Optional in
   // dev — the scan logs + counts skipped alerts when unset.
   CS_WHATSAPP_PHONE: Joi.string().optional(),
-
-  // Platform client credentials used by external callers, not read server-side
-  API_KEY: Joi.string().optional(),
-  API_SECRET: Joi.string().optional(),
 }).unknown(true);

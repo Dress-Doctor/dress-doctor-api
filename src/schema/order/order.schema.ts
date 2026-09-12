@@ -29,6 +29,20 @@ export class Order extends Document<Types.ObjectId> {
   orderCode: string;
 
   /**
+   * What this row was called in the 2026 Sales sheet it came from — `OR-0001`.
+   *
+   * Written once by `migrate-sales`, and the only thing that makes that
+   * migration re-runnable: the codes here are minted fresh, so without this
+   * there is nothing to recognise an already-imported row by, and a second run
+   * would import the whole ledger again.
+   *
+   * Only migrated rows carry one. Anything entered since has none, which is
+   * why the index is sparse.
+   */
+  @Prop({ required: false })
+  legacyCode?: string;
+
+  /**
    * Anything specific the customer told us about this order — "no starch on
    * the blue shirt", "collar stain", a delivery instruction. Free text on
    * purpose: it is what the customer said, not a field we can enumerate.
@@ -168,3 +182,6 @@ OrderSchema.index(
     },
   },
 );
+// Only migrated rows carry a `legacyCode`, so the index is sparse: rows
+// entered since have none and must not collide with each other.
+OrderSchema.index({ legacyCode: 1 }, { unique: true, sparse: true });

@@ -16,6 +16,20 @@ export class Payment extends Document<Types.ObjectId> {
   @Prop({ required: true })
   reference: string;
 
+  /**
+   * What this row was called in the 2026 Sales sheet it came from — `OR-0001:2026-02-27:3000`.
+   *
+   * Written once by `migrate-sales`, and the only thing that makes that
+   * migration re-runnable: the codes here are minted fresh, so without this
+   * there is nothing to recognise an already-imported row by, and a second run
+   * would import the whole ledger again.
+   *
+   * Only migrated rows carry one. Anything entered since has none, which is
+   * why the index is sparse.
+   */
+  @Prop({ required: false })
+  legacyCode?: string;
+
   @Prop({ required: true, type: Types.ObjectId, ref: Order.name })
   orderId: Types.ObjectId;
 
@@ -75,3 +89,6 @@ PaymentSchema.index({ orderId: 1 });
 PaymentSchema.index({ customerId: 1 });
 PaymentSchema.index({ officeId: 1, paidAt: -1 });
 PaymentSchema.index({ idempotencyKey: 1 }, { unique: true, sparse: true });
+// Only migrated rows carry a `legacyCode`, so the index is sparse: rows
+// entered since have none and must not collide with each other.
+PaymentSchema.index({ legacyCode: 1 }, { unique: true, sparse: true });
