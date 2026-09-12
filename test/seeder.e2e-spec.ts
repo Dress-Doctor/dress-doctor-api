@@ -232,7 +232,7 @@ describe('Seeding (e2e)', () => {
     });
 
     it('leaves a corrected price alone', async () => {
-      const item = await model('Item').findOne({ seedKey: 't-shirt' });
+      const item = await model('Item').findOne({ seedKey: 'men-tops-t-shirt' });
       const admin = await model('User').findOne().select('_id');
       // Edited the way the panel edits: with a real actor and a reason, so
       // the row carries a genuine history entry the seed must not undo.
@@ -249,7 +249,7 @@ describe('Seeding (e2e)', () => {
 
       await seed();
 
-      const after = await model('Item').findOne({ seedKey: 't-shirt' });
+      const after = await model('Item').findOne({ seedKey: 'men-tops-t-shirt' });
       expect(after.priceLow).toBe(1234);
       expect(after.priceHigh).toBe(5678);
     });
